@@ -1,0 +1,13 @@
+{
+  "name": "fyrd",
+  "owner": {
+    "name": "nhuizenga"
+  },
+  "plugins": [
+    {
+      "name": "fyrd",
+      "source": "./",
+      "description": "TODO: one-line description of what fyrd does"
+    }
+  ]
+}
