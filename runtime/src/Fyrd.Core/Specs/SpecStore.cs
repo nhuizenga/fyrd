@@ -5,6 +5,7 @@ namespace Fyrd.Core.Specs;
 
 public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
 {
+    private readonly object _gate = new();
     private const string RunFile = "run.json";
     private const string MarkdownFile = "spec.md";
     private const string UnitsFile = "units.json";
@@ -57,12 +58,48 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
 
     public string ReadMarkdown(string id) => File.ReadAllText(Path.Combine(DirFor(id), MarkdownFile));
 
-    public SpecRun UpdateStatus(string id, SpecStatus status)
+    public SpecRun UpdateStatus(string id, SpecStatus status) => Mutate(id, r => r with { Status = status });
+
+    /// <summary>Atomically moves the spec from one status to another; false if it was not in <paramref name="from"/>.</summary>
+    public bool TryTransition(string id, SpecStatus from, SpecStatus to)
     {
-        var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
-        var updated = run with { Status = status };
-        WriteRun(updated, id);
-        return updated;
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != from) return false;
+            WriteRun(run with { Status = to }, id);
+            return true;
+        }
+    }
+
+    public SpecRun SetLead(string id, string sessionId) =>
+        Mutate(id, r => r with { SessionId = sessionId, Status = SpecStatus.Building });
+
+    public SpecRun SetCursor(string id, string lastEventId) => Mutate(id, r => r with { LastEventId = lastEventId });
+
+    public SpecRun Finish(string id, SpecStatus status, string? branch, string? error) =>
+        Mutate(id, r => r with { Status = status, Branch = branch, Error = error });
+
+    public void WriteUnits(string id, IReadOnlyList<Unit> units)
+    {
+        var dir = DirFor(id);
+        lock (_gate) AtomicFile.Write(Path.Combine(dir, UnitsFile), JsonSerializer.Serialize(units, Json.Options));
+    }
+
+    public IReadOnlyList<SpecRun> ListActive() =>
+        List().Select(e => e.Run).OfType<SpecRun>()
+            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Building or SpecStatus.FinalReview)
+            .ToList();
+
+    private SpecRun Mutate(string id, Func<SpecRun, SpecRun> change)
+    {
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            var updated = change(run);
+            WriteRun(updated, id);
+            return updated;
+        }
     }
 
     public IReadOnlyList<Unit> ListUnits(string id)

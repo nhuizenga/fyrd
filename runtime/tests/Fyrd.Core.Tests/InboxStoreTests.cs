@@ -149,4 +149,27 @@ public class InboxStoreTests
         Assert.Throws<ArgumentException>(() => s.Answer(card.Id, "  "));
         Assert.Throws<ArgumentException>(() => s.Answer("../x", "ok"));
     }
+
+    [Fact]
+    public void Inbox_HasSourceKey_TrueAfterAnswer()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        Assert.False(s.HasSourceKey("k1"));
+        var card = s.Add(spec, null, Question, [], null, null, null, true, "k1");
+        Assert.True(s.HasSourceKey("k1"));
+        s.Answer(card.Id, "yes", remember: false);
+        Assert.True(s.HasSourceKey("k1"));
+        Assert.False(s.HasSourceKey("k2"));
+    }
+
+    [Fact]
+    public void ListOpenFor_FiltersBySpec()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var mine = AddCard(s, spec);
+        Assert.Equal(mine.Id, Assert.Single(s.ListOpenFor(spec)).Id);
+        Assert.Empty(s.ListOpenFor("other-spec"));
+    }
 }

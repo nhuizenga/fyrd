@@ -13,7 +13,10 @@ public sealed record SpecRun(
     SpecStatus Status,
     DateTimeOffset CreatedAt,
     string? SessionId = null,
-    long CostCents = 0);
+    long CostCents = 0,
+    string? LastEventId = null,
+    string? Branch = null,
+    string? Error = null);
 
 public sealed record Unit(string Id, string SpecId, string Title, UnitStage Stage, UnitState State);
 

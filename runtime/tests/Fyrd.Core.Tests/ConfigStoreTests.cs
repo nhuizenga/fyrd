@@ -29,4 +29,21 @@ public class ConfigStoreTests
 
     [Fact] public void Resolve_PrefersConfiguredOverEnv()
     { using var h = new TempHome(); Assert.Equal(h.Paths.Root, FyrdPaths.Resolve(h.Paths.Root).Root); }
+
+    [Fact] public void Config_DefaultsModelsAndNullEnvironment()
+    { using var h = new TempHome(); var c = new ConfigStore(h.Paths).Load();
+      Assert.Null(c.EnvironmentId); Assert.Equal("claude-opus-5-5", c.LeadModel); Assert.Equal("claude-sonnet-5-5", c.PeerModel); }
+
+    [Fact] public void Config_Save_RejectsBadEnvironmentId()
+    { using var h = new TempHome();
+      Assert.Throws<ArgumentException>(() => new ConfigStore(h.Paths).Save(new FyrdConfig(4, "env;rm"))); }
+
+    [Fact] public void Config_Save_AcceptsValidEnvironmentId()
+    { using var h = new TempHome(); var s = new ConfigStore(h.Paths);
+      s.Save(new FyrdConfig(4, "env_01Abc")); Assert.Equal("env_01Abc", s.Load().EnvironmentId); }
+
+    [Fact] public void Config_Load_EmptyModelFallsBack()
+    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{\"leadModel\": \"\", \"peerModel\": null}");
+      var c = new ConfigStore(h.Paths).Load();
+      Assert.Equal("claude-opus-5-5", c.LeadModel); Assert.Equal("claude-sonnet-5-5", c.PeerModel); }
 }

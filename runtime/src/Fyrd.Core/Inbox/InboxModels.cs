@@ -15,7 +15,8 @@ public sealed record InboxCard(
     string? Details,
     bool AllowFreeText,
     DateTimeOffset CreatedAt,
-    CardAnswer? Answer = null);
+    CardAnswer? Answer = null,
+    string? SourceKey = null);
 
 public sealed class CardAlreadyAnsweredException(string cardId)
     : InvalidOperationException($"Card '{cardId}' has already been answered.");
