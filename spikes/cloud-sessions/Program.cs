@@ -104,7 +104,7 @@ async Task Q1()
     SaveLead(id);
     Console.WriteLine($"[q1] lead session: {id}");
     var seen = new StatusSeen();
-    await WaitSettled(q, id, seen, TimeSpan.FromMinutes(timeoutMin));
+    Console.WriteLine($"[q1] {await WaitSettled(q, id, seen, TimeSpan.FromMinutes(timeoutMin))}");
     var events = await FetchAllEvents(q, id);
     var last = LastAssistant(events);
     Console.WriteLine($"[q1] took {sw.Elapsed:mm\\:ss}. Last assistant text:\n{Trunc(last?.Text, 2500)}");
@@ -122,9 +122,11 @@ async Task Q2()
     var sw = Stopwatch.StartNew();
     var prompt = LeadPrompt();
     string id;
+    HashSet<string>? baseline = null;
     if (leadOpt is not null)
     {
         id = leadOpt;
+        baseline = await Baseline(id); // only events after this point count as the lead's response
         await client.SendMessageAsync(id, prompt);
         Log(q, "sent-prompt-to-existing-lead", new JsonObject { ["session"] = id });
     }
@@ -137,7 +139,7 @@ async Task Q2()
     SaveLead(id);
     Console.WriteLine($"[q2] lead session: {id}  (polling every 10 s, timeout {timeoutMin} min)");
     var seen = new StatusSeen();
-    var leadResult = await WaitSettled(q, id, seen, TimeSpan.FromMinutes(timeoutMin));
+    var leadResult = await WaitSettled(q, id, seen, TimeSpan.FromMinutes(timeoutMin), baseline);
     Console.WriteLine($"[q2] lead settled after {sw.Elapsed:mm\\:ss} ({leadResult})");
 
     var events = await FetchAllEvents(q, id);
@@ -212,7 +214,7 @@ async Task Q4Ask()
     LogSession(q, "created", s);
     Console.WriteLine($"[q4] lead session: {s.Id}");
     var seen = new StatusSeen();
-    await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin));
+    Console.WriteLine($"[q4] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
     var after = await client.GetAsync(s.Id);
     LogSession(q, "after-settle", after);
     var events = await FetchAllEvents(q, s.Id);
@@ -258,9 +260,9 @@ async Task Q4Answer(string id)
     await client.SendMessageAsync(id, "The owner answers: blue. Now reply with ONE line only: the codeword I told you at the very start, then a space, then the owner's answer.");
     Log(q, "sent-answer", new JsonObject { ["session"] = id });
     var seen = new StatusSeen();
-    await WaitSettled(q, id, seen, TimeSpan.FromMinutes(timeoutMin));
-    var after = await FetchAllEvents(q, id);
     var knownIds = before.Select(e => e.Uuid).ToHashSet();
+    Console.WriteLine($"[q4] {await WaitSettled(q, id, seen, TimeSpan.FromMinutes(timeoutMin), knownIds)}");
+    var after = await FetchAllEvents(q, id);
     var fresh = after.Where(e => !knownIds.Contains(e.Uuid)).ToList();
     var reply = LastAssistant(fresh);
     Console.WriteLine($"[q4] reply after answer: {Trunc(reply?.Text, 500)}");
@@ -285,7 +287,7 @@ async Task Q5()
         var lead = LoadLead();
         if (lead is not null) ids.Add(lead);
         var cp = Path.Combine(outDir, "q2-children.txt");
-        if (File.Exists(cp)) ids.AddRange(File.ReadAllLines(cp).Where(l => l.StartsWith("session_")));
+        if (File.Exists(cp)) ids.AddRange(File.ReadAllLines(cp).Select(l => l.Trim()).Where(l => l.Length > 0));
     }
     if (ids.Count == 0) { Console.WriteLine("[q5] pass session ids, or run q1/q2 first."); return; }
     Console.WriteLine($"[q5] polling {ids.Count} sessions every 10 s for up to {timeoutMin} min (Ctrl-C to stop)");
@@ -329,7 +331,7 @@ async Task Q6()
     else
     {
         var cp = Path.Combine(outDir, "q2-children.txt");
-        var first = File.Exists(cp) ? File.ReadAllLines(cp).FirstOrDefault(l => l.StartsWith("session_")) : null;
+        var first = File.Exists(cp) ? File.ReadAllLines(cp).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) : null;
         if (first is null) { Console.WriteLine("[q6] pass a child session id, or use --fresh, or run q2 first."); return; }
         id = first;
     }
@@ -416,6 +418,8 @@ string LeadPrompt() =>
     "\"Create a file spikes/fyrd/<unit>.txt (unit is a or b) containing one line 'hello from <unit>', commit it with message 'spike: unit <unit>', and push to your outcome branch. Reply 'pushed' when done.\"\n" +
     "2. Poll get_session / list_events for each child until both report they pushed (or 20 minutes pass).\n" +
     $"3. In YOUR checkout, create branch {BranchIntegration} from the default branch, merge origin/{BranchA} and origin/{BranchB} into it, and push it to origin.\n" +
+    $"SAFETY RULES: never force-push (no --force, no --force-with-lease, no deleting branches). Push ONLY these three branches: {BranchA}, {BranchB}, {BranchIntegration}. " +
+    "Only create, message, interrupt, or archive the two implementer sessions you create in this run; do not touch any other session (do not list, message, interrupt, or archive existing ones).\n" +
     "4. Finish with a short report: the exact create_session tool parameters you used, both child session ids, and for each of the three branches whether the push succeeded (include any error text). Never modify any other branch.";
 
 CreateSessionRequest NewReq(string title, string[] tags, string first) =>
@@ -465,14 +469,14 @@ static string Trunc(string? s, int n) => s is null ? "(none)" : s.Length <= n ? 
 
 // Fetches every event, ordered by created_at (stable on ties). Pagination direction is part of what the spike learns,
 // so every page is logged.
-async Task<List<SessionEvent>> FetchAllEvents(string q, string id)
+async Task<List<SessionEvent>> FetchAllEvents(string q, string id, bool log = true)
 {
     var all = new List<SessionEvent>();
     string? after = null;
     for (var page = 0; page < 30; page++)
     {
         var p = await client.ListEventsAsync(id, 100, after);
-        Log(q, "events-page", new JsonObject
+        if (log) Log(q, "events-page", new JsonObject
         {
             ["session"] = id, ["has_more"] = p.HasMore, ["first_id"] = p.FirstId, ["last_id"] = p.LastId,
             ["events"] = new JsonArray(p.Events.Select(e => JsonNode.Parse(e.Raw.GetRawText())).ToArray()),
@@ -509,31 +513,50 @@ async Task<List<CloudSession>> ListAllSessions(string q)
     return result;
 }
 
-// Polls every 10 s. Settled = a terminal-looking status, or the event count unchanged for 3 polls with an assistant message.
-async Task<string> WaitSettled(string q, string id, StatusSeen seen, TimeSpan timeout)
+// Uuids of every event currently in the session; pass to WaitSettled so only work after this point counts.
+async Task<HashSet<string>> Baseline(string id) =>
+    (await FetchAllEvents("baseline", id, log: false)).Select(e => e.Uuid).ToHashSet();
+
+// Polls every 10 s. Settled requires a NEW assistant event (not in baseline, scanned across all pages) AND either
+// session_status / post_turn_summary.status_category looking idle/completed, or no new events for 60 s (180 s while the
+// status still looks like running). Terminal statuses (failed, archived, ...) end the wait immediately.
+// A timeout is announced loudly and returned as a string starting with "TIMEOUT".
+async Task<string> WaitSettled(string q, string id, StatusSeen seen, TimeSpan timeout, HashSet<string>? baseline = null)
 {
+    baseline ??= [];
     var deadline = DateTimeOffset.UtcNow + timeout;
-    var lastEventCount = -1;
+    var lastNewCount = -1;
     var stable = 0;
     var lastLine = "";
-    var terminal = new[] { "failed", "archived", "completed", "terminated", "error", "stopped" };
+    var terminal = new[] { "failed", "archived", "terminated", "error", "stopped" };
+    var idleish = new[] { "idle", "completed", "complete", "done", "waiting", "needs_input", "awaiting_input", "blocked", "finished" };
+    var runningish = new[] { "running", "starting", "provisioning", "queued", "pending", "creating", "working", "in_progress", "active" };
     while (DateTimeOffset.UtcNow < deadline)
     {
         var s = await client.GetAsync(id);
         seen.Record(s);
         Log(q, "poll", SessionNode(s));
-        var page = await client.ListEventsAsync(id, 100);
-        var count = page.Events.Count + (page.HasMore ? 1000 : 0);
-        var hasAssistant = page.Events.Any(e => e.Type == "assistant");
-        var line = $"session_status={s.SessionStatus} connection={s.ConnectionStatus} category={s.Summary?.StatusCategory} needs_action={s.Summary?.NeedsAction}";
+        var fresh = (await FetchAllEvents(q, id, log: false)).Where(e => !baseline.Contains(e.Uuid)).ToList();
+        var newAssistant = fresh.Any(e => e.Type == "assistant");
+        var line = $"session_status={s.SessionStatus} connection={s.ConnectionStatus} category={s.Summary?.StatusCategory} needs_action={s.Summary?.NeedsAction} new_events={fresh.Count}";
         if (line != lastLine) { Console.WriteLine($"  [{DateTimeOffset.Now:HH:mm:ss}] {line}"); lastLine = line; }
-        if (s.SessionStatus is { } st && terminal.Contains(st.ToLowerInvariant())) return $"terminal status {st}";
-        stable = count == lastEventCount ? stable + 1 : 0;
-        lastEventCount = count;
-        if (stable >= 3 && hasAssistant) return "event count stable for 30 s";
+        var st = s.SessionStatus?.ToLowerInvariant();
+        var cat = s.Summary?.StatusCategory?.ToLowerInvariant();
+        if (st is not null && terminal.Contains(st)) return $"terminal status {st}";
+        stable = fresh.Count == lastNewCount ? stable + 1 : 0;
+        lastNewCount = fresh.Count;
+        if (newAssistant)
+        {
+            if ((st is not null && idleish.Contains(st)) || (cat is not null && idleish.Contains(cat)))
+                return $"status idle/completed (session_status={st}, category={cat})";
+            var running = st is not null && runningish.Contains(st);
+            if (stable >= (running ? 18 : 6)) return $"no new events for {stable * 10} s (session_status={st})";
+        }
         await Task.Delay(TimeSpan.FromSeconds(10));
     }
-    return "timeout";
+    var msg = $"TIMEOUT after {timeout.TotalMinutes:0} min without settling (no new assistant event or session never looked idle); results below may be incomplete";
+    Console.WriteLine($"  !!! {msg}");
+    return msg;
 }
 
 static string RunProcess(string file, string arguments)
