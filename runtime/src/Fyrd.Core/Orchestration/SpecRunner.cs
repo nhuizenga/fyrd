@@ -18,13 +18,14 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
     public async Task PollOnceAsync(CancellationToken ct)
     {
         string? lastError = null;
+        string? warning = null;
         foreach (var spec in specs.ListActive())
         {
             ct.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(spec.SessionId)) continue;
             try
             {
-                await PollSpecAsync(spec, ct);
+                warning ??= await PollSpecAsync(spec, ct);
             }
             catch (Exception e) when (e is CloudSessionAuthException or ClaudeAuthMissingException)
             {
@@ -32,17 +33,18 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
                 state.LastPollAt = time.GetUtcNow();
                 return;
             }
-            catch (Exception e) when (e is not OperationCanceledException)
+            catch (Exception e) when (e is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 lastError = $"{spec.Id}: {e.Message}";
             }
         }
         state.SignedOut = false;
-        state.LastError = lastError;
+        state.LastError = lastError ?? warning;
         state.LastPollAt = time.GetUtcNow();
     }
 
-    private async Task PollSpecAsync(SpecRun spec, CancellationToken ct)
+    /// <summary>Returns a short note about ignored malformed protocol blocks, or null.</summary>
+    private async Task<string?> PollSpecAsync(SpecRun spec, CancellationToken ct)
     {
         var lead = spec.SessionId!;
 
@@ -58,10 +60,13 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         }
 
         var finished = false;
+        string? warning = null;
         foreach (var ev in events.Where(e => e.Type == "assistant"))
         {
             var parsed = Protocol.Parse(ev.Text ?? "");
-            _lastTurnHadQuestion[spec.Id] = parsed.Questions.Count > 0;
+            if (!string.IsNullOrEmpty(ev.Text)) _lastTurnHadQuestion[spec.Id] = parsed.Questions.Count > 0;
+            if (parsed.Warnings.Count > 0)
+                warning ??= $"Ignored malformed fyrd block in {spec.Id}: {parsed.Warnings[0]}";
             if (parsed.Units is not null) ApplyUnits(spec.Id, parsed.Units);
             foreach (var q in parsed.Questions) AddQuestion(spec.Id, q);
             if (parsed.Done is { } done)
@@ -77,14 +82,16 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         }
         var cursor = events.Count > 0 ? events[^1].Uuid : spec.LastEventId;
         if (events.Count > 0) specs.SetCursor(spec.Id, cursor!);
-        if (finished) return;
+        if (finished) return warning;
 
         // 2. Lead status
         var leadSession = await cloud.GetAsync(lead, ct);
         state.Record(leadSession);
         var needsAction = leadSession.Summary?.NeedsAction;
         if (leadSession.SessionStatus == "idle" && !string.IsNullOrWhiteSpace(needsAction)
-            && cursor is not null && !LastTurnHadQuestion(spec.Id))
+            && leadSession.Summary?.StatusCategory != "completed"
+            && cursor is not null && !LastTurnHadQuestion(spec.Id)
+            && !inbox.ListOpenFor(spec.Id).Any(c => c.SourceKey is not null && !c.SourceKey.Contains(":attention:")))
         {
             var key = $"{spec.Id}:attention:{cursor}";
             if (!inbox.HasSourceKey(key))
@@ -96,13 +103,12 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         var peers = await cloud.ListByTagAsync("fyrd-spec-" + spec.Id, ct);
         foreach (var p in peers) state.Record(p);
         ApplyPeers(spec.Id, peers);
+        return warning;
     }
 
     private bool LastTurnHadQuestion(string specId)
     {
-        if (_lastTurnHadQuestion.TryGetValue(specId, out var had)) return had;
-        // After a restart the last turn is unknown; an open question card means it probably had one.
-        return inbox.ListOpenFor(specId).Any(c => c.SourceKey is not null && !c.SourceKey.Contains(":attention:"));
+        return _lastTurnHadQuestion.TryGetValue(specId, out var had) && had;
     }
 
     private void ApplyUnits(string specId, IReadOnlyList<UnitDecl> decls)

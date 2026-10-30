@@ -247,4 +247,78 @@ public class SpecRunnerTests
         var cursors = new[] { r.Specs.Get(bad)!.LastEventId, r.Specs.Get(good)!.LastEventId };
         Assert.Single(cursors, c => c is not null);
     }
+
+    [Fact]
+    public async Task Poll_QuestionThenTextlessAssistantEvent_NoAttentionCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Question("{\"id\":\"q1\",\"question\":\"Why?\"}"));
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Waiting for input"));
+        await r.Runner.PollOnceAsync(default);
+        r.Inbox.Answer(Assert.Single(r.Inbox.ListOpenFor(id)).Id, "because");
+        r.Cloud.AddEvent("lead1", new SessionEvent("e2", "assistant", DateTimeOffset.UnixEpoch, null, FakeCloudSessions.Empty));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_OpenQuestionCard_NoAttentionCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Question("{\"id\":\"q1\",\"question\":\"Why?\"}"));
+        await r.Runner.PollOnceAsync(default);
+        r.Cloud.AddAssistantEvent("lead1", "e2", "Still thinking.");
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Waiting for input"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(id + ":q1", Assert.Single(r.Inbox.ListOpenFor(id)).SourceKey);
+    }
+
+    [Fact]
+    public async Task Poll_StatusCategoryCompleted_NoAttentionCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", "All done for now.");
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Waiting", statusCategory: "completed"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_TimeoutOnOneSpec_OtherStillPolled()
+    {
+        using var r = new Rig();
+        var a = r.NewSpec("Spec a", "lead-a");
+        var b = r.NewSpec("Spec b", "lead-b");
+        r.Cloud.AddAssistantEvent("lead-a", "a1", "x");
+        r.Cloud.AddAssistantEvent("lead-b", "b1", "x");
+        r.Cloud.ThrowOnNextCall(new TaskCanceledException("timeout"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.NotNull(r.State.LastError);
+        Assert.NotNull(r.State.LastPollAt);
+        var cursors = new[] { r.Specs.Get(a)!.LastEventId, r.Specs.Get(b)!.LastEventId };
+        Assert.Single(cursors, c => c is not null);
+    }
+
+    [Fact]
+    public async Task Poll_CallerCancellation_StillPropagates()
+    {
+        using var r = new Rig();
+        r.NewSpec();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => r.Runner.PollOnceAsync(cts.Token));
+    }
+
+    [Fact]
+    public async Task Poll_MalformedBlock_SurfacesWarningInLastError()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", F + "fyrd-done" + (char)10 + "{\"nobranch\":1}" + (char)10 + F);
+        await r.Runner.PollOnceAsync(default);
+        Assert.StartsWith($"Ignored malformed fyrd block in {id}: fyrd-done: missing branch", r.State.LastError);
+    }
 }

@@ -40,12 +40,12 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     public static CloudSession Session(
         string id, string status = "idle", string[]? tags = null, DateTimeOffset? createdAt = null,
-        string? needsAction = null)
+        string? needsAction = null, string? statusCategory = null)
     {
         var raw = JsonDocument.Parse(
             $"{{\"created_at\":\"{(createdAt ?? DateTimeOffset.UnixEpoch):O}\"}}").RootElement.Clone();
         return new CloudSession(id, id, status, "connected",
-            new PostTurnSummary(null, needsAction, null, null), tags ?? [], raw);
+            new PostTurnSummary(statusCategory, needsAction, null, null), tags ?? [], raw);
     }
 
     private void MaybeThrow()
