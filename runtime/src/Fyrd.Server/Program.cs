@@ -27,9 +27,32 @@ builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient(), _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
-builder.Services.AddHostedService<SpecRunnerService>();
+if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
+    builder.Services.AddHostedService<SpecRunnerService>();
+builder.Services.AddSingleton(sp =>
+{
+    var dir = Path.GetFullPath(builder.Configuration["Fyrd:PersonasDir"]
+        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "personas"));
+    try { return new PersonasSource(Personas.Load(dir), dir); }
+    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+    {
+        sp.GetRequiredService<ILogger<PersonasSource>>().LogError("Personas not loaded from {Dir}: {Message}", dir, e.Message);
+        return new PersonasSource(null, dir);
+    }
+});
+builder.Services.AddSingleton(sp => new SpecLauncher(sp.GetRequiredService<SpecStore>(),
+    sp.GetRequiredService<ConfigStore>(), sp.GetRequiredService<DecisionMemory>(),
+    sp.GetRequiredService<ICloudSessions>(),
+    sp.GetRequiredService<PersonasSource>().Value ?? throw new InvalidOperationException("Personas not loaded.")));
 
 var app = builder.Build();
+
+app.UseExceptionHandler(e => e.Run(async ctx =>
+{
+    ctx.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    ctx.Response.ContentType = "application/problem+json";
+    await ctx.Response.WriteAsJsonAsync(new { title = "Internal server error", status = 500 }, (System.Text.Json.JsonSerializerOptions?)null, "application/problem+json");
+}));
 
 app.UseSameOriginApiWrites();
 
@@ -46,3 +69,5 @@ app.MapFallbackToFile("index.html");
 app.Run();
 
 public partial class Program;
+
+internal sealed record PersonasSource(Personas? Value, string Dir);

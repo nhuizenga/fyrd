@@ -112,6 +112,7 @@ public class ApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
+        await SetEnv(c);
         var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
         var req = new HttpRequestMessage(HttpMethod.Post, $"/api/specs/{id}/attack");
         req.Headers.Add("Origin", "http://evil.example");
@@ -135,6 +136,7 @@ public class ApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
+        await SetEnv(c);
         var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
         var req = new HttpRequestMessage(HttpMethod.Post, $"/api/specs/{id}/attack");
         req.Headers.Add("Origin", "http://localhost");
@@ -167,15 +169,16 @@ public class ApiTests
     }
 
     [Fact]
-    public async Task Attack_SetsQueued_ThenSecondAttackIs409()
+    public async Task Attack_SetsBuilding_ThenSecondAttackIs409()
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
+        await SetEnv(c);
         var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
 
         var first = await c.PostAsync($"/api/specs/{id}/attack", null);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        Assert.Equal("Queued", (await ReadJson(first)).GetProperty("status").GetString());
+        Assert.Equal("Building", (await ReadJson(first)).GetProperty("status").GetString());
 
         var second = await c.PostAsync($"/api/specs/{id}/attack", null);
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
@@ -254,5 +257,67 @@ public class ApiTests
         var r = await f.CreateClient().GetAsync("/api/nope");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.DoesNotContain("<html", await r.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string> SeedSpec(HttpClient c) =>
+        (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
+
+    private static Task<HttpResponseMessage> SetEnv(HttpClient c) =>
+        c.PutAsJsonAsync("/api/config", new { environmentId = "env_abc" });
+
+    [Fact]
+    public async Task Attack_WithoutEnvironment_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = await SeedSpec(c);
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("Set the cloud environment in Settings", await r.Content.ReadAsStringAsync());
+        Assert.Empty(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Attack_Succeeds_ReturnsBuildingRun()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("Building", (await ReadJson(r)).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Attack_Concurrent_CreatesOneLead()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        var rs = await Task.WhenAll(
+            Task.Run(() => c.PostAsync($"/api/specs/{id}/attack", null)),
+            Task.Run(() => c.PostAsync($"/api/specs/{id}/attack", null)));
+        Assert.Single(rs, r => r.StatusCode == HttpStatusCode.OK);
+        Assert.Single(rs, r => r.StatusCode == HttpStatusCode.Conflict);
+        Assert.Single(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Attack_LaunchFails_Returns502_AndSpecIsDraft()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Cloud.ThrowOnNextCall(new Fyrd.Core.CloudSessions.CloudSessionApiException(500, "secret-body"));
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        var text = await r.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("secret-body", text);
+        Assert.Contains("HTTP 500", text);
+        var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
+        Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
     }
 }

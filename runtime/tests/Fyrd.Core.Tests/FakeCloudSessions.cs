@@ -10,6 +10,7 @@ public sealed class FakeCloudSessions : ICloudSessions
     private readonly Dictionary<string, CloudSession> _sessions = new();
     private readonly Dictionary<string, List<CloudSession>> _byTag = new();
     private Exception? _next;
+    private readonly object _createGate = new();
 
     /// <summary>Events returned per call; a smaller value forces multi-page listing.</summary>
     public int PageSize { get; set; } = 100;
@@ -57,11 +58,14 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     public Task<CloudSession> CreateAsync(CreateSessionRequest request, CancellationToken ct = default)
     {
-        MaybeThrow();
-        Created.Add(request);
-        var s = Session("created-" + Created.Count, "running", [.. request.Tags]);
-        _sessions[s.Id] = s;
-        return Task.FromResult(s);
+        lock (_createGate)
+        {
+            MaybeThrow();
+            Created.Add(request);
+            var s = Session("created-" + Created.Count, "running", [.. request.Tags]);
+            _sessions[s.Id] = s;
+            return Task.FromResult(s);
+        }
     }
 
     public Task<CloudSession> GetAsync(string sessionId, CancellationToken ct = default)
