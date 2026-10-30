@@ -31,6 +31,21 @@ function run(cmd, args, cwd) {
   }
 }
 
+async function consoleServed(info) {
+  try {
+    return (await fetch(`${urlOf(info)}/`, { signal: AbortSignal.timeout(2000) })).status === 200;
+  } catch {
+    return false;
+  }
+}
+
+function fail(info, logPath, message) {
+  try { process.kill(info.pid); } catch {}
+  const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/);
+  console.error(`${message} Last log lines:\n${lines.slice(-20).join("\n")}`);
+  process.exit(1);
+}
+
 async function up() {
   const existing = readServerFile(dir);
   if (existing && (await isServerAlive(existing))) {
@@ -51,7 +66,9 @@ async function up() {
   const logPath = path.join(dir, "server.log");
   const log = fs.openSync(logPath, "w");
   const dll = path.join(repoRoot, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll");
+  // The content root must be the project dir so wwwroot (the built console) is found regardless of caller cwd.
   const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`], {
+    cwd: path.join(repoRoot, "runtime/src/Fyrd.Server"),
     detached: true, stdio: ["ignore", log, log], windowsHide: true,
   });
   child.unref();
@@ -60,17 +77,17 @@ async function up() {
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     if (await isServerAlive(info)) {
-      writeServerFile(dir, info);
-      console.log(`Fyrd running at ${urlOf(info)}`);
-      openBrowser(urlOf(info));
-      return;
+      if (await consoleServed(info)) {
+        writeServerFile(dir, info);
+        console.log(`Fyrd running at ${urlOf(info)}`);
+        openBrowser(urlOf(info));
+        return;
+      }
+      fail(info, logPath, "Fyrd API is up but the console is not served (GET / failed): console not built? Run `npm run build` in console/.");
     }
     await sleep(300);
   }
-  try { process.kill(info.pid); } catch {}
-  const lines = fs.readFileSync(logPath, "utf8").split(/\r?\n/);
-  console.error(`Fyrd did not become healthy within 30s. Last log lines:\n${lines.slice(-20).join("\n")}`);
-  process.exit(1);
+  fail(info, logPath, "Fyrd did not become healthy within 30s.");
 }
 
 async function down() {

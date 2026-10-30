@@ -45,14 +45,14 @@ function occupy(port) {
 }
 
 test("findFreePort skips busy port", async () => {
-  const s = await occupy(4870);
-  try { assert.equal(await findFreePort(4870, 10), 4871); }
+  const s = await occupy(48870);
+  try { assert.equal(await findFreePort(48870, 10), 48871); }
   finally { s.close(); }
 });
 
 test("findFreePort throws when all busy", async () => {
-  const s = await occupy(4885);
-  try { await assert.rejects(findFreePort(4885, 1), /No free port/); }
+  const s = await occupy(48885);
+  try { await assert.rejects(findFreePort(48885, 1), /No free port/); }
   finally { s.close(); }
 });
 
