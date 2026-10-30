@@ -14,10 +14,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    try {
-      const [inbox, list, cfg] = await Promise.all([api.getInbox(), api.getSpecs(), api.getConfig()]);
+    // Each endpoint degrades on its own: a failure keeps that tab's last data instead of freezing the rest.
+    const [inbox, list, cfg] = await Promise.allSettled([api.getInbox(), api.getSpecs(), api.getConfig()]);
+    if (inbox.status === "fulfilled") setCards(inbox.value);
+    if (cfg.status === "fulfilled") setConfig(cfg.value);
+    if (list.status === "fulfilled") {
       const boardSpecs = await Promise.all(
-        list.map(async (entry): Promise<BoardSpec> => {
+        list.value.map(async (entry): Promise<BoardSpec> => {
           if (!entry.run) return { entry, units: [] };
           try {
             return { entry, units: (await api.getSpec(entry.id)).units };
@@ -26,12 +29,14 @@ export default function App() {
           }
         }),
       );
-      setCards(inbox);
       setSpecs(boardSpecs);
-      setConfig(cfg);
+    }
+    const failures = [inbox, list, cfg].filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failures.length === 3) {
+      const reason = failures[0].reason;
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } else {
       setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
