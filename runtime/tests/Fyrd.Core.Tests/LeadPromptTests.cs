@@ -1,0 +1,98 @@
+using Fyrd.Core.Config;
+using Fyrd.Core.Orchestration;
+using Fyrd.Core.Specs;
+
+namespace Fyrd.Core.Tests;
+
+public class LeadPromptTests
+{
+    private static readonly Personas P = new("LEAD {{SPEC_ID}} {{REPO}} {{SPEC}} {{MEMORY}} {{SQUAD_CAP}} {{PEER_MODEL}} {{ENVIRONMENT_ID}} {{IMPLEMENTER_PERSONA}} {{REVIEWER_PERSONA}} {{VALIDATOR_PERSONA}}",
+        "IMPL", "REV", "VAL");
+
+    private static readonly SpecRun Run = new("20261030-x", "T", "servicetitan/titan-lens-ossie",
+        SpecStatus.Queued, DateTimeOffset.UnixEpoch);
+
+    private static readonly FyrdConfig Cfg = new(SquadCap: 3, EnvironmentId: "env_abc");
+
+    private static string Repo()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "personas", "lead.md"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("personas/lead.md not found above test output");
+    }
+
+    private static string Shipped(string memory = "MEM", string spec = "SPEC") =>
+        LeadPrompt.Build(Run, spec, memory, Cfg, Personas.Load(Path.Combine(Repo(), "personas")));
+
+    [Fact]
+    public void Build_FillsEveryPlaceholder()
+    {
+        Assert.DoesNotContain("{{", Shipped());
+        var plain = LeadPrompt.Build(Run, "S", "M", Cfg, P);
+        Assert.DoesNotContain("{{", plain);
+        Assert.Contains("IMPL REV VAL", plain);
+    }
+
+    [Fact]
+    public void Build_DoesNotReExpandPlaceholdersInInjectedText()
+    {
+        var text = LeadPrompt.Build(Run, "spec {{MEMORY}}", "mem", Cfg, P);
+        Assert.Contains("spec {{MEMORY}}", text);
+    }
+
+    [Fact]
+    public void Build_ContainsProtocolAndSafetyRules()
+    {
+        var text = Shipped();
+        foreach (var s in new[] { "fyrd-units", "fyrd-question", "fyrd-done", "fyrd-failed", "fyrd-answer", "fyrd-config",
+                     "force-push", "fyrd/20261030-x", "fyrd-spec-20261030-x", "permission_mode", "auto",
+                     "servicetitan/titan-lens-ossie", "env_abc", "claude-sonnet-5-5", "outcome_branch", "append_system_prompt" })
+            Assert.Contains(s, text);
+    }
+
+    [Fact]
+    public void Build_PinsWaitingModelBranchingAndHardening()
+    {
+        var text = Shipped();
+        foreach (var s in new[] { "get_session", "source_revision", "...", "<spec>", "</spec>",
+                     "<remembered-decisions>", "</remembered-decisions>", "lead session id", "user message",
+                     "3 failed rounds", "git diff fyrd/20261030-x...fyrd/20261030-x/<unitId>" })
+            Assert.Contains(s, text);
+    }
+
+    [Theory]
+    [InlineData("implementer.md")]
+    [InlineData("reviewer.md")]
+    [InlineData("validator.md")]
+    public void PeerPersonas_ForbidFyrdBlocksAndReportToLead(string file)
+    {
+        var text = File.ReadAllText(Path.Combine(Repo(), "personas", file));
+        Assert.Contains("Never emit any `fyrd-", text);
+        Assert.Contains("lead session id", text);
+    }
+
+    [Fact]
+    public void Build_InjectsSquadCapAndMemory()
+    {
+        var text = Shipped(memory: "Prefer tabs over spaces.");
+        Assert.Contains("at most 3 ", text);
+        Assert.Contains("Prefer tabs over spaces.", text);
+    }
+
+    [Fact]
+    public void Personas_Load_MissingFile_NamesIt()
+    {
+        using var home = new TempHome();
+        Directory.CreateDirectory(home.Paths.Root);
+        File.WriteAllText(Path.Combine(home.Paths.Root, "lead.md"), "x");
+        var e = Assert.Throws<FileNotFoundException>(() => Personas.Load(home.Paths.Root));
+        Assert.Contains("implementer.md", e.Message);
+    }
+
+    [Fact]
+    public void ShippedPersonas_LoadFromRepo()
+    {
+        var p = Personas.Load(Path.Combine(Repo(), "personas"));
+        Assert.All(new[] { p.Lead, p.Implementer, p.Reviewer, p.Validator }, s => Assert.False(string.IsNullOrWhiteSpace(s)));
+    }
+}
