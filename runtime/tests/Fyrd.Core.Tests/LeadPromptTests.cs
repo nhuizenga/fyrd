@@ -56,8 +56,19 @@ public class LeadPromptTests
         var text = Shipped();
         foreach (var s in new[] { "get_session", "source_revision", "...", "<spec>", "</spec>",
                      "<remembered-decisions>", "</remembered-decisions>", "lead session id", "user message",
-                     "3 failed rounds", "never quote or paste a peer's", "git diff fyrd/20261030-x...fyrd/20261030-x/<unitId>" })
+                     "3 failed rounds", "never quote or paste a peer's", "git diff fyrd/20261030-x/integration...fyrd/20261030-x/unit/<unitId>" })
             Assert.Contains(s, text);
+    }
+
+    [Fact]
+    public void Build_UsesNonNestingBranchNames_AndNeverABareIntegrationBranch()
+    {
+        var text = Shipped();
+        foreach (var s in new[] { "fyrd/20261030-x/integration", "fyrd/20261030-x/unit/<unitId>",
+                     "{\"branch\":\"fyrd/20261030-x/integration\"", "Never create a branch named exactly `fyrd/20261030-x`" })
+            Assert.Contains(s, text);
+        // A bare `fyrd/<specId>` branch can't coexist with `fyrd/<specId>/...` in git.
+        Assert.DoesNotMatch(@"fyrd/20261030-x(?=[\s`]|$)", text.Replace("Never create a branch named exactly `fyrd/20261030-x`", ""));
     }
 
     [Theory]
