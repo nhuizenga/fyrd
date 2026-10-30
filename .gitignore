@@ -5,3 +5,6 @@ node_modules/
 .superpowers/
 bin/
 obj/
+runtime/src/Fyrd.Server/wwwroot/
+console/node_modules/
+spikes/cloud-sessions/out/
