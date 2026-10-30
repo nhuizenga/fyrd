@@ -8,12 +8,15 @@ public sealed class ClaudeAuthMissingException()
     : Exception("Sign in to Claude Code with `claude auth login`.");
 
 /// <summary>
-/// Reads the claude.ai OAuth credentials Claude Code keeps on disk. Files are re-read on every
-/// call so a token refreshed by the CLI is picked up; the token is never cached or logged.
+/// Reads the claude.ai OAuth credentials Claude Code keeps on disk. The credentials file is re-read on
+/// every call so a token refreshed by the CLI is picked up; the token is never cached or logged.
 /// </summary>
 public sealed class ClaudeCredentials
 {
     private readonly string _home;
+    private readonly object _orgLock = new();
+    private string? _cachedOrg;
+    private DateTime _cachedOrgStamp;
 
     public ClaudeCredentials(string? claudeHome = null) =>
         _home = claudeHome ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -21,16 +24,38 @@ public sealed class ClaudeCredentials
     public ClaudeAuth Read()
     {
         var oauth = Navigate(Path.Combine(_home, ".claude", ".credentials.json"), "claudeAiOauth");
-        var account = Navigate(Path.Combine(_home, ".claude.json"), "oauthAccount");
 
         var token = oauth.GetStringOrNull("accessToken");
-        var org = account.GetStringOrNull("organizationUuid");
+        var org = ReadOrganizationUuid();
         if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(org)
             || oauth is not { } o || !o.TryGetProperty("expiresAt", out var exp)
             || exp.ValueKind != JsonValueKind.Number || !exp.TryGetInt64(out var ms))
             throw new ClaudeAuthMissingException();
 
         return new ClaudeAuth(token, org, DateTimeOffset.FromUnixTimeMilliseconds(ms));
+    }
+
+    // The org uuid only changes when the user switches accounts, so it is cached until ~/.claude.json's
+    // last-write time changes. (~/.claude.json is large and rewritten often by the CLI.)
+    private string? ReadOrganizationUuid()
+    {
+        var path = Path.Combine(_home, ".claude.json");
+        DateTime stamp;
+        try { stamp = File.GetLastWriteTimeUtc(path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+
+        lock (_orgLock)
+        {
+            if (_cachedOrg is not null && stamp == _cachedOrgStamp) return _cachedOrg;
+            var org = Navigate(path, "oauthAccount").GetStringOrNull("organizationUuid");
+            if (!string.IsNullOrEmpty(org))
+            {
+                _cachedOrg = org;
+                _cachedOrgStamp = stamp;
+            }
+
+            return org;
+        }
     }
 
     // Returns the named top-level object of a JSON file, or null if file/property is missing or malformed.

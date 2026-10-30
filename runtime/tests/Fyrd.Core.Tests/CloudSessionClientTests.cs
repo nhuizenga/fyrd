@@ -173,4 +173,101 @@ public sealed class CloudSessionClientTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => Client(h).GetAsync(id));
         Assert.Empty(h.Requests);
     }
+
+    [Fact]
+    public async Task Create_WithPermissionMode_PrependsSetModeEvent()
+    {
+        var h = new FakeHandler(HttpStatusCode.OK, """{"id":"session_01abc"}""");
+        await Client(h).CreateAsync(SampleRequest() with { PermissionMode = "auto" });
+
+        var events = JsonDocument.Parse(h.Requests[0].Body!).RootElement.GetProperty("events");
+        Assert.Equal(2, events.GetArrayLength());
+        Assert.Equal("event", events[0].GetProperty("type").GetString());
+        var data = events[0].GetProperty("data");
+        Assert.Equal("control_request", data.GetProperty("type").GetString());
+        Assert.Equal("set_permission_mode", data.GetProperty("request").GetProperty("subtype").GetString());
+        Assert.Equal("auto", data.GetProperty("request").GetProperty("mode").GetString());
+        Assert.StartsWith("set-mode-", data.GetProperty("request_id").GetString());
+        Assert.Equal("user", events[1].GetProperty("data").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task Create_WithoutPermissionMode_HasOnlyUserEvent()
+    {
+        var h = new FakeHandler(HttpStatusCode.OK, """{"id":"session_01abc"}""");
+        await Client(h).CreateAsync(SampleRequest());
+
+        var events = JsonDocument.Parse(h.Requests[0].Body!).RootElement.GetProperty("events");
+        Assert.Equal(1, events.GetArrayLength());
+        Assert.Equal("user", events[0].GetProperty("data").GetProperty("type").GetString());
+    }
+
+    [Fact]
+    public async Task ListByTag_SendsTagsQuery_AndFollowsPages()
+    {
+        var pages = new Queue<string>(
+        [
+            """{"data":[{"id":"session_1"},{"id":"session_2"}],"has_more":true,"last_id":"session_2"}""",
+            """{"data":[{"id":"session_3","tags":["fyrd-spec-x"]}],"has_more":false,"last_id":"session_3"}""",
+        ]);
+        var h = new FakeHandler(HttpStatusCode.OK, () => pages.Dequeue());
+        var result = await Client(h).ListByTagAsync("fyrd-spec-x");
+
+        Assert.Equal(["session_1", "session_2", "session_3"], result.Select(s => s.Id));
+        Assert.Equal(2, h.Requests.Count);
+        Assert.All(h.Requests, r => Assert.StartsWith("/v1/sessions?tags=fyrd-spec-x", r.Request.RequestUri!.PathAndQuery));
+        Assert.DoesNotContain("after_id", h.Requests[0].Request.RequestUri!.Query);
+        Assert.Contains("after_id=session_2", h.Requests[1].Request.RequestUri!.Query);
+    }
+
+    [Fact]
+    public async Task ListByTag_StopsAfterTwentyPages()
+    {
+        var h = new FakeHandler(HttpStatusCode.OK, () => """{"data":[{"id":"session_1"}],"has_more":true,"last_id":"session_1"}""");
+        var result = await Client(h).ListByTagAsync("t");
+        Assert.Equal(20, h.Requests.Count);
+        Assert.Equal(20, result.Count);
+    }
+
+    [Fact]
+    public async Task Interrupt_PostsControlRequestEvent()
+    {
+        var h = new FakeHandler();
+        await Client(h).InterruptAsync("session_1");
+
+        var r = h.Requests[0];
+        Assert.Equal(HttpMethod.Post, r.Request.Method);
+        Assert.Equal("/v1/sessions/session_1/events", r.Request.RequestUri!.AbsolutePath);
+        var ev = JsonDocument.Parse(r.Body!).RootElement.GetProperty("events")[0];
+        Assert.Equal("control_request", ev.GetProperty("type").GetString());
+        Assert.False(string.IsNullOrEmpty(ev.GetProperty("request_id").GetString()));
+        Assert.Equal("interrupt", ev.GetProperty("request").GetProperty("subtype").GetString());
+        Assert.True(ev.GetProperty("request").GetProperty("cancel_queued").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Archive_PostsToCodeSessionsPath()
+    {
+        var h = new FakeHandler();
+        await Client(h).ArchiveAsync("session_1");
+
+        var r = h.Requests[0];
+        Assert.Equal(HttpMethod.Post, r.Request.Method);
+        Assert.Equal("/v1/code/sessions/session_1/archive", r.Request.RequestUri!.AbsolutePath);
+        Assert.Equal("{}", r.Body);
+    }
+
+    [Fact]
+    public async Task Get_NonJson2xx_ThrowsApiException()
+    {
+        var h = new FakeHandler(HttpStatusCode.OK, "<html>");
+        var ex = await Assert.ThrowsAsync<CloudSessionApiException>(() => Client(h).GetAsync("session_1"));
+        Assert.Equal(200, ex.Status);
+        Assert.Equal("<non-JSON body>", ex.Body);
+        Assert.DoesNotContain("tok", ex.Message);
+    }
+
+    [Fact]
+    public void Client_ImplementsICloudSessions() =>
+        Assert.IsAssignableFrom<ICloudSessions>(Client(new FakeHandler()));
 }
