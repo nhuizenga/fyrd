@@ -147,6 +147,10 @@ public class ApiTests
         await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "Unit tests" });
         var again = await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "E2E" });
         Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+
+        var memory = File.ReadAllText(Path.Combine(f.Home.Paths.MemoryDir, "servicetitan__titan-lens-ossie.md"));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(memory, @"\*\*A:\*\* Unit tests"));
+        Assert.DoesNotContain("**A:** E2E", memory);
     }
 
     [Fact]
