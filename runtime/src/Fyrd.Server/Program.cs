@@ -27,6 +27,7 @@ builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient(), _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
+builder.Services.AddSingleton<LeadRelay>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
     builder.Services.AddHostedService<SpecRunnerService>();
 builder.Services.AddSingleton(sp =>
