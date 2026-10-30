@@ -61,6 +61,10 @@ internal static class SpecEndpoints
             {
                 return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
             }
+            catch (HttpRequestException e)
+            {
+                return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested)
             {
                 return Results.Problem("Timed out creating the lead session", statusCode: StatusCodes.Status502BadGateway);

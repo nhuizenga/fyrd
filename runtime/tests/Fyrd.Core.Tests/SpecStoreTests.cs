@@ -184,4 +184,33 @@ public class SpecStoreTests
         var ids = s.ListActive().Select(r => r.Id).ToHashSet();
         Assert.Equal(new HashSet<string> { queued, building, review }, ids);
     }
+
+    [Fact]
+    public void List_InvalidFolderName_IsErrorEntry()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        Directory.CreateDirectory(Path.Combine(h.Paths.SpecsDir, "archive"));
+        var entry = Assert.Single(s.List());
+        Assert.Null(entry.Run);
+        Assert.Equal("archive", entry.Id);
+        Assert.Equal("Not a valid spec folder name", entry.Error);
+    }
+
+    [Fact]
+    public void ConcurrentReadersAndWriters_NeverThrow()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("Race", Repo, "x").Id;
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        void Guard(Action a) { try { for (var i = 0; i < 200; i++) a(); } catch (Exception e) { errors.Enqueue(e); } }
+        var tasks = new[]
+        {
+            Task.Run(() => Guard(() => s.UpdateStatus(id, SpecStatus.Draft))),
+            Task.Run(() => Guard(() => s.WriteUnits(id, [new Unit("a", id, "A", UnitStage.Implement, UnitState.Idle)]))),
+            Task.Run(() => Guard(() => { s.List(); s.Get(id); s.ListUnits(id); s.ReadMarkdown(id); })),
+            Task.Run(() => Guard(() => { s.List(); s.Get(id); s.ListUnits(id); s.ReadMarkdown(id); })),
+        };
+        Task.WaitAll(tasks);
+        Assert.Empty(errors);
+    }
 }

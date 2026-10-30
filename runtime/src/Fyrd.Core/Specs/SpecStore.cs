@@ -33,19 +33,27 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
     public IReadOnlyList<SpecListEntry> List()
     {
         var entries = new List<SpecListEntry>();
-        foreach (var dir in Directory.EnumerateDirectories(paths.SpecsDir))
+        lock (_gate)
         {
-            var id = Path.GetFileName(dir);
-            try
+            foreach (var dir in Directory.EnumerateDirectories(paths.SpecsDir))
             {
-                var run = ReadRun(dir);
-                entries.Add(run is null
-                    ? new SpecListEntry(null, id, $"{RunFile} not found")
-                    : new SpecListEntry(run, id, null));
-            }
-            catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
-            {
-                entries.Add(new SpecListEntry(null, id, $"{RunFile} unreadable: {e.Message}"));
+                var id = Path.GetFileName(dir);
+                if (!SpecIds.IsValid(id))
+                {
+                    entries.Add(new SpecListEntry(null, id, "Not a valid spec folder name"));
+                    continue;
+                }
+                try
+                {
+                    var run = ReadRun(dir);
+                    entries.Add(run is null
+                        ? new SpecListEntry(null, id, $"{RunFile} not found")
+                        : new SpecListEntry(run, id, null));
+                }
+                catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+                {
+                    entries.Add(new SpecListEntry(null, id, $"{RunFile} unreadable: {e.Message}"));
+                }
             }
         }
         return entries
@@ -54,9 +62,17 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
             .ToList();
     }
 
-    public SpecRun? Get(string id) => ReadRun(DirFor(id));
+    public SpecRun? Get(string id)
+    {
+        var dir = DirFor(id);
+        lock (_gate) return ReadRun(dir);
+    }
 
-    public string ReadMarkdown(string id) => File.ReadAllText(Path.Combine(DirFor(id), MarkdownFile));
+    public string ReadMarkdown(string id)
+    {
+        var path = Path.Combine(DirFor(id), MarkdownFile);
+        lock (_gate) return File.ReadAllText(path);
+    }
 
     public SpecRun UpdateStatus(string id, SpecStatus status) => Mutate(id, r => r with { Status = status });
 
@@ -105,8 +121,11 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
     public IReadOnlyList<Unit> ListUnits(string id)
     {
         var path = Path.Combine(DirFor(id), UnitsFile);
-        if (!File.Exists(path)) return [];
-        return JsonSerializer.Deserialize<List<Unit>>(File.ReadAllText(path), Json.Options) ?? [];
+        lock (_gate)
+        {
+            if (!File.Exists(path)) return [];
+            return JsonSerializer.Deserialize<List<Unit>>(File.ReadAllText(path), Json.Options) ?? [];
+        }
     }
 
     private string DirFor(string id)

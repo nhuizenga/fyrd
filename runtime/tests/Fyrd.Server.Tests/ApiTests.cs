@@ -404,7 +404,7 @@ public class ApiTests
         state.LastError = "poll failed";
         state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_lead", "Lead", "running", "connected", null,
             ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-lead"],
-            JsonDocument.Parse("""{"external_metadata":{"context_usage":{"used_tokens":52000,"max_tokens":1000000},"rate_limit_info":{"status":"allowed","resetsAt":"2026-10-29T12:00:00Z"}}}""").RootElement.Clone()));
+            JsonDocument.Parse("""{"external_metadata":{"context_usage":{"used_tokens":52000,"max_tokens":1000000},"rate_limit_info":{"status":"allowed","resetsAt":1793491200}}}""").RootElement.Clone()));
         state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_x", "Peer", "idle", "connected", null,
             ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-implementer", "fyrd-unit-u1"], default));
 
@@ -412,6 +412,7 @@ public class ApiTests
         Assert.Equal("poll failed", board.GetProperty("lastError").GetString());
         Assert.False(board.GetProperty("signedOut").GetBoolean());
         Assert.Equal("allowed", board.GetProperty("rateLimit").GetProperty("status").GetString());
+        Assert.Equal("2026-11-01T00:00:00.0000000+00:00", board.GetProperty("rateLimit").GetProperty("resetsAt").GetString());
         var spec = Assert.Single(board.GetProperty("specs").EnumerateArray());
         Assert.Equal(1, spec.GetProperty("units").GetArrayLength());
         var lead = spec.GetProperty("lead");
@@ -438,5 +439,36 @@ public class ApiTests
         var specs = (await ReadJson(r)).GetProperty("specs").EnumerateArray().ToList();
         Assert.Equal(2, specs.Count);
         Assert.Single(specs, e => e.GetProperty("entry").GetProperty("error").ValueKind == JsonValueKind.String);
+    }
+
+    [Fact]
+    public async Task Board_StrayFolderInSpecsDir_Returns200WithErrorEntry()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await CreateSpec(c, "One");
+        Directory.CreateDirectory(Path.Combine(f.Home.Paths.SpecsDir, "archive"));
+
+        var r = await c.GetAsync("/api/board");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var specs = (await ReadJson(r)).GetProperty("specs").EnumerateArray().ToList();
+        Assert.Equal(2, specs.Count);
+        var bad = Assert.Single(specs, e => e.GetProperty("entry").GetProperty("error").ValueKind == JsonValueKind.String);
+        Assert.Equal("archive", bad.GetProperty("entry").GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task Attack_HttpRequestException_Returns502_AndSpecIsDraft()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("No such host is known"));
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Contains("No such host is known", await r.Content.ReadAsStringAsync());
+        var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
+        Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
     }
 }

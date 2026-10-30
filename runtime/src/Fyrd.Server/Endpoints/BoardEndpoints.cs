@@ -59,7 +59,7 @@ internal static class BoardEndpoints
     private static IReadOnlyList<Unit> Safe(Func<IReadOnlyList<Unit>> f)
     {
         try { return f(); }
-        catch (JsonException) { return []; }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException or ArgumentException) { return []; }
     }
 
     private static string? TagValue(CloudSession s, string prefix) =>
@@ -87,11 +87,23 @@ internal static class BoardEndpoints
             _ => null,
         } : null;
 
+    // The wire value is epoch seconds (a number); strings are passed through untouched.
+    private static string? ResetsAt(JsonElement r)
+    {
+        if (r.TryGetProperty("resetsAt", out var v) && v.ValueKind == JsonValueKind.Number)
+        {
+            if (!v.TryGetInt64(out var secs)) return null;
+            try { return DateTimeOffset.FromUnixTimeSeconds(secs).ToString("O"); }
+            catch (ArgumentOutOfRangeException) { return null; }
+        }
+        return Str(r, "resetsAt");
+    }
+
     private static RateLimitView? RateLimit(IEnumerable<CloudSession> sessions)
     {
         foreach (var s in sessions)
             if (Meta(s.Raw, "rate_limit_info") is { } r)
-                return new RateLimitView(Str(r, "status"), Str(r, "resetsAt"));
+                return new RateLimitView(Str(r, "status"), ResetsAt(r));
         return null;
     }
 }
