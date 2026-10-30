@@ -172,4 +172,19 @@ public class InboxStoreTests
         Assert.Equal(mine.Id, Assert.Single(s.ListOpenFor(spec)).Id);
         Assert.Empty(s.ListOpenFor("other-spec"));
     }
+
+    [Fact]
+    public void Answer_AttentionCard_RecordsNoMemory()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = s.Add(spec, null, "Lead needs attention: Approve Bash", [], null, null, null, true,
+            spec + ":attention:e1");
+
+        var answered = s.Answer(card.Id, "go ahead", remember: true);
+
+        Assert.False(answered.Answer!.Remember);
+        Assert.False(File.Exists(RepoFile(home)));
+        Assert.Empty(Directory.GetFiles(home.Paths.MemoryDir));
+    }
 }

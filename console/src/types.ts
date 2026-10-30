@@ -50,6 +50,7 @@ export interface InboxCard {
   allowFreeText: boolean;
   createdAt: string;
   answer?: CardAnswer | null;
+  sourceKey?: string | null;
 }
 
 export interface FyrdConfig {

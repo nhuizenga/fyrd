@@ -58,6 +58,8 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
             if (card.Answer is not null) throw new CardAlreadyAnsweredException(cardId);
 
             var now = time.GetUtcNow();
+            // Attention answers are one-off instructions about a session, not reusable decisions.
+            if (card.SourceKey?.Contains(":attention:", StringComparison.Ordinal) == true) remember = false;
             if (remember)
             {
                 var repo = specs.Get(card.SpecId)?.Repo

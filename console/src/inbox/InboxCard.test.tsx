@@ -96,3 +96,13 @@ it("passes the relayError from the answer response to onAnswered", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Okta" }));
   await waitFor(() => expect(onAnswered).toHaveBeenCalledWith("lead unreachable"));
 });
+
+it("attention cards default Remember off and hide the scope select", async () => {
+  answer.mockResolvedValue(c);
+  const att = { ...c, sourceKey: "s1:attention:e1" };
+  render(<InboxCard card={att} specLabel="Spec One" onAnswered={() => {}} />);
+  expect(screen.getByRole("checkbox", { name: /remember/i })).not.toBeChecked();
+  expect(screen.queryByLabelText("Memory scope")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Entra ID" }));
+  expect(answer).toHaveBeenCalledWith("c9", { text: "Entra ID", remember: false, scope: "Repo" });
+});

@@ -25,7 +25,9 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false); // blocks a second click in the same tick, before re-render
   const [error, setError] = useState<string | null>(null);
-  const [remember, setRemember] = useState(true);
+  // Attention answers are one-off instructions; the server never remembers them.
+  const isAttention = card.sourceKey?.includes(":attention:") ?? false;
+  const [remember, setRemember] = useState(!isAttention);
   const [scope, setScope] = useState<MemoryScope>("Repo");
   const [text, setText] = useState("");
   const [showDetails, setShowDetails] = useState(false);
@@ -102,15 +104,17 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
           />{" "}
           Remember this
         </label>
-        <select
-          aria-label="Memory scope"
-          value={scope}
-          disabled={busy || !remember}
-          onChange={(e) => setScope(e.target.value as MemoryScope)}
-        >
-          <option value="Repo">Repo</option>
-          <option value="Global">Everywhere</option>
-        </select>
+        {!isAttention && (
+          <select
+            aria-label="Memory scope"
+            value={scope}
+            disabled={busy || !remember}
+            onChange={(e) => setScope(e.target.value as MemoryScope)}
+          >
+            <option value="Repo">Repo</option>
+            <option value="Global">Everywhere</option>
+          </select>
+        )}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
     </article>
