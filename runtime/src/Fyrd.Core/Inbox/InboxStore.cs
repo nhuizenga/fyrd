@@ -24,7 +24,7 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
         lock (_gate)
         {
             return Directory.EnumerateFiles(paths.InboxDir, "*.json")
-                .Select(Read)
+                .Select(ReadOrSkip)
                 .OfType<InboxCard>()
                 .Where(c => c.Answer is null)
                 .OrderBy(c => c.CreatedAt)
@@ -60,13 +60,19 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
     private static InboxCard? Read(string path) =>
         File.Exists(path) ? JsonSerializer.Deserialize<InboxCard>(File.ReadAllText(path), Json.Options) : null;
 
-    private void Write(InboxCard card)
+    // A corrupt or unreadable card must not take the whole inbox down.
+    private static InboxCard? ReadOrSkip(string path)
     {
-        var path = PathFor(card.Id);
-        var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(tmp, JsonSerializer.Serialize(card, Json.Options));
-        File.Move(tmp, path, overwrite: true);
+        try { return Read(path); }
+        catch (Exception e) when (e is JsonException or IOException)
+        {
+            Console.Error.WriteLine($"fyrd: skipping unreadable inbox card '{path}': {e.Message}");
+            return null;
+        }
     }
+
+    private void Write(InboxCard card) =>
+        AtomicFile.Write(PathFor(card.Id), JsonSerializer.Serialize(card, Json.Options));
 
     [GeneratedRegex(@"^[0-9a-f]{12}\z")]
     private static partial Regex CardIdPattern();

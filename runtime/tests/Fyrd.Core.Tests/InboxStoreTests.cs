@@ -25,6 +25,16 @@ public class InboxStoreTests
     private static int QuestionCount(string text) => text.Split("**Q:**").Length - 1;
 
     [Fact]
+    public void ListOpen_SkipsCorruptCard()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var good = AddCard(s, spec);
+        File.WriteAllText(Path.Combine(home.Paths.InboxDir, "badbadbadbad.json"), "{ nope");
+        Assert.Equal(good.Id, Assert.Single(s.ListOpen()).Id);
+    }
+
+    [Fact]
     public void Add_ThenListOpen_ReturnsCard()
     {
         var (s, home, spec) = Make();

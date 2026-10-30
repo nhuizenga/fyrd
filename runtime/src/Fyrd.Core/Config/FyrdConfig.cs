@@ -9,16 +9,26 @@ public sealed record FyrdConfig(int SquadCap = 4)
 
 public sealed class ConfigStore(FyrdPaths paths)
 {
-    public FyrdConfig Load() =>
-        File.Exists(paths.ConfigFile)
-            ? JsonSerializer.Deserialize<FyrdConfig>(File.ReadAllText(paths.ConfigFile), Json.Options) ?? new FyrdConfig()
-            : new FyrdConfig();
+    public FyrdConfig Load()
+    {
+        try
+        {
+            if (!File.Exists(paths.ConfigFile)) return new FyrdConfig();
+            var config = JsonSerializer.Deserialize<FyrdConfig>(File.ReadAllText(paths.ConfigFile), Json.Options)
+                ?? new FyrdConfig();
+            return config with { SquadCap = Math.Clamp(config.SquadCap, FyrdConfig.MinSquadCap, FyrdConfig.MaxSquadCap) };
+        }
+        catch (Exception e) when (e is JsonException or IOException)
+        {
+            return new FyrdConfig();
+        }
+    }
 
     public void Save(FyrdConfig config)
     {
         if (config.SquadCap is < FyrdConfig.MinSquadCap or > FyrdConfig.MaxSquadCap)
             throw new ArgumentOutOfRangeException(nameof(config), config.SquadCap,
                 $"SquadCap must be between {FyrdConfig.MinSquadCap} and {FyrdConfig.MaxSquadCap}.");
-        File.WriteAllText(paths.ConfigFile, JsonSerializer.Serialize(config, Json.Options));
+        AtomicFile.Write(paths.ConfigFile, JsonSerializer.Serialize(config, Json.Options));
     }
 }

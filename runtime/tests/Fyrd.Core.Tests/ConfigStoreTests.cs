@@ -18,6 +18,15 @@ public class ConfigStoreTests
     { using var h = new TempHome();
       Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(h.Paths).Save(new FyrdConfig(cap))); }
 
+    [Fact] public void Load_MalformedFile_ReturnsDefaults()
+    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{ nope");
+      Assert.Equal(4, new ConfigStore(h.Paths).Load().SquadCap); }
+
+    [Theory, InlineData(0, 1), InlineData(50, 8)]
+    public void Load_OutOfRangeCap_Clamps(int raw, int expected)
+    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, $"{{\"squadCap\": {raw}}}");
+      Assert.Equal(expected, new ConfigStore(h.Paths).Load().SquadCap); }
+
     [Fact] public void Resolve_PrefersConfiguredOverEnv()
     { using var h = new TempHome(); Assert.Equal(h.Paths.Root, FyrdPaths.Resolve(h.Paths.Root).Root); }
 }

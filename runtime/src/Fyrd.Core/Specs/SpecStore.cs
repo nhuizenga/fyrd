@@ -23,8 +23,8 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
         Directory.CreateDirectory(paths.SpecDir(id));
 
         var run = new SpecRun(id, title, repo, SpecStatus.Draft, now);
-        WriteAtomic(Path.Combine(paths.SpecDir(id), MarkdownFile), markdown);
-        WriteAtomic(Path.Combine(paths.SpecDir(id), UnitsFile), JsonSerializer.Serialize(Array.Empty<Unit>(), Json.Options));
+        AtomicFile.Write(Path.Combine(paths.SpecDir(id), MarkdownFile), markdown);
+        AtomicFile.Write(Path.Combine(paths.SpecDir(id), UnitsFile), JsonSerializer.Serialize(Array.Empty<Unit>(), Json.Options));
         WriteRun(run);
         return run;
     }
@@ -87,14 +87,7 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
     }
 
     private void WriteRun(SpecRun run, string? id = null) =>
-        WriteAtomic(Path.Combine(paths.SpecDir(id ?? run.Id), RunFile), JsonSerializer.Serialize(run, Json.Options));
-
-    private static void WriteAtomic(string path, string content)
-    {
-        var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(tmp, content);
-        File.Move(tmp, path, overwrite: true);
-    }
+        AtomicFile.Write(Path.Combine(paths.SpecDir(id ?? run.Id), RunFile), JsonSerializer.Serialize(run, Json.Options));
 
     [GeneratedRegex(@"^[\w.-]+/[\w.-]+\z")]
     private static partial Regex RepoPattern();
