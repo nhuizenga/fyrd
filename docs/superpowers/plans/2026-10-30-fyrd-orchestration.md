@@ -22,7 +22,7 @@
 - The claude.ai OAuth token is read per request, and is never logged, stored elsewhere, or sent anywhere but `https://api.anthropic.com`.
 - **Every lead is created with permission mode `auto`** (owner's decision), using this create event ahead of the first user message: `{"type":"event","data":{"type":"control_request","request_id":"set-mode-<guid>","request":{"subtype":"set_permission_mode","mode":"auto"}}}`.
 - **Session tags:** `fyrd`, `fyrd-spec-<specId>`, `fyrd-role-<lead|implementer|reviewer|validator>`, and `fyrd-unit-<unitId>` where it applies.
-- **Branches:** unit `fyrd/<specId>/<unitId>`; integration `fyrd/<specId>`. Peers never force-push and never touch other branches. Fyrd never merges a PR.
+- **Branches:** unit `fyrd/<specId>/unit/<unitId>`; integration `fyrd/<specId>/integration` (never a bare `fyrd/<specId>`: git cannot hold a branch and a branch folder of the same name). Peers never force-push and never touch other branches. Fyrd never merges a PR.
 - **Default models:** lead `claude-opus-5-5`, peers `claude-sonnet-5-5`. Both are configurable.
 - Squad cap is 1–8, default 4. The lead always receives the current cap.
 - All state stays hand-editable under `~/.fyrd/data/`; a malformed file must never take down the console.
@@ -40,7 +40,7 @@ The lead talks to Fyrd only through fenced blocks in its assistant messages. Eac
 |---|---|---|
 | `fyrd-units` | lead → Fyrd | `[{"id":"<unitId>","title":"<text>","done":false}]` (full list each time; `id` matches `^[a-z0-9-]{1,40}$`) |
 | `fyrd-question` | lead → Fyrd | `{"id":"<questionId>","question":"…","options":["…"],"recommendation":"…","reason":"…","unit":"<unitId or null>","details":"…"}` |
-| `fyrd-done` | lead → Fyrd | `{"branch":"fyrd/<specId>","summary":"…"}` |
+| `fyrd-done` | lead → Fyrd | `{"branch":"fyrd/<specId>/integration","summary":"…"}` |
 | `fyrd-failed` | lead → Fyrd | `{"reason":"…"}` |
 | `fyrd-answer` | Fyrd → lead | `{"id":"<questionId>","answer":"…"}` |
 | `fyrd-config` | Fyrd → lead | `{"squadCap":<n>}` |
@@ -249,13 +249,13 @@ console/src/...                             # Board uses /api/board; Settings; s
 - For each unit, create peers in order (implementer, then reviewer, then validator) with `create_session`, using:
   - `source_url` `https://github.com/{{REPO}}`, `environment_id` `{{ENVIRONMENT_ID}}`, `model` `{{PEER_MODEL}}`, `permission_mode` `auto`
   - tags `fyrd`, `fyrd-spec-{{SPEC_ID}}`, `fyrd-role-<role>`, `fyrd-unit-<unitId>`
-  - `outcome_branch` `fyrd/{{SPEC_ID}}/<unitId>` for the implementer
+  - `outcome_branch` `fyrd/{{SPEC_ID}}/unit/<unitId>` for the implementer
   - `append_system_prompt` = that role's persona
 - Settle questions using the remembered decisions (`{{MEMORY}}`) and its own judgment first. Ask the owner only with a `fyrd-question` block, then end its turn.
 - Treat `fyrd-answer` as the owner's decision.
-- Merge finished units into `fyrd/{{SPEC_ID}}`, do a final review, and archive finished peer sessions.
+- Merge finished units into `fyrd/{{SPEC_ID}}/integration`, do a final review, and archive finished peer sessions.
 - End with `fyrd-done` (or `fyrd-failed`).
-- Safety rules (verbatim intent from the spike): never force-push; push only `fyrd/{{SPEC_ID}}` and `fyrd/{{SPEC_ID}}/*`; only create, message, interrupt or archive sessions it created for this spec; never merge a PR.
+- Safety rules (verbatim intent from the spike): never force-push; push only branches under `fyrd/{{SPEC_ID}}/` (`integration` and `unit/<unitId>`), never a bare `fyrd/{{SPEC_ID}}`; only create, message, interrupt or archive sessions it created for this spec; never merge a PR.
 
 `implementer.md`, `reviewer.md` and `validator.md` define each role: implement and test, then push to the unit branch; review the unit branch diff and report findings to the lead with `send_message`; run the tests and verify behavior, then report pass or fail to the lead. Each states that it reports only to its lead and asks the lead, not the owner.
 
@@ -459,11 +459,11 @@ it("renders a context bar from lead usage", …); it("inbox card details URL is 
 
 ### Task 9: Owner smoke run (manual, real cloud)
 
-The owner runs this; agents can't, because it uses the owner's claude.ai login. It creates real cloud sessions and pushes `fyrd/<specId>*` branches to `servicetitan/titan-lens-ossie`.
+The owner runs this; agents can't, because it uses the owner's claude.ai login. It creates real cloud sessions and pushes `fyrd/<specId>/*` branches to `servicetitan/titan-lens-ossie`.
 
 - [ ] **Step 1:** In `main`, run `/fyrd:up`. In Settings, set the environment to `env_011v4b3WBhRMaGGti6Qw747c` (or another of the owner's environments).
 - [ ] **Step 2:** Create a tiny spec, e.g. "Add a `docs/fyrd-smoke.md` file containing one sentence", and attack it.
 - [ ] **Step 3:** Within about 2 minutes, the Board shows the lead link with status `Building`. Units appear after the lead emits `fyrd-units`. Peer links appear per unit, and the stage markers advance.
 - [ ] **Step 4:** If a card appears, answer it, and confirm the lead continues in its claude.ai session.
-- [ ] **Step 5:** The spec reaches `ReadyForHandoff` with branch `fyrd/<specId>`. Confirm the branch exists on GitHub and contains the file.
-- [ ] **Step 6:** Record what happened (time taken, cards, anything odd) in `docs/superpowers/spikes/2026-10-30-plan2-smoke.md`. Delete the `fyrd/<specId>*` branches after confirming with the owner.
+- [ ] **Step 5:** The spec reaches `ReadyForHandoff` with branch `fyrd/<specId>/integration`. Confirm the branch exists on GitHub and contains the file.
+- [ ] **Step 6:** Record what happened (time taken, cards, anything odd) in `docs/superpowers/spikes/2026-10-30-plan2-smoke.md`. Delete the `fyrd/<specId>/*` branches after confirming with the owner.
