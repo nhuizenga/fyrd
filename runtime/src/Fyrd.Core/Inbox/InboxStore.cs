@@ -9,12 +9,13 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
     private readonly object _gate = new();
 
     public InboxCard Add(string specId, string? unitId, string question, IReadOnlyList<string> options,
-        string? recommendation, string? reason, string? details, bool allowFreeText)
+        string? recommendation, string? reason, string? details, bool allowFreeText,
+        string? sourceKey = null)
     {
         if (string.IsNullOrWhiteSpace(question)) throw new ArgumentException("Question is required.", nameof(question));
         if (specs.Get(specId) is null) throw new KeyNotFoundException($"Spec '{specId}' not found.");
         var card = new InboxCard(Guid.NewGuid().ToString("N")[..12], specId, unitId, question, options,
-            recommendation, reason, details, allowFreeText, time.GetUtcNow());
+            recommendation, reason, details, allowFreeText, time.GetUtcNow(), SourceKey: sourceKey);
         lock (_gate) Write(card);
         return card;
     }
@@ -32,6 +33,20 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
         }
     }
 
+    public IReadOnlyList<InboxCard> ListOpenFor(string specId) =>
+        ListOpen().Where(c => c.SpecId == specId).ToList();
+
+    /// <summary>True for open or answered cards carrying this source key.</summary>
+    public bool HasSourceKey(string sourceKey)
+    {
+        lock (_gate)
+        {
+            return Directory.EnumerateFiles(paths.InboxDir, "*.json")
+                .Select(ReadOrSkip).OfType<InboxCard>()
+                .Any(c => c.SourceKey == sourceKey);
+        }
+    }
+
     public InboxCard Answer(string cardId, string text, bool remember = true, MemoryScope scope = MemoryScope.Repo)
     {
         if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("Answer text is required.", nameof(text));
@@ -43,6 +58,8 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
             if (card.Answer is not null) throw new CardAlreadyAnsweredException(cardId);
 
             var now = time.GetUtcNow();
+            // Attention answers are one-off instructions about a session, not reusable decisions.
+            if (card.SourceKey?.Contains(":attention:", StringComparison.Ordinal) == true) remember = false;
             if (remember)
             {
                 var repo = specs.Get(card.SpecId)?.Repo

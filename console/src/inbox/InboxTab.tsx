@@ -4,7 +4,7 @@ import InboxCard from "./InboxCard";
 interface Props {
   cards: Card[];
   specs: SpecListEntry[];
-  onAnswered: () => void;
+  onAnswered: (relayError?: string) => void;
 }
 
 export default function InboxTab({ cards, specs, onAnswered }: Props) {

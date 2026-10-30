@@ -1,18 +1,33 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import * as api from "../api";
 import type { InboxCard as Card, MemoryScope } from "../types";
 
 interface Props {
   card: Card;
   specLabel: string;
-  onAnswered: () => void;
+  onAnswered: (relayError?: string) => void;
+}
+
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+
+/** Splits text into plain strings and http(s) links; never builds HTML. */
+function linkify(text: string): ReactNode[] {
+  return text.split(URL_RE).map((part, i) =>
+    i % 2 === 1 ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer">{part}</a>
+    ) : (
+      part
+    ),
+  );
 }
 
 export default function InboxCard({ card, specLabel, onAnswered }: Props) {
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false); // blocks a second click in the same tick, before re-render
   const [error, setError] = useState<string | null>(null);
-  const [remember, setRemember] = useState(true);
+  // Attention answers are one-off instructions; the server never remembers them.
+  const isAttention = card.sourceKey?.includes(":attention:") ?? false;
+  const [remember, setRemember] = useState(!isAttention);
   const [scope, setScope] = useState<MemoryScope>("Repo");
   const [text, setText] = useState("");
   const [showDetails, setShowDetails] = useState(false);
@@ -23,8 +38,8 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await api.answer(card.id, { text: answerText, remember, scope });
-      onAnswered();
+      const res = await api.answer(card.id, { text: answerText, remember, scope });
+      onAnswered(res?.relayError);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -49,7 +64,7 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
           <button type="button" className="link" onClick={() => setShowDetails((v) => !v)}>
             Details
           </button>
-          {showDetails && <p className="card-details">{card.details}</p>}
+          {showDetails && <p className="card-details">{linkify(card.details)}</p>}
         </>
       )}
       <div className="card-options">
@@ -89,15 +104,17 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
           />{" "}
           Remember this
         </label>
-        <select
-          aria-label="Memory scope"
-          value={scope}
-          disabled={busy || !remember}
-          onChange={(e) => setScope(e.target.value as MemoryScope)}
-        >
-          <option value="Repo">Repo</option>
-          <option value="Global">Everywhere</option>
-        </select>
+        {!isAttention && (
+          <select
+            aria-label="Memory scope"
+            value={scope}
+            disabled={busy || !remember}
+            onChange={(e) => setScope(e.target.value as MemoryScope)}
+          >
+            <option value="Repo">Repo</option>
+            <option value="Global">Everywhere</option>
+          </select>
+        )}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
     </article>

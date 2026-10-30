@@ -67,7 +67,7 @@ async function up() {
   const log = fs.openSync(logPath, "w");
   const dll = path.join(repoRoot, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll");
   // The content root must be the project dir so wwwroot (the built console) is found regardless of caller cwd.
-  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`], {
+  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`, "--Fyrd:PersonasDir", path.join(repoRoot, "personas")], {
     cwd: path.join(repoRoot, "runtime/src/Fyrd.Server"),
     detached: true, stdio: ["ignore", log, log], windowsHide: true,
   });

@@ -1,43 +1,38 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "./api";
-import BoardTab, { type BoardSpec } from "./board/BoardTab";
+import BoardTab from "./board/BoardTab";
 import InboxTab from "./inbox/InboxTab";
-import type { FyrdConfig, InboxCard } from "./types";
+import type { Board, FyrdConfig, InboxCard } from "./types";
 
 const POLL_MS = 3000;
 
 export default function App() {
   const [tab, setTab] = useState<"inbox" | "board">("inbox");
   const [cards, setCards] = useState<InboxCard[]>([]);
-  const [specs, setSpecs] = useState<BoardSpec[]>([]);
+  const [board, setBoard] = useState<Board | null>(null);
+  const [relayError, setRelayError] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const specs = board?.specs ?? [];
   const [config, setConfig] = useState<FyrdConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     // Each endpoint degrades on its own: a failure keeps that tab's last data instead of freezing the rest.
-    const [inbox, list, cfg] = await Promise.allSettled([api.getInbox(), api.getSpecs(), api.getConfig()]);
+    const [inbox, bd, cfg] = await Promise.allSettled([api.getInbox(), api.getBoard(), api.getConfig()]);
     if (inbox.status === "fulfilled") setCards(inbox.value);
     if (cfg.status === "fulfilled") setConfig(cfg.value);
-    if (list.status === "fulfilled") {
-      const boardSpecs = await Promise.all(
-        list.value.map(async (entry): Promise<BoardSpec> => {
-          if (!entry.run) return { entry, units: [] };
-          try {
-            return { entry, units: (await api.getSpec(entry.id)).units };
-          } catch {
-            return { entry, units: [] };
-          }
-        }),
-      );
-      setSpecs(boardSpecs);
-    }
-    const failures = [inbox, list, cfg].filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (bd.status === "fulfilled") setBoard(bd.value);
+    const failures = [inbox, bd, cfg].filter((r): r is PromiseRejectedResult => r.status === "rejected");
     if (failures.length === 3) {
       const reason = failures[0].reason;
       setError(reason instanceof Error ? reason.message : String(reason));
     } else {
       setError(null);
     }
+  }, []);
+
+  const onRelayError = useCallback((message?: string) => {
+    if (message) setRelayError(message);
   }, []);
 
   useEffect(() => {
@@ -57,6 +52,9 @@ export default function App() {
   const done = units.filter((u) => u.state === "Done").length;
   const boardLabel = units.length > 0 ? `Board · ${done}/${units.length} done` : "Board";
 
+  const lastError = board?.lastError && board.lastError !== dismissedError ? board.lastError : null;
+  const amber = relayError ?? lastError;
+
   return (
     <main>
       <h1>Fyrd</h1>
@@ -69,10 +67,33 @@ export default function App() {
         </button>
       </div>
       {error && <p className="error" role="alert">Can't reach the Fyrd server: {error}</p>}
+      {board?.signedOut && (
+        <div className="banner banner-signedout" role="alert">
+          <span>Signed out of Claude — run <code>claude auth login</code></span>
+        </div>
+      )}
+      {amber && (
+        <div className="banner" role="alert">
+          <span>{amber}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => (relayError ? setRelayError(null) : setDismissedError(amber))}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {board?.rateLimit && (
+        <div className="chips">
+          <span className="chip">
+            {`Rate limit: ${board.rateLimit.status ?? "unknown"}${board.rateLimit.resetsAt ? ` · resets ${new Date(board.rateLimit.resetsAt).toLocaleString()}` : ""}`}
+          </span>
+        </div>
+      )}
       {tab === "inbox" ? (
-        <InboxTab cards={cards} specs={specs.map((s) => s.entry)} onAnswered={refresh} />
+        <InboxTab cards={cards} specs={specs.map((s) => s.entry)} onAnswered={(r) => {
+          onRelayError(r);
+          void refresh();
+        }} />
       ) : (
-        <BoardTab specs={specs} config={config} onChange={refresh} />
+        <BoardTab specs={specs} config={config} onChange={refresh} onRelayError={onRelayError} />
       )}
     </main>
   );

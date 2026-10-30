@@ -1,3 +1,4 @@
+using Fyrd.Core.Specs;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -112,6 +113,7 @@ public class ApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
+        await SetEnv(c);
         var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
         var req = new HttpRequestMessage(HttpMethod.Post, $"/api/specs/{id}/attack");
         req.Headers.Add("Origin", "http://evil.example");
@@ -135,6 +137,7 @@ public class ApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
+        await SetEnv(c);
         var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
         var req = new HttpRequestMessage(HttpMethod.Post, $"/api/specs/{id}/attack");
         req.Headers.Add("Origin", "http://localhost");
@@ -167,15 +170,16 @@ public class ApiTests
     }
 
     [Fact]
-    public async Task Attack_SetsQueued_ThenSecondAttackIs409()
+    public async Task Attack_SetsBuilding_ThenSecondAttackIs409()
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
+        await SetEnv(c);
         var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
 
         var first = await c.PostAsync($"/api/specs/{id}/attack", null);
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-        Assert.Equal("Queued", (await ReadJson(first)).GetProperty("status").GetString());
+        Assert.Equal("Building", (await ReadJson(first)).GetProperty("status").GetString());
 
         var second = await c.PostAsync($"/api/specs/{id}/attack", null);
         Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
@@ -204,6 +208,50 @@ public class ApiTests
 
         var memory = File.ReadAllText(Path.Combine(f.Home.Paths.MemoryDir, "servicetitan__titan-lens-ossie.md"));
         Assert.Contains("**A:** Unit tests", memory);
+    }
+
+    [Fact]
+    public async Task AnswerEndpoint_RelayFails_StillAnswered_Returns200WithRelayError()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
+        var card = f.Services.GetRequiredService<InboxStore>()
+            .Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        var c = f.CreateClient();
+
+        var r = await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var json = await ReadJson(r);
+        Assert.Equal("boom", json.GetProperty("relayError").GetString());
+        Assert.Equal("a", json.GetProperty("answer").GetProperty("text").GetString());
+        Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox"))).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task PutConfig_SameCap_DoesNotRelay_ChangedCapRelays()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        var specs = f.Services.GetRequiredService<SpecStore>();
+        specs.SetLead(specId, "sess-1");
+        specs.UpdateStatus(specId, SpecStatus.Building);
+        var c = f.CreateClient();
+
+        var same = await c.PutAsJsonAsync("/api/config", new { squadCap = 4 });
+        Assert.Equal(HttpStatusCode.OK, same.StatusCode);
+        Assert.Empty(f.Cloud.Sent);
+
+        var changed = await c.PutAsJsonAsync("/api/config", new { squadCap = 6 });
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        Assert.Contains("\"squadCap\":6", Assert.Single(f.Cloud.Sent).Text);
+
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("down"));
+        var failed = await c.PutAsJsonAsync("/api/config", new { squadCap = 7 });
+        Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
+        Assert.Equal("down", (await ReadJson(failed)).GetProperty("relayError").GetString());
+        Assert.Equal(7, (await ReadJson(await c.GetAsync("/api/config"))).GetProperty("squadCap").GetInt32());
     }
 
     [Fact]
@@ -254,5 +302,173 @@ public class ApiTests
         var r = await f.CreateClient().GetAsync("/api/nope");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.DoesNotContain("<html", await r.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string> SeedSpec(HttpClient c) =>
+        (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
+
+    private static Task<HttpResponseMessage> SetEnv(HttpClient c) =>
+        c.PutAsJsonAsync("/api/config", new { environmentId = "env_abc" });
+
+    [Fact]
+    public async Task Attack_WithoutEnvironment_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = await SeedSpec(c);
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("Set the cloud environment in Settings", await r.Content.ReadAsStringAsync());
+        Assert.Empty(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Attack_Succeeds_ReturnsBuildingRun()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("Building", (await ReadJson(r)).GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Attack_Concurrent_CreatesOneLead()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        var rs = await Task.WhenAll(
+            Task.Run(() => c.PostAsync($"/api/specs/{id}/attack", null)),
+            Task.Run(() => c.PostAsync($"/api/specs/{id}/attack", null)));
+        Assert.Single(rs, r => r.StatusCode == HttpStatusCode.OK);
+        Assert.Single(rs, r => r.StatusCode == HttpStatusCode.Conflict);
+        Assert.Single(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Attack_LaunchFails_Returns502_AndSpecIsDraft()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Cloud.ThrowOnNextCall(new Fyrd.Core.CloudSessions.CloudSessionApiException(500, "secret-body"));
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        var text = await r.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("secret-body", text);
+        Assert.Contains("HTTP 500", text);
+        var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
+        Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Attack_TraversalId_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var r = await c.PostAsync("/api/specs/..%2F..%2Fx/attack", null);
+        Assert.True(r.StatusCode is HttpStatusCode.BadRequest, $"got {(int)r.StatusCode}");
+    }
+
+    [Fact]
+    public async Task Attack_Timeout_Returns502_AndSpecIsDraft()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Cloud.ThrowOnNextCall(new TaskCanceledException("timeout"));
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Contains("Timed out creating the lead session", await r.Content.ReadAsStringAsync());
+        var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
+        Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Board_IncludesUnitsLeadAndPeerLinks()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var specs = f.Services.GetRequiredService<SpecStore>();
+        var run = specs.Create("Board spec", Repo, "# x");
+        specs.SetLead(run.Id, "session_lead");
+        specs.WriteUnits(run.Id, [new Unit("u1", run.Id, "Unit", UnitStage.Implement, UnitState.Running)]);
+        var state = f.Services.GetRequiredService<Fyrd.Core.Orchestration.RunnerState>();
+        state.LastError = "poll failed";
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_lead", "Lead", "running", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-lead"],
+            JsonDocument.Parse("""{"external_metadata":{"context_usage":{"used_tokens":52000,"max_tokens":1000000},"rate_limit_info":{"status":"allowed","resetsAt":1793491200}}}""").RootElement.Clone()));
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_x", "Peer", "idle", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-implementer", "fyrd-unit-u1"], default));
+
+        var board = await ReadJson(await c.GetAsync("/api/board"));
+        Assert.Equal("poll failed", board.GetProperty("lastError").GetString());
+        Assert.False(board.GetProperty("signedOut").GetBoolean());
+        Assert.Equal("allowed", board.GetProperty("rateLimit").GetProperty("status").GetString());
+        Assert.Equal("2026-11-01T00:00:00.0000000+00:00", board.GetProperty("rateLimit").GetProperty("resetsAt").GetString());
+        var spec = Assert.Single(board.GetProperty("specs").EnumerateArray());
+        Assert.Equal(1, spec.GetProperty("units").GetArrayLength());
+        var lead = spec.GetProperty("lead");
+        Assert.Equal("https://claude.ai/code/session_lead", lead.GetProperty("url").GetString());
+        Assert.Equal(52000, lead.GetProperty("contextUsed").GetInt64());
+        Assert.Equal(1000000, lead.GetProperty("contextMax").GetInt64());
+        var peer = Assert.Single(spec.GetProperty("peers").EnumerateArray());
+        Assert.Equal("https://claude.ai/code/session_x", peer.GetProperty("url").GetString());
+        Assert.Equal("implementer", peer.GetProperty("role").GetString());
+        Assert.Equal("u1", peer.GetProperty("unitId").GetString());
+    }
+
+    [Fact]
+    public async Task Board_MalformedSpecStillListed()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await CreateSpec(c, "One");
+        var id = (await ReadJson(await CreateSpec(c, "Two"))).GetProperty("id").GetString()!;
+        File.WriteAllText(Path.Combine(f.Home.Paths.SpecDir(id), "run.json"), "{ not json");
+
+        var r = await c.GetAsync("/api/board");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var specs = (await ReadJson(r)).GetProperty("specs").EnumerateArray().ToList();
+        Assert.Equal(2, specs.Count);
+        Assert.Single(specs, e => e.GetProperty("entry").GetProperty("error").ValueKind == JsonValueKind.String);
+    }
+
+    [Fact]
+    public async Task Board_StrayFolderInSpecsDir_Returns200WithErrorEntry()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await CreateSpec(c, "One");
+        Directory.CreateDirectory(Path.Combine(f.Home.Paths.SpecsDir, "archive"));
+
+        var r = await c.GetAsync("/api/board");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var specs = (await ReadJson(r)).GetProperty("specs").EnumerateArray().ToList();
+        Assert.Equal(2, specs.Count);
+        var bad = Assert.Single(specs, e => e.GetProperty("entry").GetProperty("error").ValueKind == JsonValueKind.String);
+        Assert.Equal("archive", bad.GetProperty("entry").GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task Attack_HttpRequestException_Returns502_AndSpecIsDraft()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("No such host is known"));
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Contains("No such host is known", await r.Content.ReadAsStringAsync());
+        var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
+        Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
     }
 }

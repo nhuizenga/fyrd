@@ -65,4 +65,23 @@ public sealed class ClaudeCredentialsTests : IDisposable
         WriteCreds("tok2");
         Assert.Equal("tok2", creds.Read().AccessToken);
     }
+
+    [Fact]
+    public void Read_CachesOrgUuidUntilClaudeJsonChanges()
+    {
+        WriteCreds("tok");
+        WriteAccount();
+        var creds = new ClaudeCredentials(_home);
+        Assert.Equal("org-123", creds.Read().OrganizationUuid);
+
+        // Same mtime: a changed file is not noticed, proving the value is served from cache.
+        var path = Path.Combine(_home, ".claude.json");
+        var mtime = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, """{"oauthAccount":{"organizationUuid":"org-456"}}""");
+        File.SetLastWriteTimeUtc(path, mtime);
+        Assert.Equal("org-123", creds.Read().OrganizationUuid);
+
+        File.SetLastWriteTimeUtc(path, mtime.AddSeconds(5));
+        Assert.Equal("org-456", creds.Read().OrganizationUuid);
+    }
 }

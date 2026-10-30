@@ -118,4 +118,99 @@ public class SpecStoreTests
         File.WriteAllText(path, File.ReadAllText(path).Replace("Original", "Edited by hand"));
         Assert.Equal("Edited by hand", s.Get(run.Id)!.Title);
     }
+
+    [Fact]
+    public void TryTransition_OnlyFromExpectedStatus()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        Assert.True(s.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued));
+        Assert.False(s.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued));
+        Assert.Equal(SpecStatus.Queued, s.Get(id)!.Status);
+    }
+
+    [Fact]
+    public void TryTransition_Concurrent_OnlyOneWins()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        var wins = 0;
+        Parallel.For(0, 8, _ => { if (s.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued)) Interlocked.Increment(ref wins); });
+        Assert.Equal(1, wins);
+    }
+
+    [Fact]
+    public void SetLead_SetsSessionAndBuilding()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        var run = s.SetLead(id, "session_1");
+        Assert.Equal("session_1", run.SessionId); Assert.Equal(SpecStatus.Building, run.Status);
+        Assert.Equal("session_1", s.Get(id)!.SessionId);
+    }
+
+    [Fact]
+    public void SetCursor_And_Finish_Persist()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        s.SetCursor(id, "evt_9");
+        var done = s.Finish(id, SpecStatus.Failed, "fyrd/x", "boom");
+        var got = s.Get(id)!;
+        Assert.Equal("evt_9", got.LastEventId); Assert.Equal(SpecStatus.Failed, got.Status);
+        Assert.Equal("fyrd/x", got.Branch); Assert.Equal("boom", got.Error); Assert.Equal(done, got);
+    }
+
+    [Fact]
+    public void WriteUnits_IsHandEditableJson()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        s.WriteUnits(id, [new Unit("u1", id, "Do it", UnitStage.Implement, UnitState.Running)]);
+        Assert.Contains("\"stage\": \"Implement\"", File.ReadAllText(Path.Combine(h.Paths.SpecDir(id), "units.json")));
+        Assert.Equal("u1", Assert.Single(s.ListUnits(id)).Id);
+    }
+
+    [Fact]
+    public void ListActive_SkipsDraftDoneAndMalformed()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var draft = s.Create("Draft", Repo, "x").Id;
+        var queued = s.Create("Queued", Repo, "x").Id; s.UpdateStatus(queued, SpecStatus.Queued);
+        var building = s.Create("Building", Repo, "x").Id; s.UpdateStatus(building, SpecStatus.Building);
+        var review = s.Create("Review", Repo, "x").Id; s.UpdateStatus(review, SpecStatus.FinalReview);
+        var done = s.Create("Done", Repo, "x").Id; s.UpdateStatus(done, SpecStatus.ReadyForHandoff);
+        var bad = s.Create("Bad", Repo, "x").Id; File.WriteAllText(Path.Combine(h.Paths.SpecDir(bad), "run.json"), "{ nope");
+        var ids = s.ListActive().Select(r => r.Id).ToHashSet();
+        Assert.Equal(new HashSet<string> { queued, building, review }, ids);
+    }
+
+    [Fact]
+    public void List_InvalidFolderName_IsErrorEntry()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        Directory.CreateDirectory(Path.Combine(h.Paths.SpecsDir, "archive"));
+        var entry = Assert.Single(s.List());
+        Assert.Null(entry.Run);
+        Assert.Equal("archive", entry.Id);
+        Assert.Equal("Not a valid spec folder name", entry.Error);
+    }
+
+    [Fact]
+    public void ConcurrentReadersAndWriters_NeverThrow()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("Race", Repo, "x").Id;
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        void Guard(Action a) { try { for (var i = 0; i < 200; i++) a(); } catch (Exception e) { errors.Enqueue(e); } }
+        var tasks = new[]
+        {
+            Task.Run(() => Guard(() => s.UpdateStatus(id, SpecStatus.Draft))),
+            Task.Run(() => Guard(() => s.WriteUnits(id, [new Unit("a", id, "A", UnitStage.Implement, UnitState.Idle)]))),
+            Task.Run(() => Guard(() => { s.List(); s.Get(id); s.ListUnits(id); s.ReadMarkdown(id); })),
+            Task.Run(() => Guard(() => { s.List(); s.Get(id); s.ListUnits(id); s.ReadMarkdown(id); })),
+        };
+        Task.WaitAll(tasks);
+        Assert.Empty(errors);
+    }
 }
