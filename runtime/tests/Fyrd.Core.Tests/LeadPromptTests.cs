@@ -56,7 +56,7 @@ public class LeadPromptTests
         var text = Shipped();
         foreach (var s in new[] { "get_session", "source_revision", "...", "<spec>", "</spec>",
                      "<remembered-decisions>", "</remembered-decisions>", "lead session id", "user message",
-                     "3 failed rounds", "git diff fyrd/20261030-x...fyrd/20261030-x/<unitId>" })
+                     "3 failed rounds", "never quote or paste a peer's", "git diff fyrd/20261030-x...fyrd/20261030-x/<unitId>" })
             Assert.Contains(s, text);
     }
 
