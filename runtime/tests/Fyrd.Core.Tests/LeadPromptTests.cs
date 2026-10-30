@@ -51,6 +51,27 @@ public class LeadPromptTests
     }
 
     [Fact]
+    public void Build_PinsWaitingModelBranchingAndHardening()
+    {
+        var text = Shipped();
+        foreach (var s in new[] { "get_session", "source_revision", "...", "<spec>", "</spec>",
+                     "<remembered-decisions>", "</remembered-decisions>", "lead session id", "user message",
+                     "3 failed rounds", "git diff fyrd/20261030-x...fyrd/20261030-x/<unitId>" })
+            Assert.Contains(s, text);
+    }
+
+    [Theory]
+    [InlineData("implementer.md")]
+    [InlineData("reviewer.md")]
+    [InlineData("validator.md")]
+    public void PeerPersonas_ForbidFyrdBlocksAndReportToLead(string file)
+    {
+        var text = File.ReadAllText(Path.Combine(Repo(), "personas", file));
+        Assert.Contains("Never emit any `fyrd-", text);
+        Assert.Contains("lead session id", text);
+    }
+
+    [Fact]
     public void Build_InjectsSquadCapAndMemory()
     {
         var text = Shipped(memory: "Prefer tabs over spaces.");
