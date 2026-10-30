@@ -11,7 +11,8 @@ public sealed record CreateSessionRequest(
     string FirstMessage,
     string Model,
     string? AppendSystemPrompt,
-    SessionSource? Source);
+    SessionSource? Source,
+    string? PermissionMode = null);
 
 public sealed record PostTurnSummary(string? StatusCategory, string? NeedsAction, string? RecentAction, string? StatusDetail);
 
