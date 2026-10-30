@@ -12,3 +12,8 @@ public sealed class TempHome : IDisposable
         if (Directory.Exists(Paths.Root)) Directory.Delete(Paths.Root, recursive: true);
     }
 }
+
+public sealed class FixedTime(DateTimeOffset now) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => now;
+}
