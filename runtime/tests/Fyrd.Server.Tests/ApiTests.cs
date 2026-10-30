@@ -1,3 +1,4 @@
+using Fyrd.Core.Specs;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -207,6 +208,50 @@ public class ApiTests
 
         var memory = File.ReadAllText(Path.Combine(f.Home.Paths.MemoryDir, "servicetitan__titan-lens-ossie.md"));
         Assert.Contains("**A:** Unit tests", memory);
+    }
+
+    [Fact]
+    public async Task AnswerEndpoint_RelayFails_StillAnswered_Returns200WithRelayError()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
+        var card = f.Services.GetRequiredService<InboxStore>()
+            .Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        var c = f.CreateClient();
+
+        var r = await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var json = await ReadJson(r);
+        Assert.Equal("boom", json.GetProperty("relayError").GetString());
+        Assert.Equal("a", json.GetProperty("answer").GetProperty("text").GetString());
+        Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox"))).EnumerateArray());
+    }
+
+    [Fact]
+    public async Task PutConfig_SameCap_DoesNotRelay_ChangedCapRelays()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        var specs = f.Services.GetRequiredService<SpecStore>();
+        specs.SetLead(specId, "sess-1");
+        specs.UpdateStatus(specId, SpecStatus.Building);
+        var c = f.CreateClient();
+
+        var same = await c.PutAsJsonAsync("/api/config", new { squadCap = 4 });
+        Assert.Equal(HttpStatusCode.OK, same.StatusCode);
+        Assert.Empty(f.Cloud.Sent);
+
+        var changed = await c.PutAsJsonAsync("/api/config", new { squadCap = 6 });
+        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
+        Assert.Contains("\"squadCap\":6", Assert.Single(f.Cloud.Sent).Text);
+
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("down"));
+        var failed = await c.PutAsJsonAsync("/api/config", new { squadCap = 7 });
+        Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
+        Assert.Equal("down", (await ReadJson(failed)).GetProperty("relayError").GetString());
+        Assert.Equal(7, (await ReadJson(await c.GetAsync("/api/config"))).GetProperty("squadCap").GetInt32());
     }
 
     [Fact]
