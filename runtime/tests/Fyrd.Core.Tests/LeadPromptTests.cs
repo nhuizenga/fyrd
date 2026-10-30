@@ -68,7 +68,7 @@ public class LeadPromptTests
                      "{\"branch\":\"fyrd/20261030-x/integration\"", "Never create a branch named exactly `fyrd/20261030-x`" })
             Assert.Contains(s, text);
         // A bare `fyrd/<specId>` branch can't coexist with `fyrd/<specId>/...` in git.
-        Assert.DoesNotMatch(@"fyrd/20261030-x(?=[\s`]|$)", text.Replace("Never create a branch named exactly `fyrd/20261030-x`", ""));
+        Assert.DoesNotMatch(@"fyrd/20261030-x(?!/)", text.Replace("Never create a branch named exactly `fyrd/20261030-x`", ""));
     }
 
     [Theory]
