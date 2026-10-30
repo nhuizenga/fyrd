@@ -12,6 +12,19 @@ Requires Node, the .NET 10 SDK, and npm.
 
 Runtime state (PID/port, log) lives in `~/.fyrd/run/`; data lives in `~/.fyrd/data/`.
 
+Environment variables:
+
+- `FYRD_HOME` moves the data directory (default `~/.fyrd/data`). It moves data only; `~/.fyrd/run` (PID/port, log) is always shared.
+- `FYRD_NO_BROWSER=1` stops `/fyrd:up` from opening a browser.
+
+## Tests
+
+```
+dotnet test runtime/Fyrd.sln
+cd console && npm test
+node --test "scripts/*.test.mjs"
+```
+
 ## Local install
 
 ```
