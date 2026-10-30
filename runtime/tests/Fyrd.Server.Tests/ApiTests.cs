@@ -320,4 +320,29 @@ public class ApiTests
         var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
         Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
     }
+
+    [Fact]
+    public async Task Attack_TraversalId_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var r = await c.PostAsync("/api/specs/..%2F..%2Fx/attack", null);
+        Assert.True(r.StatusCode is HttpStatusCode.BadRequest, $"got {(int)r.StatusCode}");
+    }
+
+    [Fact]
+    public async Task Attack_Timeout_Returns502_AndSpecIsDraft()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Cloud.ThrowOnNextCall(new TaskCanceledException("timeout"));
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Contains("Timed out creating the lead session", await r.Content.ReadAsStringAsync());
+        var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
+        Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
+    }
 }

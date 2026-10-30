@@ -37,38 +37,35 @@ internal static class SpecEndpoints
             catch (JsonException e) { return Malformed(id, "units.json", e); }
         }));
 
-        group.MapPost("/{id}/attack", async (string id, SpecStore specs, ConfigStore config, PersonasSource personas,
-            IServiceProvider sp, CancellationToken ct) =>
+        group.MapPost("/{id}/attack", (string id, SpecStore specs, ConfigStore config, PersonasSource personas,
+            IServiceProvider sp, CancellationToken ct) => ApiErrors.RunAsync(async () =>
         {
+            var run = specs.Get(id);
+            if (run is null) return Results.Problem($"Spec '{id}' not found.", statusCode: StatusCodes.Status404NotFound);
+            if (config.Load().EnvironmentId is null)
+                return Results.Problem("Set the cloud environment in Settings", statusCode: StatusCodes.Status409Conflict);
+            if (personas.Value is null)
+                return Results.Problem($"Personas not found at {personas.Dir}", statusCode: StatusCodes.Status409Conflict);
+            var launcher = sp.GetRequiredService<SpecLauncher>();
+            if (!specs.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued))
+                return Results.Problem($"Spec '{id}' is not Draft.", statusCode: StatusCodes.Status409Conflict);
             try
             {
-                var run = specs.Get(id);
-                if (run is null) return Results.Problem($"Spec '{id}' not found.", statusCode: StatusCodes.Status404NotFound);
-                if (config.Load().EnvironmentId is null)
-                    return Results.Problem("Set the cloud environment in Settings", statusCode: StatusCodes.Status409Conflict);
-                if (personas.Value is null)
-                    return Results.Problem($"Personas not found at {personas.Dir}", statusCode: StatusCodes.Status409Conflict);
-                if (!specs.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued))
-                    return Results.Problem($"Spec '{id}' is not Draft.", statusCode: StatusCodes.Status409Conflict);
-                try
-                {
-                    return Results.Ok(await sp.GetRequiredService<SpecLauncher>().LaunchAsync(id, ct));
-                }
-                catch (Exception e) when (e is ClaudeAuthMissingException or CloudSessionAuthException)
-                {
-                    return Results.Problem("Signed out of Claude — run `claude auth login`", statusCode: StatusCodes.Status502BadGateway);
-                }
-                catch (CloudSessionApiException e)
-                {
-                    return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
-                }
+                return Results.Ok(await launcher.LaunchAsync(id, ct));
             }
-            catch (KeyNotFoundException e)
+            catch (Exception e) when (e is ClaudeAuthMissingException or CloudSessionAuthException)
             {
-                return Results.Problem(e.Message, statusCode: StatusCodes.Status404NotFound);
+                return Results.Problem("Signed out of Claude — run `claude auth login`", statusCode: StatusCodes.Status502BadGateway);
             }
-            catch (JsonException e) { return Malformed(id, "run.json", e); }
-        });
+            catch (CloudSessionApiException e)
+            {
+                return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
+            catch (TaskCanceledException) when (!ct.IsCancellationRequested)
+            {
+                return Results.Problem("Timed out creating the lead session", statusCode: StatusCodes.Status502BadGateway);
+            }
+        }));
 
         return app;
     }

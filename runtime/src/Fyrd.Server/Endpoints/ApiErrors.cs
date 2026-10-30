@@ -30,4 +30,16 @@ internal static class ApiErrors
             return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest);
         }
     }
+
+    public static async Task<IResult> RunAsync(Func<Task<IResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception e) when (e is CardAlreadyAnsweredException or KeyNotFoundException or JsonException or ArgumentException)
+        {
+            return Run(() => throw e);
+        }
+    }
 }
