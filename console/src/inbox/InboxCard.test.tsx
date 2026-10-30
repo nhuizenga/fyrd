@@ -78,3 +78,21 @@ it("shows the error when answering fails", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Okta" }));
   expect(await screen.findByText("already answered")).toBeInTheDocument();
 });
+
+it("renders details URLs as links and other text as text", async () => {
+  const withDetails = card({ details: "See https://example.com/doc for <b>context</b>", options: ["A"] });
+  render(<InboxCard card={withDetails} specLabel="S" onAnswered={() => {}} />);
+  await userEvent.click(screen.getByRole("button", { name: "Details" }));
+  const link = screen.getByRole("link", { name: "https://example.com/doc" });
+  expect(link).toHaveAttribute("href", "https://example.com/doc");
+  expect(link).toHaveAttribute("rel", "noreferrer");
+  expect(screen.getByText(/<b>context<\/b>/)).toBeInTheDocument();
+});
+
+it("passes the relayError from the answer response to onAnswered", async () => {
+  answer.mockResolvedValue({ ...c, relayError: "lead unreachable" });
+  const onAnswered = vi.fn();
+  render(<InboxCard card={c} specLabel="S" onAnswered={onAnswered} />);
+  await userEvent.click(screen.getByRole("button", { name: "Okta" }));
+  await waitFor(() => expect(onAnswered).toHaveBeenCalledWith("lead unreachable"));
+});

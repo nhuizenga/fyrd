@@ -1,18 +1,16 @@
 import { useState } from "react";
 import * as api from "../api";
 import NewSpecForm from "../specs/NewSpecForm";
-import type { FyrdConfig, SpecListEntry, Unit, UnitStage } from "../types";
-import SquadCapControl from "./SquadCapControl";
+import type { BoardSpec, FyrdConfig, PeerView, UnitStage } from "../types";
+import SettingsPanel from "./SettingsPanel";
 
-export interface BoardSpec {
-  entry: SpecListEntry;
-  units: Unit[];
-}
+export type { BoardSpec };
 
 interface Props {
   specs: BoardSpec[];
   config: FyrdConfig | null;
   onChange: () => void;
+  onRelayError?: (message: string) => void;
 }
 
 const STAGES: UnitStage[] = ["Implement", "Review", "Validate"];
@@ -23,20 +21,43 @@ export function stageMarkers(stage: UnitStage): string {
   return STAGES.map((_, i) => (i < current ? "✓" : i === current ? "●" : "○")).join("");
 }
 
-export default function BoardTab({ specs, config, onChange }: Props) {
+/** 52000 -> "52k", 1000000 -> "1M". */
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+function PeerLinks({ peers }: { peers: PeerView[] }) {
+  return (
+    <span className="peers">
+      {peers.map((p) => (
+        <a key={p.sessionId} href={p.url} target="_blank" rel="noreferrer" title={p.status ?? undefined}>
+          {p.role}
+        </a>
+      ))}
+    </span>
+  );
+}
+
+export default function BoardTab({ specs, config, onChange, onRelayError }: Props) {
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [settings, setSettings] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [attacking, setAttacking] = useState<string | null>(null);
 
   async function attack(id: string) {
     if (attacking) return;
     setAttacking(id);
-    setError(null);
+    setErrors((e) => {
+      const { [id]: _drop, ...rest } = e;
+      return rest;
+    });
     try {
       await api.attack(id);
       onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setErrors((cur) => ({ ...cur, [id]: e instanceof Error ? e.message : String(e) }));
     } finally {
       setAttacking(null);
     }
@@ -46,9 +67,17 @@ export default function BoardTab({ specs, config, onChange }: Props) {
     <div className="board">
       <div className="board-bar">
         <button type="button" onClick={() => setCreating(true)}>New spec</button>
-        {config && <SquadCapControl cap={config.squadCap} onSaved={onChange} />}
+        <button type="button" aria-expanded={settings} onClick={() => setSettings((v) => !v)}>Settings</button>
       </div>
-      {error && <p className="error" role="alert">{error}</p>}
+      {settings && config && (
+        <SettingsPanel
+          config={config}
+          onSaved={(relayError) => {
+            if (relayError) onRelayError?.(relayError);
+            onChange();
+          }}
+        />
+      )}
       {creating && (
         <NewSpecForm
           onCancel={() => setCreating(false)}
@@ -58,19 +87,42 @@ export default function BoardTab({ specs, config, onChange }: Props) {
           }}
         />
       )}
-      {specs.map(({ entry, units }) =>
-        entry.run ? (
+      {specs.map(({ entry, units, lead, peers }) => {
+        if (!entry.run) {
+          return (
+            <section key={entry.id} className="spec spec-error">
+              {entry.id}: {entry.error}
+            </section>
+          );
+        }
+        const run = entry.run;
+        const showContext = lead && lead.contextUsed != null && lead.contextMax;
+        return (
           <section key={entry.id} className="spec">
             <header>
-              <h3>{entry.run.title}</h3>
-              <span className="repo">{entry.run.repo}</span>
-              <span className="status">{entry.run.status}</span>
-              {entry.run.status === "Draft" && (
+              <h3>{run.title}</h3>
+              <span className="repo">{run.repo}</span>
+              <span className="status">{run.status}</span>
+              {lead && (
+                <a className="lead-link" href={lead.url} target="_blank" rel="noreferrer">
+                  {`Lead${lead.status ? ` · ${lead.status}` : ""}`}
+                </a>
+              )}
+              {run.branch && <span className="branch">{run.branch}</span>}
+              {run.status === "Draft" && (
                 <button type="button" disabled={attacking !== null} onClick={() => attack(entry.id)}>
                   Attack
                 </button>
               )}
             </header>
+            {errors[entry.id] && <p className="error" role="alert">{errors[entry.id]}</p>}
+            {run.error && <p className="error">{run.error}</p>}
+            {showContext && (
+              <div className="context">
+                <progress value={lead.contextUsed!} max={lead.contextMax!} aria-label="Lead context usage" />
+                <span>{`${formatTokens(lead.contextUsed!)} / ${formatTokens(lead.contextMax!)} tokens`}</span>
+              </div>
+            )}
             <ul className="units">
               {units.map((u) => (
                 <li key={u.id}>
@@ -79,16 +131,13 @@ export default function BoardTab({ specs, config, onChange }: Props) {
                     {stageMarkers(u.stage)}
                   </span>
                   {u.state === "WaitingOnOwner" && <span className="waiting">waiting on you</span>}
+                  <PeerLinks peers={peers.filter((p) => p.unitId === u.id)} />
                 </li>
               ))}
             </ul>
           </section>
-        ) : (
-          <section key={entry.id} className="spec spec-error">
-            {entry.id}: {entry.error}
-          </section>
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }

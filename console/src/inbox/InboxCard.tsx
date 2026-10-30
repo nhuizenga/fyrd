@@ -1,11 +1,24 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import * as api from "../api";
 import type { InboxCard as Card, MemoryScope } from "../types";
 
 interface Props {
   card: Card;
   specLabel: string;
-  onAnswered: () => void;
+  onAnswered: (relayError?: string) => void;
+}
+
+const URL_RE = /(https?:\/\/[^\s<>"']+)/g;
+
+/** Splits text into plain strings and http(s) links; never builds HTML. */
+function linkify(text: string): ReactNode[] {
+  return text.split(URL_RE).map((part, i) =>
+    i % 2 === 1 ? (
+      <a key={i} href={part} target="_blank" rel="noreferrer">{part}</a>
+    ) : (
+      part
+    ),
+  );
 }
 
 export default function InboxCard({ card, specLabel, onAnswered }: Props) {
@@ -23,8 +36,8 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await api.answer(card.id, { text: answerText, remember, scope });
-      onAnswered();
+      const res = await api.answer(card.id, { text: answerText, remember, scope });
+      onAnswered(res?.relayError);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -49,7 +62,7 @@ export default function InboxCard({ card, specLabel, onAnswered }: Props) {
           <button type="button" className="link" onClick={() => setShowDetails((v) => !v)}>
             Details
           </button>
-          {showDetails && <p className="card-details">{card.details}</p>}
+          {showDetails && <p className="card-details">{linkify(card.details)}</p>}
         </>
       )}
       <div className="card-options">

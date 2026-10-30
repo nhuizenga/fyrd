@@ -64,6 +64,7 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapSpecs();
 app.MapInbox();
 app.MapConfig();
+app.MapBoard();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 

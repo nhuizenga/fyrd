@@ -13,6 +13,8 @@ export interface SpecRun {
   createdAt: string;
   sessionId?: string | null;
   costCents: number;
+  branch?: string | null;
+  error?: string | null;
 }
 
 export interface Unit {
@@ -52,6 +54,43 @@ export interface InboxCard {
 
 export interface FyrdConfig {
   squadCap: number;
+  environmentId: string | null;
+  leadModel: string;
+  peerModel: string;
+}
+
+/** Mutating responses may carry a relay failure alongside the saved value. */
+export type WithRelay<T> = T & { relayError?: string };
+
+export interface LeadView {
+  sessionId: string;
+  url: string;
+  status: string | null;
+  contextUsed: number | null;
+  contextMax: number | null;
+}
+
+export interface PeerView {
+  sessionId: string;
+  url: string;
+  role: string;
+  unitId: string | null;
+  status: string | null;
+}
+
+export interface BoardSpec {
+  entry: SpecListEntry;
+  units: Unit[];
+  lead: LeadView | null;
+  peers: PeerView[];
+}
+
+export interface Board {
+  specs: BoardSpec[];
+  signedOut: boolean;
+  lastError: string | null;
+  lastPollAt: string | null;
+  rateLimit: { status: string | null; resetsAt: string | null } | null;
 }
 
 export interface SpecDetail {

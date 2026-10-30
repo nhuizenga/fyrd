@@ -2,15 +2,17 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
-import { entry, unit } from "../test/fixtures";
+import { boardSpec, config, entry, unit } from "../test/fixtures";
+import type { BoardSpec } from "../types";
 import BoardTab from "./BoardTab";
 
 vi.mock("../api");
 
 beforeEach(() => vi.resetAllMocks());
 
-const renderBoard = (specs: Parameters<typeof BoardTab>[0]["specs"], onChange = () => {}) =>
-  render(<BoardTab specs={specs} config={{ squadCap: 3 }} onChange={onChange} />);
+const renderBoard = (
+  specs: Array<Partial<BoardSpec>>, onChange = () => {}, onRelayError: (m: string) => void = () => {},
+) => render(<BoardTab specs={specs.map((s) => boardSpec(s))} config={config()} onChange={onChange} onRelayError={onRelayError} />);
 
 it("renders stage markers per unit", () => {
   renderBoard([{
@@ -47,15 +49,19 @@ it("attack button only on Draft specs and calls attack(id)", async () => {
   await waitFor(() => expect(onChange).toHaveBeenCalled());
 });
 
-it("squad cap save puts config and shows server error on 400", async () => {
+it("squad cap lives in Settings: save puts config and shows server error on 400", async () => {
   vi.mocked(api.putConfig).mockRejectedValue(new Error("squadCap must be 1-8"));
   renderBoard([]);
+  expect(screen.queryByLabelText("Squad cap")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Settings" }));
   const input = screen.getByLabelText("Squad cap");
   expect(input).toHaveValue(3);
   await userEvent.clear(input);
   await userEvent.type(input, "9");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
-  expect(api.putConfig).toHaveBeenCalledWith({ squadCap: 9 });
+  expect(api.putConfig).toHaveBeenCalledWith({
+    squadCap: 9, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5",
+  });
   expect(await screen.findByText("squadCap must be 1-8")).toBeInTheDocument();
 });
 
@@ -63,4 +69,46 @@ it("New spec button opens the form", async () => {
   renderBoard([]);
   await userEvent.click(screen.getByRole("button", { name: "New spec" }));
   expect(screen.getByLabelText("Repo")).toHaveValue("servicetitan/titan-lens-ossie");
+});
+
+it("shows attack 409 detail inline", async () => {
+  vi.mocked(api.attack).mockRejectedValue(new Error("Set the cloud environment in Settings"));
+  renderBoard([{ entry: entry({ id: "d1", status: "Draft" }) }]);
+  await userEvent.click(screen.getByRole("button", { name: "Attack" }));
+  expect(await screen.findByText("Set the cloud environment in Settings")).toBeInTheDocument();
+});
+
+it("renders peer session links per unit, by role", () => {
+  renderBoard([{
+    units: [unit({ id: "u1", title: "One" }), unit({ id: "u2", title: "Two" })],
+    peers: [
+      { sessionId: "session_a", url: "https://claude.ai/code/session_a", role: "implementer", unitId: "u1", status: "running" },
+      { sessionId: "session_b", url: "https://claude.ai/code/session_b", role: "reviewer", unitId: "u1", status: "idle" },
+      { sessionId: "session_c", url: "https://claude.ai/code/session_c", role: "validator", unitId: "u2", status: "idle" },
+    ],
+  }]);
+  const impl = screen.getByRole("link", { name: "implementer" });
+  expect(impl).toHaveAttribute("href", "https://claude.ai/code/session_a");
+  expect(impl).toHaveAttribute("target", "_blank");
+  expect(impl).toHaveAttribute("rel", "noreferrer");
+  expect(screen.getByRole("link", { name: "reviewer" })).toHaveAttribute("href", "https://claude.ai/code/session_b");
+  expect(screen.getByText("One").closest("li")).not.toHaveTextContent("validator");
+  expect(screen.getByText("Two").closest("li")).toHaveTextContent("validator");
+});
+
+it("renders lead link, a context bar and the branch", () => {
+  renderBoard([{
+    entry: entry({ status: "ReadyForHandoff", branch: "fyrd/export" }),
+    lead: { sessionId: "session_l", url: "https://claude.ai/code/session_l", status: "running", contextUsed: 52000, contextMax: 1000000 },
+  }]);
+  expect(screen.getByRole("link", { name: /Lead/ })).toHaveAttribute("href", "https://claude.ai/code/session_l");
+  expect(screen.getByText("52k / 1M tokens")).toBeInTheDocument();
+  expect(screen.getByRole("progressbar", { name: "Lead context usage" })).toHaveAttribute("value", "52000");
+  expect(screen.getByText("fyrd/export")).toBeInTheDocument();
+});
+
+it("renders untrusted titles as text, not HTML", () => {
+  renderBoard([{ entry: entry({ title: "<img src=x onerror=alert(1)>" }) }]);
+  expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
+  expect(document.querySelector("img")).toBeNull();
 });

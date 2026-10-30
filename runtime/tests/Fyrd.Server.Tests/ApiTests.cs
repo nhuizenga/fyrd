@@ -390,4 +390,53 @@ public class ApiTests
         var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
         Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
     }
+
+    [Fact]
+    public async Task Board_IncludesUnitsLeadAndPeerLinks()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var specs = f.Services.GetRequiredService<SpecStore>();
+        var run = specs.Create("Board spec", Repo, "# x");
+        specs.SetLead(run.Id, "session_lead");
+        specs.WriteUnits(run.Id, [new Unit("u1", run.Id, "Unit", UnitStage.Implement, UnitState.Running)]);
+        var state = f.Services.GetRequiredService<Fyrd.Core.Orchestration.RunnerState>();
+        state.LastError = "poll failed";
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_lead", "Lead", "running", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-lead"],
+            JsonDocument.Parse("""{"external_metadata":{"context_usage":{"used_tokens":52000,"max_tokens":1000000},"rate_limit_info":{"status":"allowed","resetsAt":"2026-10-29T12:00:00Z"}}}""").RootElement.Clone()));
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_x", "Peer", "idle", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-implementer", "fyrd-unit-u1"], default));
+
+        var board = await ReadJson(await c.GetAsync("/api/board"));
+        Assert.Equal("poll failed", board.GetProperty("lastError").GetString());
+        Assert.False(board.GetProperty("signedOut").GetBoolean());
+        Assert.Equal("allowed", board.GetProperty("rateLimit").GetProperty("status").GetString());
+        var spec = Assert.Single(board.GetProperty("specs").EnumerateArray());
+        Assert.Equal(1, spec.GetProperty("units").GetArrayLength());
+        var lead = spec.GetProperty("lead");
+        Assert.Equal("https://claude.ai/code/session_lead", lead.GetProperty("url").GetString());
+        Assert.Equal(52000, lead.GetProperty("contextUsed").GetInt64());
+        Assert.Equal(1000000, lead.GetProperty("contextMax").GetInt64());
+        var peer = Assert.Single(spec.GetProperty("peers").EnumerateArray());
+        Assert.Equal("https://claude.ai/code/session_x", peer.GetProperty("url").GetString());
+        Assert.Equal("implementer", peer.GetProperty("role").GetString());
+        Assert.Equal("u1", peer.GetProperty("unitId").GetString());
+    }
+
+    [Fact]
+    public async Task Board_MalformedSpecStillListed()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await CreateSpec(c, "One");
+        var id = (await ReadJson(await CreateSpec(c, "Two"))).GetProperty("id").GetString()!;
+        File.WriteAllText(Path.Combine(f.Home.Paths.SpecDir(id), "run.json"), "{ not json");
+
+        var r = await c.GetAsync("/api/board");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var specs = (await ReadJson(r)).GetProperty("specs").EnumerateArray().ToList();
+        Assert.Equal(2, specs.Count);
+        Assert.Single(specs, e => e.GetProperty("entry").GetProperty("error").ValueKind == JsonValueKind.String);
+    }
 }
