@@ -1,0 +1,142 @@
+using Fyrd.Core.Specs;
+namespace Fyrd.Core.Tests;
+
+public class InboxStoreTests
+{
+    private const string Repo = "servicetitan/titan-lens-ossie";
+    private const string Question = "What kind of test coverage do you expect?";
+    private static readonly DateTimeOffset T = new(2026, 10, 29, 12, 0, 0, TimeSpan.Zero);
+
+    private static (InboxStore Inbox, TempHome Home, string SpecId) Make()
+    {
+        var home = new TempHome();
+        var time = new FixedTime(T);
+        var specs = new SpecStore(home.Paths, time);
+        var id = specs.Create("Add export button", Repo, "x").Id;
+        return (new InboxStore(home.Paths, specs, new DecisionMemory(home.Paths), time), home, id);
+    }
+
+    private static InboxCard AddCard(InboxStore s, string specId) =>
+        s.Add(specId, "u1", Question, ["Unit", "E2E"], "Unit", "cheap", "details", true);
+
+    private static string RepoFile(TempHome h) =>
+        Path.Combine(h.Paths.MemoryDir, "servicetitan__titan-lens-ossie.md");
+
+    private static int QuestionCount(string text) => text.Split("**Q:**").Length - 1;
+
+    [Fact]
+    public void Add_ThenListOpen_ReturnsCard()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var added = AddCard(s, spec);
+
+        var open = Assert.Single(s.ListOpen());
+        Assert.Equal(added.Id, open.Id);
+        Assert.Equal(12, open.Id.Length);
+        Assert.Equal(["Unit", "E2E"], open.Options);
+        Assert.Equal("Unit", open.Recommendation);
+        Assert.Equal("u1", open.UnitId);
+        Assert.True(open.AllowFreeText);
+    }
+
+    [Fact]
+    public void Answer_RemembersByDefault_InRepoFile()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+
+        var answered = s.Answer(card.Id, "Unit tests only");
+
+        Assert.Equal("Unit tests only", answered.Answer!.Text);
+        var text = File.ReadAllText(RepoFile(home));
+        Assert.Contains("**Q:** " + Question, text);
+        Assert.Contains("**A:** Unit tests only", text);
+        Assert.False(File.Exists(Path.Combine(home.Paths.MemoryDir, "global.md")));
+    }
+
+    [Fact]
+    public void Answer_GlobalScope_WritesGlobalFile()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+
+        s.Answer(card.Id, "Unit tests only", scope: MemoryScope.Global);
+
+        Assert.Contains("**A:** Unit tests only", File.ReadAllText(Path.Combine(home.Paths.MemoryDir, "global.md")));
+        Assert.False(File.Exists(RepoFile(home)));
+    }
+
+    [Fact]
+    public void Answer_RememberFalse_WritesNoMemory()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+
+        s.Answer(card.Id, "Unit tests only", remember: false);
+
+        Assert.Empty(Directory.GetFiles(home.Paths.MemoryDir));
+    }
+
+    [Fact]
+    public void Answer_RemovesFromListOpen()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+        s.Answer(card.Id, "x");
+        Assert.Empty(s.ListOpen());
+    }
+
+    [Fact]
+    public void Answer_Twice_Throws_AndRecordsMemoryOnce()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+        s.Answer(card.Id, "first");
+
+        Assert.Throws<CardAlreadyAnsweredException>(() => s.Answer(card.Id, "second"));
+
+        var text = File.ReadAllText(RepoFile(home));
+        Assert.Equal(1, QuestionCount(text));
+        Assert.DoesNotContain("second", text);
+    }
+
+    [Fact]
+    public void Answer_Concurrent_OnlyOneWins()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+        var wins = 0;
+        Parallel.For(0, 8, i =>
+        {
+            try { s.Answer(card.Id, "a" + i); Interlocked.Increment(ref wins); }
+            catch (CardAlreadyAnsweredException) { }
+        });
+        Assert.Equal(1, wins);
+        Assert.Equal(1, QuestionCount(File.ReadAllText(RepoFile(home))));
+    }
+
+    [Fact]
+    public void Answer_UnknownCard_ThrowsKeyNotFound()
+    {
+        var (s, home, _) = Make();
+        using var _h = home;
+        Assert.Throws<KeyNotFoundException>(() => s.Answer("abcdef123456", "x"));
+    }
+
+    [Fact]
+    public void Answer_BadInput_ThrowsArgument()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var card = AddCard(s, spec);
+        Assert.Throws<ArgumentException>(() => s.Answer(card.Id, "  "));
+        Assert.Throws<ArgumentException>(() => s.Answer("../x", "ok"));
+    }
+}
