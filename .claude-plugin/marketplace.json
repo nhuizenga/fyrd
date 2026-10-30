@@ -7,7 +7,7 @@
     {
       "name": "fyrd",
       "source": "./",
-      "description": "TODO: one-line description of what fyrd does"
+      "description": "Build software with an army of specialized agents, managed from a one-click console."
     }
   ]
 }
