@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Fyrd.Core;
 using Fyrd.Core.Config;
 using Fyrd.Core.Specs;
+using Fyrd.Server;
 using Fyrd.Server.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,6 +23,8 @@ builder.Services.AddSingleton<DecisionMemory>();
 builder.Services.AddSingleton<InboxStore>();
 
 var app = builder.Build();
+
+app.UseSameOriginApiWrites();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

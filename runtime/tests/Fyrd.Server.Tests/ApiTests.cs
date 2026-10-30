@@ -83,6 +83,74 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task Attack_MalformedRunJson_Returns422()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
+        File.WriteAllText(Path.Combine(f.Home.Paths.SpecDir(id), "run.json"), "{ nope");
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetInbox_WithCorruptCard_Returns200WithGoodCard()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var specId = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
+        var inbox = f.Services.GetRequiredService<InboxStore>();
+        var good = inbox.Add(specId, null, "Which?", ["a", "b"], null, null, null, true);
+        File.WriteAllText(Path.Combine(f.Home.Paths.InboxDir, "badbadbadbad.json"), "{ nope");
+        var r = await c.GetAsync("/api/inbox");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(good.Id, Assert.Single((await ReadJson(r)).EnumerateArray()).GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task Post_WithForeignOrigin_Returns403()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/api/specs/{id}/attack");
+        req.Headers.Add("Origin", "http://evil.example");
+        var r = await c.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+        Assert.Equal("Draft", (await ReadJson(await c.GetAsync($"/api/specs/{id}"))).GetProperty("run").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Post_WithForeignReferer_Returns403()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/api/specs/x/attack");
+        req.Headers.Add("Referer", "http://evil.example/page");
+        Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Post_WithMatchingOrigin_IsAllowed()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = (await ReadJson(await CreateSpec(c))).GetProperty("id").GetString()!;
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/api/specs/{id}/attack");
+        req.Headers.Add("Origin", "http://localhost");
+        Assert.Equal(HttpStatusCode.OK, (await c.SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Request_WithForeignHost_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var req = new HttpRequestMessage(HttpMethod.Get, "/api/specs");
+        req.Headers.Host = "evil.example";
+        Assert.Equal(HttpStatusCode.BadRequest, (await f.CreateClient().SendAsync(req)).StatusCode);
+    }
+
+    [Fact]
     public async Task GetSpec_Unknown_Returns404()
     {
         using var f = new FyrdFactory();
