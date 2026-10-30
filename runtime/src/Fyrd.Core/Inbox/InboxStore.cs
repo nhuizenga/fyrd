@@ -9,12 +9,13 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
     private readonly object _gate = new();
 
     public InboxCard Add(string specId, string? unitId, string question, IReadOnlyList<string> options,
-        string? recommendation, string? reason, string? details, bool allowFreeText)
+        string? recommendation, string? reason, string? details, bool allowFreeText,
+        string? sourceKey = null)
     {
         if (string.IsNullOrWhiteSpace(question)) throw new ArgumentException("Question is required.", nameof(question));
         if (specs.Get(specId) is null) throw new KeyNotFoundException($"Spec '{specId}' not found.");
         var card = new InboxCard(Guid.NewGuid().ToString("N")[..12], specId, unitId, question, options,
-            recommendation, reason, details, allowFreeText, time.GetUtcNow());
+            recommendation, reason, details, allowFreeText, time.GetUtcNow(), SourceKey: sourceKey);
         lock (_gate) Write(card);
         return card;
     }
@@ -29,6 +30,20 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
                 .Where(c => c.Answer is null)
                 .OrderBy(c => c.CreatedAt)
                 .ToList();
+        }
+    }
+
+    public IReadOnlyList<InboxCard> ListOpenFor(string specId) =>
+        ListOpen().Where(c => c.SpecId == specId).ToList();
+
+    /// <summary>True for open or answered cards carrying this source key.</summary>
+    public bool HasSourceKey(string sourceKey)
+    {
+        lock (_gate)
+        {
+            return Directory.EnumerateFiles(paths.InboxDir, "*.json")
+                .Select(ReadOrSkip).OfType<InboxCard>()
+                .Any(c => c.SourceKey == sourceKey);
         }
     }
 
