@@ -24,7 +24,7 @@ public sealed record ParsedBlocks(
 public static partial class Protocol
 {
     [GeneratedRegex(
-        @"^[ \t]*(?<fence>`{3,})(?<name>fyrd-[a-z]+)[ \t]*\r?\n(?<body>.*?)\r?\n[ \t]*\k<fence>[ \t]*$",
+        @"^[ \t]*(?<fence>`{3,})(?<name>fyrd-[a-z]+)[ \t]*\r?\n(?<body>.*?)\r?\n[ \t]*\k<fence>[ \t]*\r?$",
         RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex FenceRegex();
 

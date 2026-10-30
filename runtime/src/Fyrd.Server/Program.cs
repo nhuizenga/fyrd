@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using Fyrd.Core;
 using Fyrd.Core.Config;
+using Fyrd.Core.CloudSessions;
+using Fyrd.Core.Orchestration;
 using Fyrd.Core.Specs;
 using Fyrd.Server;
 using Fyrd.Server.Endpoints;
@@ -21,6 +23,11 @@ builder.Services.AddSingleton<ConfigStore>();
 builder.Services.AddSingleton<SpecStore>();
 builder.Services.AddSingleton<DecisionMemory>();
 builder.Services.AddSingleton<InboxStore>();
+builder.Services.AddSingleton<ClaudeCredentials>();
+builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient(), _.GetRequiredService<ClaudeCredentials>()));
+builder.Services.AddSingleton<RunnerState>();
+builder.Services.AddSingleton<SpecRunner>();
+builder.Services.AddHostedService<SpecRunnerService>();
 
 var app = builder.Build();
 

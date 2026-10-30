@@ -108,6 +108,17 @@ public class ProtocolTests
     }
 
     [Fact]
+    public void Parse_CrlfText_ParsesAllBlocks()
+    {
+        var text = F + "fyrd-units\r\n[{\"id\":\"a\",\"title\":\"A\"}]\r\n" + F + "\r\n\r\n"
+            + F + "fyrd-question\r\n{\"id\":\"q1\",\"question\":\"Why?\"}\r\n" + F;
+        var r = Protocol.Parse(text);
+        Assert.Single(r.Units!);
+        Assert.Single(r.Questions);
+        Assert.Empty(r.Warnings);
+    }
+
+    [Fact]
     public void FormatConfig_EmitsSquadCap()
     {
         var s = Protocol.FormatConfig(3);

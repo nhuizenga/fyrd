@@ -1,0 +1,250 @@
+using Fyrd.Core.CloudSessions;
+using Fyrd.Core.Orchestration;
+using Fyrd.Core.Specs;
+
+namespace Fyrd.Core.Tests;
+
+public class SpecRunnerTests
+{
+    private const string F = "```";
+    private static readonly DateTimeOffset T = new(2026, 10, 29, 12, 0, 0, TimeSpan.Zero);
+
+    private sealed class Rig : IDisposable
+    {
+        public TempHome Home = new();
+        public FixedTime Time = new(T);
+        public SpecStore Specs;
+        public InboxStore Inbox;
+        public FakeCloudSessions Cloud = new();
+        public RunnerState State = new();
+        public SpecRunner Runner;
+
+        public Rig()
+        {
+            Specs = new SpecStore(Home.Paths, Time);
+            Inbox = new InboxStore(Home.Paths, Specs, new DecisionMemory(Home.Paths), Time);
+            Runner = NewRunner();
+        }
+
+        public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time);
+
+        public string NewSpec(string title = "Add export button", string lead = "lead1")
+        {
+            var id = Specs.Create(title, "owner/repo", "x").Id;
+            Specs.SetLead(id, lead);
+            Cloud.SetSession(FakeCloudSessions.Session(lead, "running"));
+            return id;
+        }
+
+        public void Dispose() => Home.Dispose();
+    }
+
+    private static string Units(string json) => F + "fyrd-units\n" + json + "\n" + F;
+    private static string Question(string json) => F + "fyrd-question\n" + json + "\n" + F;
+
+    [Fact]
+    public async Task Poll_UnitsBlock_WritesUnits()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Units("[{\"id\":\"a\",\"title\":\"A\"},{\"id\":\"b\",\"title\":\"B\"}]"));
+        await r.Runner.PollOnceAsync(default);
+        var units = r.Specs.ListUnits(id);
+        Assert.Equal(["a", "b"], units.Select(u => u.Id));
+        Assert.All(units, u => Assert.Equal(UnitStage.Implement, u.Stage));
+        Assert.Equal("e1", r.Specs.Get(id)!.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_QuestionBlock_CreatesCardWithSourceKey()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1",
+            Question("{\"id\":\"q-color\",\"question\":\"Which colour?\",\"options\":[\"red\",\"blue\"],\"unit\":\"a\"}"));
+        await r.Runner.PollOnceAsync(default);
+        var card = Assert.Single(r.Inbox.ListOpenFor(id));
+        Assert.Equal(id + ":q-color", card.SourceKey);
+        Assert.True(card.AllowFreeText);
+        Assert.Equal("a", card.UnitId);
+        Assert.Equal(["red", "blue"], card.Options);
+    }
+
+    [Fact]
+    public async Task Poll_SameQuestionTwice_OneCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = Question("{\"id\":\"q-color\",\"question\":\"Which colour?\"}");
+        r.Cloud.AddAssistantEvent("lead1", "e1", q);
+        await r.Runner.PollOnceAsync(default);
+        // The same question is asked again in a later event.
+        r.Cloud.AddAssistantEvent("lead1", "e2", q);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Single(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_ResumesFromStoredCursor()
+    {
+        using var r = new Rig();
+        r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", "hello");
+        await r.Runner.PollOnceAsync(default);
+        r.Cloud.EventAfterIds.Clear();
+        await r.NewRunner().PollOnceAsync(default);
+        Assert.Equal("e1", Assert.Single(r.Cloud.EventAfterIds));
+    }
+
+    [Fact]
+    public async Task Poll_FollowsAllPages()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.PageSize = 1;
+        r.Cloud.AddAssistantEvent("lead1", "e1", Units("[{\"id\":\"a\",\"title\":\"A\"}]"));
+        r.Cloud.AddAssistantEvent("lead1", "e2", Question("{\"id\":\"q1\",\"question\":\"Why?\"}"));
+        r.Cloud.AddAssistantEvent("lead1", "e3", "tail");
+        await r.Runner.PollOnceAsync(default);
+        Assert.Single(r.Specs.ListUnits(id));
+        Assert.Single(r.Inbox.ListOpenFor(id));
+        Assert.Equal("e3", r.Specs.Get(id)!.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_PeerSessions_SetStageAndState()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1",
+            Units("[{\"id\":\"a\",\"title\":\"A\"},{\"id\":\"b\",\"title\":\"B\"}]") + "\n" +
+            Question("{\"id\":\"qb\",\"question\":\"Pick?\",\"unit\":\"b\"}"));
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("p1", "idle", ["fyrd-role-implementer", "fyrd-unit-a"], T),
+            FakeCloudSessions.Session("p2", "running", ["fyrd-role-implementer", "fyrd-unit-b"], T),
+            FakeCloudSessions.Session("p3", "running", ["fyrd-role-reviewer", "fyrd-unit-b"], T.AddMinutes(5)));
+        await r.Runner.PollOnceAsync(default);
+        var units = r.Specs.ListUnits(id).ToDictionary(u => u.Id);
+        Assert.Equal(UnitStage.Implement, units["a"].Stage);
+        Assert.Equal(UnitState.Idle, units["a"].State);
+        Assert.Equal(UnitStage.Review, units["b"].Stage);
+        Assert.Equal(UnitState.WaitingOnOwner, units["b"].State);
+        Assert.True(r.State.Sessions.ContainsKey("p3"));
+        Assert.True(r.State.Sessions.ContainsKey("lead1"));
+    }
+
+    [Fact]
+    public async Task Poll_PeerWorking_NoCard_IsRunning()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Units("[{\"id\":\"b\",\"title\":\"B\"}]"));
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("p3", "running", ["fyrd-role-validator", "fyrd-unit-b"], T));
+        await r.Runner.PollOnceAsync(default);
+        var u = Assert.Single(r.Specs.ListUnits(id));
+        Assert.Equal(UnitStage.Validate, u.Stage);
+        Assert.Equal(UnitState.Running, u.State);
+    }
+
+    [Fact]
+    public async Task Poll_UnitDone_StaysDone()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Units("[{\"id\":\"a\",\"title\":\"A\",\"done\":true}]"));
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("p1", "running", ["fyrd-role-implementer", "fyrd-unit-a"], T));
+        await r.Runner.PollOnceAsync(default);
+        var u = Assert.Single(r.Specs.ListUnits(id));
+        Assert.Equal(UnitStage.Done, u.Stage);
+        Assert.Equal(UnitState.Done, u.State);
+    }
+
+    [Fact]
+    public async Task Poll_DoneBlock_SetsReadyForHandoffAndBranch()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", F + "fyrd-done\n{\"branch\":\"fyrd/export\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.ReadyForHandoff, run.Status);
+        Assert.Equal("fyrd/export", run.Branch);
+        Assert.Equal("e1", run.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_FailedBlock_SetsFailed()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", F + "fyrd-failed\n{\"reason\":\"tests broke\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Failed, run.Status);
+        Assert.Equal("tests broke", run.Error);
+    }
+
+    [Fact]
+    public async Task Poll_NeedsActionWithoutQuestion_CreatesAttentionCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", "I need to run a command.");
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Approve Bash: rm -rf x"));
+        await r.Runner.PollOnceAsync(default);
+        await r.Runner.PollOnceAsync(default);
+        var card = Assert.Single(r.Inbox.ListOpenFor(id));
+        Assert.Equal("Lead needs attention: Approve Bash: rm -rf x", card.Question);
+        Assert.Equal(id + ":attention:e1", card.SourceKey);
+        Assert.Equal("https://claude.ai/code/lead1", card.Details);
+        Assert.True(card.AllowFreeText);
+    }
+
+    [Fact]
+    public async Task Poll_NeedsActionWithQuestion_NoAttentionCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Question("{\"id\":\"q1\",\"question\":\"Why?\"}"));
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Waiting for input"));
+        await r.Runner.PollOnceAsync(default);
+        var card = Assert.Single(r.Inbox.ListOpenFor(id));
+        Assert.Equal(id + ":q1", card.SourceKey);
+    }
+
+    [Fact]
+    public async Task Poll_AuthFailure_SetsSignedOut_ThenRecovers()
+    {
+        using var r = new Rig();
+        r.NewSpec();
+        r.Cloud.ThrowOnNextCall(new CloudSessionAuthException(401));
+        await r.Runner.PollOnceAsync(default);
+        Assert.True(r.State.SignedOut);
+        await r.Runner.PollOnceAsync(default);
+        Assert.False(r.State.SignedOut);
+        Assert.NotNull(r.State.LastPollAt);
+
+        r.Cloud.ThrowOnNextCall(new ClaudeAuthMissingException());
+        await r.Runner.PollOnceAsync(default);
+        Assert.True(r.State.SignedOut);
+    }
+
+    [Fact]
+    public async Task Poll_OneSpecThrows_OthersStillPolled()
+    {
+        using var r = new Rig();
+        var bad = r.NewSpec("Bad spec", "lead-bad");
+        var good = r.NewSpec("Good spec", "lead-good");
+        r.Cloud.AddAssistantEvent("lead-bad", "b1", "x");
+        r.Cloud.AddAssistantEvent("lead-good", "g1", Question("{\"id\":\"q1\",\"question\":\"Why?\"}"));
+        // Whichever spec is polled first hits the failure; the other must still complete.
+        r.Cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.NotNull(r.State.LastError);
+        Assert.False(r.State.SignedOut);
+        var cursors = new[] { r.Specs.Get(bad)!.LastEventId, r.Specs.Get(good)!.LastEventId };
+        Assert.Single(cursors, c => c is not null);
+    }
+}
