@@ -130,7 +130,7 @@ export default function BoardTab({ specs, config, onChange, onRelayError }: Prop
                   <button type="button" onClick={() => setPanel({ kind: "edit", id: entry.id })}>Edit spec</button>
                 </>
               )}
-              {run.hasProposal && (
+              {run.hasProposal && run.status === "Draft" && (
                 <button type="button" onClick={() => setPanel({ kind: "review", id: entry.id })}>Review proposal</button>
               )}
             </header>

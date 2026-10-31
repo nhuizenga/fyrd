@@ -88,7 +88,7 @@ it("shows the unreachable banner only when every endpoint fails", async () => {
 });
 
 it("Memory is the third tab and an undelivered answer shows in the Inbox", async () => {
-  vi.mocked(api.getMemory).mockResolvedValue({ ownerProxy: "", global: "", repos: [] });
+  vi.mocked(api.getMemory).mockResolvedValue({ ownerProxy: "", ownerProxyVersion: "", global: "", globalVersion: "", repos: [] });
   vi.mocked(api.getUndelivered).mockResolvedValue([card({
     id: "f1", question: "Which DB?",
     answer: { text: "Postgres", remember: true, scope: "Repo", answeredAt: "x", relayStatus: "failed" },

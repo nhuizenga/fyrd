@@ -41,7 +41,7 @@ export const discardProposal = (id: string) => call<SpecRun>("POST", `/api/specs
 export const updateMarkdown = (id: string, markdown: string) =>
   call<SpecRun>("PUT", `/api/specs/${enc(id)}/markdown`, { markdown });
 export const getMemory = () => call<MemoryDoc>("GET", "/api/memory");
-export const saveMemory = (kind: MemoryKind, text: string, repo?: string) =>
-  call<void>("PUT", `/api/memory/${kind}${repo === undefined ? "" : `?repo=${enc(repo)}`}`, { text });
+export const saveMemory = (kind: MemoryKind, text: string, repo?: string, baseVersion?: string) =>
+  call<void>("PUT", `/api/memory/${kind}${repo === undefined ? "" : `?repo=${enc(repo)}`}`, { text, baseVersion });
 export const getUndelivered = () => call<InboxCard[]>("GET", "/api/inbox/undelivered");
 export const relay = (id: string) => call<WithRelay<InboxCard>>("POST", `/api/inbox/${enc(id)}/relay`);

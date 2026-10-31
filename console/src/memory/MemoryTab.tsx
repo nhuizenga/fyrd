@@ -5,12 +5,20 @@ import type { MemoryDoc, MemoryKind } from "../types";
 interface SectionProps {
   title: string;
   initial: string;
+  version: string;
   kind: MemoryKind;
   repo?: string;
 }
 
-function Section({ title, initial, kind, repo }: SectionProps) {
+function pick(d: MemoryDoc, kind: MemoryKind, repo?: string): { text: string; version: string } | undefined {
+  if (kind === "owner-proxy") return { text: d.ownerProxy, version: d.ownerProxyVersion };
+  if (kind === "global") return { text: d.global, version: d.globalVersion };
+  return d.repos.find((r) => r.repo === repo);
+}
+
+function Section({ title, initial, version: initialVersion, kind, repo }: SectionProps) {
   const [text, setText] = useState(initial);
+  const [version, setVersion] = useState(initialVersion);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +29,33 @@ function Section({ title, initial, kind, repo }: SectionProps) {
     setError(null);
     setSaved(false);
     try {
-      await api.saveMemory(kind, text, repo);
+      await api.saveMemory(kind, text, repo, version);
       setSaved(true);
+      // Keep the owner's text; only pick up the new version so the next save is not a false conflict.
+      try {
+        const v = pick(await api.getMemory(), kind, repo)?.version;
+        if (v !== undefined) setVersion(v);
+      } catch {
+        /* the next save will report a conflict if the version is stale */
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reload() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const fresh = pick(await api.getMemory(), kind, repo);
+      if (fresh) {
+        setText(fresh.text);
+        setVersion(fresh.version);
+      }
+      setError(null);
+      setSaved(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -44,6 +77,7 @@ function Section({ title, initial, kind, repo }: SectionProps) {
       />
       <div className="row">
         <button type="button" aria-label={`Save ${title}`} disabled={busy} onClick={() => void save()}>Save</button>
+        <button type="button" aria-label={`Reload ${title}`} disabled={busy} onClick={() => void reload()}>Reload</button>
         {saved && <span className="saved">Saved</span>}
       </div>
       {error && <p className="error" role="alert">{error}</p>}
@@ -72,10 +106,10 @@ export default function MemoryTab() {
       {error && <p className="error" role="alert">{error}</p>}
       {doc && (
         <>
-          <Section title="Owner preferences" initial={doc.ownerProxy} kind="owner-proxy" />
-          <Section title="Global decisions" initial={doc.global} kind="global" />
+          <Section title="Owner preferences" initial={doc.ownerProxy} version={doc.ownerProxyVersion} kind="owner-proxy" />
+          <Section title="Global decisions" initial={doc.global} version={doc.globalVersion} kind="global" />
           {doc.repos.map((r) => (
-            <Section key={r.repo} title={r.repo} initial={r.text} kind="repo" repo={r.repo} />
+            <Section key={r.repo} title={r.repo} initial={r.text} version={r.version} kind="repo" repo={r.repo} />
           ))}
         </>
       )}

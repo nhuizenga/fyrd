@@ -134,6 +134,11 @@ describe("research", () => {
     expect(await screen.findByText("# Prop")).toBeInTheDocument();
   });
 
+  it("hides Review proposal when the proposal flag is stale on a non-Draft spec", () => {
+    renderBoard([{ entry: entry({ status: "Researching", hasProposal: true }) }]);
+    expect(screen.queryByRole("button", { name: "Review proposal" })).toBeNull();
+  });
+
   it("shows research errors inline", async () => {
     vi.mocked(api.research).mockRejectedValue(new Error("Set the cloud environment in Settings"));
     renderBoard([{ entry: entry({ status: "Draft" }) }]);

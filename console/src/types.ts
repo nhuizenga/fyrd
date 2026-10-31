@@ -125,8 +125,10 @@ export interface Proposal {
 
 export interface MemoryDoc {
   ownerProxy: string;
+  ownerProxyVersion: string;
   global: string;
-  repos: { repo: string; text: string }[];
+  globalVersion: string;
+  repos: { repo: string; text: string; version: string }[];
 }
 
 export type MemoryKind = "owner-proxy" | "global" | "repo";
