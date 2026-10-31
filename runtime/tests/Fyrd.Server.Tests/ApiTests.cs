@@ -471,4 +471,42 @@ public class ApiTests
         var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
         Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
     }
+
+    [Fact]
+    public async Task PutMemory_RoundTripsExactly()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        const string text = "a\r\nb \u00e9\u4e2d\U0001F600\r\n";
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/owner-proxy", new { text = text + "o" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/global", new { text = text + "g" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/repo?repo=" + Repo, new { text = text + "r" })).StatusCode);
+
+        var got = await ReadJson(await c.GetAsync("/api/memory"));
+        Assert.Equal(text + "o", got.GetProperty("ownerProxy").GetString());
+        Assert.Equal(text + "g", got.GetProperty("global").GetString());
+        var repo = Assert.Single(got.GetProperty("repos").EnumerateArray());
+        Assert.Equal(Repo, repo.GetProperty("repo").GetString());
+        Assert.Equal(text + "r", repo.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_TooLarge_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var r = await c.PutAsJsonAsync("/api/memory/global", new { text = new string('x', 200 * 1024 + 1) });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PutAsJsonAsync("/api/memory/global", new { text = new string('x', 200 * 1024) })).StatusCode);
+    }
+
+    [Fact]
+    public async Task PutMemory_BadRepo_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        foreach (var url in new[] { "/api/memory/repo?repo=../..", "/api/memory/repo?repo=nope", "/api/memory/repo" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync(url, new { text = "x" })).StatusCode);
+    }
 }

@@ -22,7 +22,7 @@ public sealed record Personas(string Lead, string Implementer, string Reviewer, 
 
 public static partial class LeadPrompt
 {
-    public static string Build(SpecRun run, string specMarkdown, string memory, FyrdConfig config, Personas personas)
+    public static string Build(SpecRun run, string specMarkdown, string memory, FyrdConfig config, Personas personas, string ownerProxy)
     {
         var environmentId = config.EnvironmentId
             ?? throw new InvalidOperationException("EnvironmentId must be configured before launching a lead.");
@@ -32,6 +32,7 @@ public static partial class LeadPrompt
             ["REPO"] = run.Repo,
             ["SPEC"] = specMarkdown,
             ["MEMORY"] = string.IsNullOrWhiteSpace(memory) ? "(none yet)" : memory,
+            ["OWNER_PROXY"] = string.IsNullOrWhiteSpace(ownerProxy) ? "(none yet)" : ownerProxy,
             ["SQUAD_CAP"] = config.SquadCap.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["PEER_MODEL"] = config.PeerModel,
             ["ENVIRONMENT_ID"] = environmentId,

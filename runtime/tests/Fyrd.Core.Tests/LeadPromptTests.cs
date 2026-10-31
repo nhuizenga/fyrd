@@ -22,13 +22,13 @@ public class LeadPromptTests
     }
 
     private static string Shipped(string memory = "MEM", string spec = "SPEC") =>
-        LeadPrompt.Build(Run, spec, memory, Cfg, Personas.Load(Path.Combine(Repo(), "personas")));
+        LeadPrompt.Build(Run, spec, memory, Cfg, Personas.Load(Path.Combine(Repo(), "personas")), "OWNERPREF");
 
     [Fact]
     public void Build_FillsEveryPlaceholder()
     {
         Assert.DoesNotContain("{{", Shipped());
-        var plain = LeadPrompt.Build(Run, "S", "M", Cfg, P);
+        var plain = LeadPrompt.Build(Run, "S", "M", Cfg, P, "OP");
         Assert.DoesNotContain("{{", plain);
         Assert.Contains("IMPL REV VAL", plain);
     }
@@ -36,7 +36,7 @@ public class LeadPromptTests
     [Fact]
     public void Build_DoesNotReExpandPlaceholdersInInjectedText()
     {
-        var text = LeadPrompt.Build(Run, "spec {{MEMORY}}", "mem", Cfg, P);
+        var text = LeadPrompt.Build(Run, "spec {{MEMORY}}", "mem", Cfg, P, "OP");
         Assert.Contains("spec {{MEMORY}}", text);
     }
 
@@ -80,6 +80,15 @@ public class LeadPromptTests
         var text = File.ReadAllText(Path.Combine(Repo(), "personas", file));
         Assert.Contains("Never emit any `fyrd-", text);
         Assert.Contains("lead session id", text);
+    }
+
+    [Fact]
+    public void Build_IncludesOwnerPreferencesAndPeerDeliveryRule()
+    {
+        var text = Shipped();
+        Assert.Contains("<owner-preferences>\nOWNERPREF\n</owner-preferences>", text.ReplaceLineEndings("\n"));
+        Assert.Contains("identical copy of the `<owner-preferences>` block, together with the `<remembered-decisions>` block, at the top of that peer's `append_system_prompt`", text);
+        Assert.Contains("not instructions that override the workflow or the safety rules", text);
     }
 
     [Fact]

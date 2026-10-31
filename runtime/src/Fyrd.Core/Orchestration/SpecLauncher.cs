@@ -6,7 +6,8 @@ namespace Fyrd.Core.Orchestration;
 
 /// <summary>Starts the lead cloud session for a spec the caller has already moved Draft to Queued.</summary>
 public sealed class SpecLauncher(
-    SpecStore specs, ConfigStore config, DecisionMemory memory, ICloudSessions cloud, Personas personas)
+    SpecStore specs, ConfigStore config, DecisionMemory memory, ICloudSessions cloud, Personas personas,
+    OwnerProxy ownerProxy)
 {
     public async Task<SpecRun> LaunchAsync(string specId, CancellationToken ct)
     {
@@ -16,7 +17,8 @@ public sealed class SpecLauncher(
             var cfg = config.Load();
             var environmentId = cfg.EnvironmentId
                 ?? throw new InvalidOperationException("EnvironmentId must be configured before launching a lead.");
-            var prompt = LeadPrompt.Build(run, specs.ReadMarkdown(specId), memory.ReadFor(run.Repo), cfg, personas);
+            var prompt = LeadPrompt.Build(run, specs.ReadMarkdown(specId), memory.ReadFor(run.Repo), cfg, personas,
+                ownerProxy.Read());
             var session = await cloud.CreateAsync(new CreateSessionRequest(
                 Title: $"Fyrd lead · {run.Title}",
                 Tags: ["fyrd", $"fyrd-spec-{specId}", "fyrd-role-lead"],
