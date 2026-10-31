@@ -17,6 +17,7 @@ public sealed partial class HubRunner(
     private const string RoleTagPrefix = "fyrd-role-";
     private const string ControllerTag = "fyrd-controller";
     private const string ControllerRole = "controller";
+    private const string RequiresAction = "requires_action";
     private const int RecentEvents = 200;
     private const int PageLimit = 100;
 
@@ -67,7 +68,10 @@ public sealed partial class HubRunner(
             {
                 var w = await PollSessionAsync(s, ct);
                 views.Add(View(s, w.LastActivity));
-                questions.AddRange(PendingQuestions.Find(s.Id, Title(s), w.Recent));
+                // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
+                // waiting on the owner has a live question.
+                if (s.SessionStatus == RequiresAction)
+                    questions.AddRange(PendingQuestions.Find(s.Id, Title(s), w.Recent));
             }
             catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
                                       && (e is not OperationCanceledException || !ct.IsCancellationRequested))
@@ -86,7 +90,7 @@ public sealed partial class HubRunner(
 
         try
         {
-            await PostMemoryUpdateAsync(ct);
+            await PostMemoryUpdateAsync(sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal), ct);
         }
         catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
                                   && (e is not OperationCanceledException || !ct.IsCancellationRequested))
@@ -174,9 +178,10 @@ public sealed partial class HubRunner(
         }
     }
 
-    private async Task PostMemoryUpdateAsync(CancellationToken ct)
+    /// <summary>Posts only to a Controller this pass listed as live; an archived one is never written to.</summary>
+    private async Task PostMemoryUpdateAsync(IReadOnlySet<string> live, CancellationToken ct)
     {
-        if (controller.CurrentId is not { } controllerId) return;
+        if (controller.CurrentId is not { } controllerId || !live.Contains(controllerId)) return;
         var text = HubPrompt.MemoryUpdate(memory, personas.List());
         // Hashed over the exact text sent, so a concurrent memory edit cannot be marked as posted.
         var hash = ControllerManager.Hash(text);

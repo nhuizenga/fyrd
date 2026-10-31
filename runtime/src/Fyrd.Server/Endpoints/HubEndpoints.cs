@@ -21,7 +21,8 @@ internal static class HubEndpoints
 
         group.MapGet("/state", (HubState state, ControllerManager controller) => ApiErrors.Run(() =>
         {
-            var id = controller.CurrentId;
+            // Only a Controller the last poll listed as live: a stored id that was archived elsewhere is a dead link.
+            var id = controller.CurrentId is { } stored && state.Sessions.Any(s => s.Id == stored) ? stored : null;
             return Results.Ok(new
             {
                 sessions = state.Sessions,

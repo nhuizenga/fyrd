@@ -110,7 +110,7 @@ public sealed class ControllerManager
         if (config.EnvironmentId is null) throw new HubConfigException("Set a cloud environment in Settings first.");
         var personas = _personas.List();
         var controller = personas.FirstOrDefault(p => p.Id == "controller")
-            ?? throw new InvalidOperationException("The Controller persona is missing.");
+            ?? throw new HubConfigException("The Controller persona is missing.");
         var hash = MemoryHash(_memory, personas);
         var created = await _cloud.CreateAsync(new CreateSessionRequest(
             "controller",

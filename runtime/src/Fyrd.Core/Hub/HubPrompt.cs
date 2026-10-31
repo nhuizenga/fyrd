@@ -15,7 +15,7 @@ public static partial class HubPrompt
     public static string Controller(IReadOnlyList<HubPersona> personas, HubMemory memory, FyrdConfig config)
     {
         var controller = personas.FirstOrDefault(p => p.Id == ControllerId)
-            ?? throw new InvalidOperationException("The Controller persona is missing.");
+            ?? throw new HubConfigException("The Controller persona is missing.");
         var sections = new List<string>
         {
             Safe(controller.Definition),

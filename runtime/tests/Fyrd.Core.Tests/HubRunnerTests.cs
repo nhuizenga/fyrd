@@ -212,7 +212,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_MemoryChanged_PostsUpdateToControllerOnce()
     {
         var ctl = await _controller.FindOrCreateAsync(default);
-        _cloud.SetByTag("fyrd-hub");
+        _cloud.SetByTag("fyrd-hub", Hub(ctl.SessionId, "controller", role: "controller", controller: true));
         var runner = Make();
         await runner.PollOnceAsync(default);
         Assert.Empty(_cloud.Sent);
@@ -225,6 +225,29 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Equal(ctl.SessionId, sent.SessionId);
         Assert.StartsWith("Fyrd memory update.", sent.Text);
         Assert.Contains("Ship on Fridays is fine.", sent.Text);
+    }
+
+    [Fact]
+    public async Task Poll_ControllerArchived_NoMemoryPost()
+    {
+        await _controller.FindOrCreateAsync(default);
+        _cloud.SetByTag("fyrd-hub", Hub("created-1", "controller", "archived", role: "controller", controller: true));
+        _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Empty(_cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_InterruptedQuestion_NotShown()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("q1", "builder-ab12", "idle", role: "builder"));
+        foreach (var e in FixtureEvents.Load("ask-user-pending.json")) _cloud.AddEvent("q1", e);
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Empty(_state.Questions);
     }
 
     [Fact]

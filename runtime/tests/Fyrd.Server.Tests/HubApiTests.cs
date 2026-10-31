@@ -54,9 +54,36 @@ public class HubApiTests
         SetEnvironment(f);
         var c = f.CreateClient();
         await c.PostAsync("/api/hub/controller", null);
+        f.Services.GetRequiredService<HubState>().Publish([View("created-1")], []);
         var ctl = (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("controller");
         Assert.Equal("created-1", ctl.GetProperty("sessionId").GetString());
         Assert.Equal("https://claude.ai/code/created-1", ctl.GetProperty("url").GetString());
+    }
+
+    [Fact]
+    public async Task State_StoredControllerNotLive_ControllerNull()
+    {
+        using var f = new FyrdFactory();
+        SetEnvironment(f);
+        var c = f.CreateClient();
+        await c.PostAsync("/api/hub/controller", null);
+        // The last poll did not list the stored Controller (archived elsewhere): no dead link.
+        f.Services.GetRequiredService<HubState>().Publish([View()], []);
+        var body = await ReadJson(await c.GetAsync("/api/hub/state"));
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("controller").ValueKind);
+    }
+
+    [Fact]
+    public async Task Controller_PersonaMissing_400()
+    {
+        using var f = new FyrdFactory();
+        SetEnvironment(f);
+        var c = f.CreateClient();
+        await c.GetAsync("/api/hub/personas"); // seeds
+        File.WriteAllText(Path.Combine(f.Home.Paths.HubPersonasDir, "controller.json"), "{ not json");
+        var r = await c.PostAsync("/api/hub/controller", null);
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal("The Controller persona is missing.", (await ReadJson(r)).GetProperty("detail").GetString());
     }
 
     [Fact]

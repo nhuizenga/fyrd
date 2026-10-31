@@ -5,7 +5,8 @@ namespace Fyrd.Core.Hub;
 
 /// <summary>
 /// Finds unanswered <c>AskUserQuestion</c> items: a <c>control_request</c> with subtype <c>can_use_tool</c> and tool
-/// <c>AskUserQuestion</c> is pending while no <c>control_response</c> carries its <c>request_id</c>.
+/// <c>AskUserQuestion</c> is pending while no <c>control_response</c> carries its <c>request_id</c> and no
+/// <c>control_cancel_request</c> names it.
 /// </summary>
 public static class PendingQuestions
 {
@@ -16,6 +17,9 @@ public static class PendingQuestions
         {
             if (e.Type == "control_response" && Obj(e.Raw, "response") is { } resp && Str(resp, "request_id") is { } rid)
                 answered.Add(rid);
+            else if (e.Type == "control_cancel_request"
+                     && (Str(e.Raw, "request_id") ?? (Obj(e.Raw, "request") is { } cr ? Str(cr, "request_id") : null)) is { } cid)
+                answered.Add(cid);
         }
 
         var result = new List<HubQuestion>();

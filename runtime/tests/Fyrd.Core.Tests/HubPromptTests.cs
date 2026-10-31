@@ -46,7 +46,7 @@ public sealed class HubPromptTests : IDisposable
         var p = HubPrompt.Controller([Controller, Builder], m, Config);
         Assert.Contains("<role-memory role=\"builder\">", p);
         Assert.DoesNotContain("<role-memory role=\"controller\">", p);
-        Assert.Throws<InvalidOperationException>(() => HubPrompt.Controller([Builder], m, Config));
+        Assert.Throws<HubConfigException>(() => HubPrompt.Controller([Builder], m, Config));
     }
 
     [Fact]
