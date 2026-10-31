@@ -230,6 +230,31 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task RelayRoute_ResetsAndSends()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
+        var inbox = f.Services.GetRequiredService<InboxStore>();
+        var card = inbox.Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
+        var c = f.CreateClient();
+
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/inbox/{card.Id}/relay", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/inbox/abcdef123456/relay", null)).StatusCode);
+
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
+        Assert.Equal("failed", inbox.Get(card.Id).Answer!.RelayStatus);
+        Assert.Empty(f.Cloud.Sent);
+
+        var r = await c.PostAsync($"/api/inbox/{card.Id}/relay", null);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Single(f.Cloud.Sent);
+        var after = inbox.Get(card.Id).Answer!;
+        Assert.Equal(("sent", 0), (after.RelayStatus, after.RelayAttempts));
+    }
+
+    [Fact]
     public async Task PutConfig_SameCap_DoesNotRelay_ChangedCapRelays()
     {
         using var f = new FyrdFactory();

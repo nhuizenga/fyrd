@@ -16,7 +16,8 @@ public sealed record SpecRun(
     long CostCents = 0,
     string? LastEventId = null,
     string? Branch = null,
-    string? Error = null);
+    string? Error = null,
+    DateTimeOffset? UpdatedAt = null);
 
 public sealed record Unit(string Id, string SpecId, string Title, UnitStage Stage, UnitState State);
 

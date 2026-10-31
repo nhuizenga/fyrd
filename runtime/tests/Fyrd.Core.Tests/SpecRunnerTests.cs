@@ -26,7 +26,8 @@ public class SpecRunnerTests
             Runner = NewRunner();
         }
 
-        public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time);
+        public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time, Relay);
+        public LeadRelay Relay => new(Specs, Cloud, State, Inbox);
 
         public string NewSpec(string title = "Add export button", string lead = "lead1")
         {
@@ -159,7 +160,7 @@ public class SpecRunnerTests
         var q = Assert.Single(r.Inbox.ListOpenFor(id));
         Assert.True(r.State.LastTurnHadQuestion(id));
 
-        var relay = new LeadRelay(r.Specs, r.Cloud, r.State);
+        var relay = r.Relay;
         var answered = r.Inbox.Answer(q.Id, "blue");
         await relay.RelayAnswerAsync(answered, default);
         Assert.False(r.State.LastTurnHadQuestion(id));
@@ -167,6 +168,83 @@ public class SpecRunnerTests
         r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Approve Bash: ls"));
         await r.Runner.PollOnceAsync(default);
         Assert.Contains(r.Inbox.ListOpenFor(id), c => c.Question == "Lead needs attention: Approve Bash: ls");
+    }
+
+    [Fact]
+    public async Task Poll_RetriesPendingRelay_Once()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var answered = r.Inbox.Answer(q.Id, "blue");
+        r.Inbox.SetRelay(answered.Id, "pending", null);
+
+        await r.NewRunner().PollOnceAsync(default); // simulates a restarted runner
+        await r.NewRunner().PollOnceAsync(default);
+
+        Assert.Single(r.Cloud.Sent);
+        Assert.Equal("sent", r.Inbox.Get(q.Id).Answer!.RelayStatus);
+    }
+
+    [Fact]
+    public async Task Poll_FailedRelay_RecordsFailureAndRetries()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var card = r.Inbox.SetRelay(r.Inbox.Answer(q.Id, "blue").Id, "pending", null);
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        Assert.Equal("boom", await r.Relay.DeliverAsync(card, default));
+        var failed = r.Inbox.Get(q.Id).Answer!;
+        Assert.Equal("failed", failed.RelayStatus);
+        Assert.Equal("boom", failed.RelayError);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal("sent", r.Inbox.Get(q.Id).Answer!.RelayStatus);
+    }
+
+    private static string StaleSpec(Rig r, SpecStatus status)
+    {
+        var id = r.Specs.Create("Add export button", "owner/repo", "x").Id;
+        r.Specs.UpdateStatus(id, status);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        return id;
+    }
+
+    [Fact]
+    public async Task Reconcile_AdoptsExistingLead()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Queued);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("old", "running", ["fyrd-spec-" + id, "fyrd-role-lead"], T),
+            FakeCloudSessions.Session("arch", "archived", ["fyrd-spec-" + id, "fyrd-role-lead"], T.AddHours(1)));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal("old", run.SessionId);
+        Assert.Equal(SpecStatus.Building, run.Status);
+    }
+
+    [Fact]
+    public async Task Reconcile_NoSession_RevertsToDraftWithError()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Researching);
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("Launch interrupted; try again", run.Error);
+    }
+
+    [Fact]
+    public async Task Reconcile_RecentLaunch_Untouched()
+    {
+        using var r = new Rig();
+        var id = r.Specs.Create("Add export button", "owner/repo", "x").Id;
+        r.Specs.UpdateStatus(id, SpecStatus.Queued);
+        r.Time.Advance(TimeSpan.FromSeconds(30));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(SpecStatus.Queued, r.Specs.Get(id)!.Status);
+        Assert.Null(r.Specs.Get(id)!.Error);
     }
 
     [Fact]

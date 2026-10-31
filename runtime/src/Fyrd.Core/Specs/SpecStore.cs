@@ -107,6 +107,17 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
             .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Building or SpecStatus.FinalReview)
             .ToList();
 
+    /// <summary>Queued or researching runs that never got a session and have not been touched for <paramref name="olderThan"/>.</summary>
+    public IReadOnlyList<SpecRun> ListStaleLaunches(TimeSpan olderThan)
+    {
+        var cutoff = time.GetUtcNow() - olderThan;
+        return List().Select(e => e.Run).OfType<SpecRun>()
+            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Researching
+                        && string.IsNullOrEmpty(r.SessionId)
+                        && (r.UpdatedAt ?? r.CreatedAt) < cutoff)
+            .ToList();
+    }
+
     private SpecRun Mutate(string id, Func<SpecRun, SpecRun> change)
     {
         lock (_gate)
@@ -143,7 +154,8 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
     }
 
     private void WriteRun(SpecRun run, string? id = null) =>
-        AtomicFile.Write(Path.Combine(paths.SpecDir(id ?? run.Id), RunFile), JsonSerializer.Serialize(run, Json.Options));
+        AtomicFile.Write(Path.Combine(paths.SpecDir(id ?? run.Id), RunFile),
+            JsonSerializer.Serialize(run with { UpdatedAt = time.GetUtcNow() }, Json.Options));
 
     [GeneratedRegex(@"^[\w.-]+/[\w.-]+\z")]
     private static partial Regex RepoPattern();

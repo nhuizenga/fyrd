@@ -15,5 +15,7 @@ public sealed class TempHome : IDisposable
 
 public sealed class FixedTime(DateTimeOffset now) : TimeProvider
 {
+    public void Advance(TimeSpan by) => now += by;
+
     public override DateTimeOffset GetUtcNow() => now;
 }

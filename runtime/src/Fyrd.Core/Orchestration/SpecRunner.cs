@@ -8,8 +8,11 @@ namespace Fyrd.Core.Orchestration;
 /// Polls each active spec's lead session and peer sessions and turns what it sees into units, inbox cards and
 /// spec status. Passes must run sequentially: the inbox's HasSourceKey-then-Add is not atomic.
 /// </summary>
-public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions cloud, RunnerState state, TimeProvider time)
+public sealed class SpecRunner(
+    SpecStore specs, InboxStore inbox, ICloudSessions cloud, RunnerState state, TimeProvider time, LeadRelay relay)
 {
+    private static readonly TimeSpan StaleLaunch = TimeSpan.FromMinutes(2);
+
     private const string AttentionPrefix = "Lead needs attention: ";
 
     public async Task PollOnceAsync(CancellationToken ct)
@@ -35,9 +38,55 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
                 lastError = $"{spec.Id}: {e.Message}";
             }
         }
+        lastError ??= await RetryRelaysAsync(ct);
+        lastError ??= await ReconcileLaunchesAsync(ct);
         state.SignedOut = false;
         state.LastError = lastError ?? warning;
         state.LastPollAt = time.GetUtcNow();
+    }
+
+    /// <summary>Re-sends answers whose delivery is pending or failed; returns the first error message, or null.</summary>
+    private async Task<string?> RetryRelaysAsync(CancellationToken ct)
+    {
+        string? error = null;
+        foreach (var card in inbox.ListRelaysToRetry())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var e = await relay.DeliverAsync(card, ct);
+                if (e is not null) error ??= $"{card.SpecId}: relay failed: {e}";
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                error ??= $"{card.SpecId}: relay failed: {e.Message}";
+            }
+        }
+        return error;
+    }
+
+    /// <summary>Adopts a session started by an interrupted launch, or sends the spec back to Draft.</summary>
+    private async Task<string?> ReconcileLaunchesAsync(CancellationToken ct)
+    {
+        string? error = null;
+        foreach (var run in specs.ListStaleLaunches(StaleLaunch))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var found = (await cloud.ListByTagAsync("fyrd-spec-" + run.Id, ct))
+                    .Where(s => s.SessionStatus != "archived" && s.Tags.Contains("fyrd-role-lead"))
+                    .OrderByDescending(CreatedAt)
+                    .FirstOrDefault();
+                if (found is not null) specs.SetLead(run.Id, found.Id);
+                else specs.Finish(run.Id, SpecStatus.Draft, null, "Launch interrupted; try again");
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                error ??= $"{run.Id}: {e.Message}";
+            }
+        }
+        return error;
     }
 
     /// <summary>Returns a short note about ignored malformed protocol blocks, or null.</summary>
