@@ -81,7 +81,7 @@ public sealed class HubSeedTests : IDisposable
     public void Controller_CarriesTeardownCapAndLeadRules()
     {
         var d = Get("controller").Definition;
-        foreach (var s in new[] { "Never archive yourself", "`Start fewer now`", "`Tear down idle sessions`", "`Cancel`", "The Lead role isn't defined yet", "delete_trigger" })
+        foreach (var s in new[] { "Never archive yourself", "`Start fewer now`", "`Tear down idle sessions`", "`Cancel`", "The Lead role isn't defined yet", "delete_trigger", "Before archiving or creating anything", "`multiSelect: true` `AskUserQuestion`", "watching" })
             Assert.Contains(s, d, StringComparison.Ordinal);
     }
 
@@ -91,6 +91,25 @@ public sealed class HubSeedTests : IDisposable
         var d = Get("controller").Definition;
         Assert.DoesNotContain("</shared-memory", d, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("</role-memory", d, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void NoPersonaCarriesAStorableRememberExample()
+    {
+        foreach (var p in Load())
+        {
+            Assert.DoesNotContain("```fyrd-remember", p.Definition, StringComparison.Ordinal);
+            Assert.Empty(RememberBlock.Parse(p.Definition));
+        }
+    }
+
+    [Fact]
+    public void Controller_AlwaysWritesSharedMemory()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("scope: shared", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("scope: role", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("role-memory role=\"controller\"", d, StringComparison.Ordinal);
     }
 
     [Fact]

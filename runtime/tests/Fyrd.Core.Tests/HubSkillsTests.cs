@@ -42,6 +42,43 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
+    public void StartFlows_CheckCapBeforeRecycling()
+    {
+        foreach (var n in Names)
+        {
+            var text = Read(n);
+            var cap = text.IndexOf("**Session cap", StringComparison.Ordinal);
+            var recycle = text.IndexOf("**Recycle.**", StringComparison.Ordinal);
+            Assert.True(cap > 0 && recycle > cap, $"{n}: session cap must come before recycling");
+            Assert.DoesNotMatch(@"archive it with `mcp__claude-code-remote__archive_session`, then recreate", text);
+        }
+    }
+
+    [Fact]
+    public void TearDownIdle_AsksWhichWithMultiSelect()
+    {
+        Assert.Contains("`multiSelect: true` `AskUserQuestion`", Read("fyrd-peasant"), StringComparison.Ordinal);
+        Assert.Contains("watching", Read("fyrd-peasant"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Research_PublishesPlanAsArtifact()
+    {
+        var text = Read("fyrd-research");
+        Assert.Contains("publish the plan as a claude.ai artifact and reply with its link and a short summary", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Readme_UploadAllFour_NoFallback_PointsToRecreate()
+    {
+        var text = File.ReadAllText(Path.Combine(SkillsDir(), "README.md"));
+        Assert.Contains("Upload all four skills together", text, StringComparison.Ordinal);
+        Assert.Contains("Recreate Controller", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fallback", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("follow-up is filed", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void NoSkillPostsToSlack()
     {
         foreach (var n in Names)

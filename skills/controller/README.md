@@ -4,6 +4,8 @@ Four claude.ai account skills the Fyrd Controller cloud session uses: `fyrd-rese
 
 ## Upload (manual step)
 
+Upload all four skills together. `fyrd-research`, `fyrd-build` and `fyrd-watch` point to `fyrd-peasant` for the session-cap and teardown steps, so none of them is complete on its own.
+
 For each folder here (`fyrd-research`, `fyrd-build`, `fyrd-peasant`, `fyrd-watch`):
 
 1. Zip the folder so `SKILL.md` is inside it (for example `fyrd-build/SKILL.md`).
@@ -14,8 +16,4 @@ Re-upload a skill whenever its `SKILL.md` changes.
 
 ## After edits
 
-Skills load when a session starts. After uploading changed skills, Recreate the Controller from the Fyrd console so the new session picks them up.
-
-## Fallback if skills don't load
-
-The hub spike showed account skills appear in claude.ai/code sessions. Whether they load in API-created sessions (how the Controller is created) is still unverified. If the Controller can't see the skills after Recreate, the fallback is to append the four skill bodies to `HubPrompt.Controller`. That follow-up is filed, not built here.
+Skills load when a session starts, and account skills load in API-created sessions such as the Controller (hub spike, run 6). After uploading changed skills, open Sessions in the Fyrd console and choose **Recreate Controller** next to Open Controller, so a new Controller picks them up.
