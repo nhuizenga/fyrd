@@ -44,7 +44,15 @@ var cmd = argv[0].ToLowerInvariant();
 var envId = TakeOpt(argv, "--env") ?? DefaultEnv;
 var timeoutMin = int.TryParse(TakeOpt(argv, "--timeout"), out var tm) ? tm : 30;
 var leadOpt = TakeOpt(argv, "--lead");
+var viaOpt = TakeOpt(argv, "--via");
+var sessionOpt = TakeOpt(argv, "--session");
 var positional = argv.Skip(1).Where(a => !a.StartsWith("--")).ToList();
+var unknown = argv.Skip(1).Where(a => a.StartsWith("--") && a != "--fresh").ToList();
+if (unknown.Count > 0)
+{
+    Console.Error.WriteLine($"unknown option(s): {string.Join(" ", unknown)}");
+    return Usage();
+}
 
 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
 var creds = new ClaudeCredentials();
@@ -66,6 +74,7 @@ try
         case "q5": await Q5(); break;
         case "q6": await Q6(); break;
         case "q7": await Q7(); break;
+        case "q8": await Q8(); break;
         default: return Usage();
     }
     return 0;
@@ -407,6 +416,123 @@ async Task Q7()
     await Task.CompletedTask;
 }
 
+// Q8: does `/clear`, posted as a plain user event (not via claude-code-remote send_message), clear the
+// conversation while keeping the append_system_prompt persona? See docs/superpowers/spikes/2026-10-31-clear-persona-probe.md.
+// --session <id>: use an existing session (e.g. one created in the web UI) instead of creating one; it has no persona,
+// and it is not archived afterwards.
+async Task Q8()
+{
+    var q = "q8";
+    const string Marker = "BEE-7731";
+    var word = sessionOpt is null ? "PAPAYA" : "MANGO";
+    var first = $"Remember the word {word}. Reply with only \"OK\"" + (sessionOpt is null ? " (plus your required ending line)." : ".");
+    var seen = new StatusSeen();
+    CloudSession s;
+    if (sessionOpt is null)
+    {
+        var persona = $"PERSONA MARKER: You are the probe peer. End every reply with the exact line \"{Marker}\". Never message other sessions.";
+        s = await client.CreateAsync(new CreateSessionRequest("fyrd spike q8 clear probe", ["fyrd", SpikeTag, "fyrd-probe-clear"],
+            envId, first, Model, persona, new SessionSource(Repo, null), "auto"));
+        LogSession(q, "created", s);
+        Console.WriteLine($"[q8] probe session: {s.Id}");
+        Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
+    }
+    else
+    {
+        s = await client.GetAsync(sessionOpt);
+        LogSession(q, "existing", s);
+        Console.WriteLine($"[q8] existing session: {s.Id} (status {s.SessionStatus})");
+        var b0 = await Baseline(s.Id);
+        await client.SendMessageAsync(s.Id, first);
+        Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), b0)}");
+    }
+    var replyA = LastAssistant(await FetchAllEvents(q, s.Id))?.Text;
+    var ctxA = await ContextUsage(s.Id);
+    Console.WriteLine($"[q8] reply A:\n{Trunc(replyA, 600)}\n[q8] context after A: {ctxA}");
+
+    // /clear may produce no assistant event, so wait for idle instead of WaitSettled.
+    var baseline = await Baseline(s.Id);
+    await SendClear(q, s.Id);
+    var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+    await Task.Delay(TimeSpan.FromSeconds(15));
+    while (DateTimeOffset.UtcNow < deadline && (await client.GetAsync(s.Id)).SessionStatus != "idle")
+        await Task.Delay(TimeSpan.FromSeconds(10));
+    var afterClear = (await FetchAllEvents(q, s.Id)).Where(e => !baseline.Contains(e.Uuid)).ToList();
+    Console.WriteLine($"[q8] events after /clear ({afterClear.Count}):");
+    foreach (var e in afterClear.Take(8)) Console.WriteLine($"  {Trunc(e.Raw.GetRawText(), 400)}");
+    Console.WriteLine($"[q8] context after /clear: {await ContextUsage(s.Id)}");
+
+    baseline = await Baseline(s.Id);
+    await client.SendMessageAsync(s.Id,
+        "Without using any tools, answer from memory only: what word did I ask you to remember earlier? If you have no memory of earlier messages, reply NONE.");
+    Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
+    var replyB = LastAssistant(await FetchAllEvents(q, s.Id))?.Text;
+    Console.WriteLine($"[q8] reply B:\n{Trunc(replyB, 600)}\n[q8] context after B: {await ContextUsage(s.Id)}");
+
+    if (sessionOpt is null) Console.WriteLine($"[q8] Q1 persona survives /clear: {(replyB?.Contains(Marker) == true ? "yes" : "no")}");
+    Console.WriteLine($"[q8] Q2 /clear cleared memory: {(replyB?.Contains(word) == true ? $"no (remembered {word})" : replyB?.Contains("NONE") == true ? "yes (NONE)" : "unclear")}");
+    if (sessionOpt is not null) return;
+    await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
+    Console.WriteLine($"[q8] archived {s.Id}");
+}
+
+// --via api (default): CloudSessionClient.SendMessageAsync, POST /v1/sessions/{id}/events. Run 2 showed /clear arrives as text.
+// --via code: the web UI's route, POST /v1/code/sessions/cse_<suffix>/events with {"events":[{"payload":<user event>}]}.
+// --via code-init: as code, preceded by the UI's {"subtype":"initialize"} control_request.
+async Task SendClear(string q, string sessionId)
+{
+    var via = viaOpt ?? "api";
+    if (via == "api")
+    {
+        await client.SendMessageAsync(sessionId, "/clear");
+    }
+    else
+    {
+        var cse = "cse_" + sessionId["session_".Length..];
+        var path = $"/v1/code/sessions/{cse}/events";
+        if (via == "code-init")
+        {
+            var init = await raw.SendAsync(HttpMethod.Post, path, new JsonObject
+            {
+                ["session_id"] = sessionId,
+                ["events"] = new JsonArray(new JsonObject
+                {
+                    ["payload"] = new JsonObject
+                    {
+                        ["type"] = "control_request",
+                        ["request_id"] = Guid.NewGuid().ToString(),
+                        ["request"] = new JsonObject { ["subtype"] = "initialize" },
+                        ["uuid"] = Guid.NewGuid().ToString(),
+                    },
+                }),
+            });
+            Log(q, "init", init.Describe());
+            Console.WriteLine($"[q8] initialize -> HTTP {init.Status} {Trunc(init.Text, 300)}");
+        }
+        var r = await raw.SendAsync(HttpMethod.Post, path, new JsonObject
+        {
+            ["events"] = new JsonArray(new JsonObject
+            {
+                ["payload"] = new JsonObject
+                {
+                    ["type"] = "user",
+                    ["uuid"] = Guid.NewGuid().ToString(),
+                    ["session_id"] = sessionId,
+                    ["parent_tool_use_id"] = null,
+                    ["message"] = new JsonObject { ["role"] = "user", ["content"] = "/clear" },
+                },
+            }),
+        });
+        Log(q, "clear", r.Describe());
+        Console.WriteLine($"[q8] /clear via {path} -> HTTP {r.Status} {Trunc(r.Text, 300)}");
+        if (r.Status >= 300) throw new InvalidOperationException("the /v1/code/sessions route rejected the /clear event");
+    }
+    Log(q, "sent-clear", new JsonObject { ["session"] = sessionId, ["via"] = via });
+}
+
+async Task<string> ContextUsage(string id) =>
+    Trunc(SessionNode(await client.GetAsync(id))["context_usage"]?.ToJsonString() ?? "(none)", 200);
+
 // ------------------------------------------------------------------------------------------------ helpers
 
 string LeadPrompt() =>
@@ -580,6 +706,13 @@ static string RunProcess(string file, string arguments)
 
 static string? TakeOpt(List<string> a, string name)
 {
+    var eq = a.FindIndex(x => x.StartsWith(name + "=", StringComparison.Ordinal));
+    if (eq >= 0)
+    {
+        var val = a[eq][(name.Length + 1)..];
+        a.RemoveAt(eq);
+        return val;
+    }
     var i = a.IndexOf(name);
     if (i < 0) return null;
     var v = i + 1 < a.Count ? a[i + 1] : null;
@@ -611,6 +744,7 @@ static int Usage()
           q5 [<id> ...]               poll statuses every 10 s (default: last lead + q2 children)
           q6 [<childId>] [--fresh]    interrupt then archive
           q7                          token expiry / refresh check
+          q8 [--via api|code|code-init] [--session <id>]  /clear via a direct user event: memory cleared, persona kept?
         options: --env <id> (default env_011v4b3WBhRMaGGti6Qw747c)   --timeout <minutes> (default 30)
         """);
     return 2;

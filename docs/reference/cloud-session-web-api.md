@@ -1,4 +1,4 @@
-# Cloud sessions: sending files
+# Cloud sessions: file uploads and /clear (web UI API)
 
 Observed 2026-10-31 by capturing the claude.ai/code web UI's network calls while attaching a file to a prompt. None of this is documented by Anthropic and it can change in any release. Treat it the same as the `/v1/sessions` API in `docs/superpowers/specs/2026-10-29-fyrd-design.md` §11.
 
@@ -100,6 +100,25 @@ The second message was sent after the session had been idle for about 10 minutes
 - **Session paths.** The web UI creates sessions with `POST /v1/code/sessions`, not `/v1/sessions`. The body is `{title, tags, environment_id, events, config: {append_system_prompt, model, effort_level, sources, outcomes}}`. Fyrd's design doc lists `session_context` where the UI sends `config`. Fyrd's client may be using an older alias.
 - **Two id forms.** Events are posted to `/v1/code/sessions/cse_<id>/events` and streamed from `.../events/stream`. Status reads and title updates use `/v1/code/sessions/session_<id>`. The suffix after the prefix is the same.
 - **Cold start.** The first container took about 3 minutes to set up before Claude replied.
+
+## Clearing a session's context (`/clear`)
+
+Tested on the same probe session, 2026-10-31.
+
+- The web UI sends `/clear` as an ordinary user event, the same shape as any message:
+  `{"events":[{"payload":{"type":"user","uuid":"…","session_id":"…","parent_tool_use_id":null,"message":{"role":"user","content":"/clear"}}}]}` to `POST /v1/code/sessions/cse_<id>/events`.
+- The session id and URL stay the same. The transcript empties, and context usage dropped from 9% to the 6% baseline.
+- Asked afterwards, from memory only, what had been asked earlier and which files were attached, Claude replied `NONE`.
+- Uploaded files stay on disk under `/root/.claude/uploads/`; `/clear` clears the conversation, not the filesystem.
+
+Not yet verified:
+
+- Whether `append_system_prompt` set at creation survives `/clear`. The probe session was created from the UI, which sends no persona.
+- Whether `/clear` runs when it arrives through the `claude-code-remote` connector's `send_message` (a turn "sent by a session") instead of from a client posting the user event directly. The cross-session messaging docs say such messages never run commands.
+
+## The `claude-code-remote` tools
+
+The probe session's MCP server list showed `claude-code-remote` among the claude.ai connectors. It reaches cloud sessions as a connector, not from the laptop's MCP config.
 
 ## Open questions
 
