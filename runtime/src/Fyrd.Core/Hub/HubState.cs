@@ -40,7 +40,7 @@ public sealed class HubState(TimeProvider? time = null)
     private volatile string? _lastError;
     private readonly object _gate = new();
     private DateTimeOffset? _lastPollAt;
-    private readonly Dictionary<string, DateTimeOffset> _claims = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (DateTimeOffset At, string? SessionId)> _claims = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Dictionary<string, (string Question, string Value)>> _partial = new(StringComparer.Ordinal);
 
     public IReadOnlyList<HubSessionView> Sessions => _sessions;
@@ -55,16 +55,23 @@ public sealed class HubState(TimeProvider? time = null)
         set { lock (_gate) _lastPollAt = value; }
     }
 
-    /// <summary>Questions whose request is claimed are left out. A claim ends when this poll no longer sees its
-    /// request as pending (the <c>control_response</c> is visible) or when it is older than <see cref="ClaimTtl"/>.</summary>
-    public void Publish(IReadOnlyList<HubSessionView> sessions, IReadOnlyList<HubQuestion> questions)
+    /// <summary>
+    /// Questions whose request is claimed are left out. A claim ends when this poll read its session successfully and
+    /// no longer sees the request as pending (the <c>control_response</c> is visible), or when it is older than
+    /// <see cref="ClaimTtl"/>. Claims on sessions in <paramref name="failedSessions"/> are kept: that poll saw nothing.
+    /// </summary>
+    public void Publish(
+        IReadOnlyList<HubSessionView> sessions, IReadOnlyList<HubQuestion> questions, IReadOnlySet<string>? failedSessions = null)
     {
         lock (_gate)
         {
             var now = _time.GetUtcNow();
             var seen = questions.Select(q => q.RequestId).ToHashSet(StringComparer.Ordinal);
-            foreach (var (rid, at) in _claims.ToList())
-                if (!seen.Contains(rid) || now - at > ClaimTtl) _claims.Remove(rid);
+            foreach (var (rid, claim) in _claims.ToList())
+            {
+                var unread = claim.SessionId is { } sid && failedSessions?.Contains(sid) == true;
+                if ((!seen.Contains(rid) && !unread) || now - claim.At > ClaimTtl) _claims.Remove(rid);
+            }
             foreach (var rid in _partial.Keys.Where(k => !seen.Contains(k)).ToList()) _partial.Remove(rid);
             _sessions = sessions.ToArray();
             _questions = questions.Where(q => !_claims.ContainsKey(q.RequestId)).ToArray();
@@ -101,13 +108,14 @@ public sealed class HubState(TimeProvider? time = null)
         }
     }
 
-    /// <summary>Atomically marks a request as being answered; false when it already is.</summary>
-    public bool TryClaim(string requestId)
+    /// <summary>Atomically marks a request as being answered; false when it already is. Pass the request's session so a
+    /// failed poll of that session does not end the claim.</summary>
+    public bool TryClaim(string requestId, string? sessionId = null)
     {
         lock (_gate)
         {
             if (_claims.ContainsKey(requestId)) return false;
-            _claims[requestId] = _time.GetUtcNow();
+            _claims[requestId] = (_time.GetUtcNow(), sessionId);
             return true;
         }
     }

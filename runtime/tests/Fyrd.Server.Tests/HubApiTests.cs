@@ -367,6 +367,36 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task Answer_ThenFailedPoll_ThenPending_SecondAnswer409()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var state = f.Services.GetRequiredService<HubState>();
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" })).StatusCode);
+
+        state.Publish([View()], [], new HashSet<string> { SessionId }); // the session's poll failed
+        state.Publish([View()], [Question()]); // the next poll still sees it pending
+        Assert.Empty(state.Questions);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Apple" })).StatusCode);
+        Assert.Single(f.Cloud.Answered);
+    }
+
+    [Fact]
+    public async Task Answer_Cancelled_KeepsClaim()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var state = f.Services.GetRequiredService<HubState>();
+        f.Cloud.ThrowOnNextCall(new TaskCanceledException("timed out"));
+        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" });
+        Assert.NotEqual(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.False(state.TryClaim(Question().RequestId)); // may have been delivered: never released
+    }
+
+    [Fact]
     public async Task Config_SessionCap_RoundTrip()
     {
         using var f = new FyrdFactory();

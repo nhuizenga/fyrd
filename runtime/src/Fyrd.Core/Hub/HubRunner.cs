@@ -59,6 +59,7 @@ public sealed partial class HubRunner(
 
         var views = new List<HubSessionView>();
         var questions = new List<HubQuestion>();
+        var failed = new HashSet<string>(StringComparer.Ordinal);
         foreach (var s in sessions)
         {
             ct.ThrowIfCancellationRequested();
@@ -72,6 +73,7 @@ public sealed partial class HubRunner(
                                       && (e is not OperationCanceledException || !ct.IsCancellationRequested))
             {
                 lastError ??= $"{s.Id}: {e.Message}";
+                failed.Add(s.Id);
                 views.Add(previousViews.TryGetValue(s.Id, out var old) ? old : View(s, null));
                 questions.AddRange(previousQuestions[s.Id]);
             }
@@ -80,7 +82,7 @@ public sealed partial class HubRunner(
         Prune(sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal));
         state.PublishRecent(_windows.ToDictionary(
             kv => kv.Key, kv => (IReadOnlyList<SessionEvent>)kv.Value.Recent.ToArray(), StringComparer.Ordinal));
-        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList());
+        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed);
 
         try
         {

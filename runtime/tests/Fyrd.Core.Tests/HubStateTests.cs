@@ -62,6 +62,34 @@ public sealed class HubStateTests
     }
 
     [Fact]
+    public void Publish_FailedSession_KeepsClaim_ThenPendingStaysHidden()
+    {
+        var s = new HubState(_time);
+        var q = Q("q1", "r1", "First?");
+        s.Publish([], [q]);
+        Assert.True(s.TryClaim("r1", "s1"));
+        s.CompleteRequest("r1");
+
+        s.Publish([], [], new HashSet<string> { "s1" }); // s1's poll failed: it saw nothing
+        s.Publish([], [q]); // next poll: still pending in the cloud
+        Assert.Empty(s.Questions);
+        Assert.False(s.RecordAnswer("q1", "B").Pending);
+        Assert.False(s.TryClaim("r1"));
+    }
+
+    [Fact]
+    public void Publish_FailedSession_TtlStillApplies()
+    {
+        var s = new HubState(_time);
+        var q = Q("q1", "r1", "First?");
+        s.Publish([], [q]);
+        s.TryClaim("r1", "s1");
+        _time.Advance(HubState.ClaimTtl + TimeSpan.FromSeconds(1));
+        s.Publish([], [q], new HashSet<string> { "s1" });
+        Assert.Single(s.Questions);
+    }
+
+    [Fact]
     public void Publish_ClaimOlderThanTtl_Expires()
     {
         var s = new HubState(_time);

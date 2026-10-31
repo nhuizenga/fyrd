@@ -86,19 +86,19 @@ internal static class HubEndpoints
             if (!progress.Pending) return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
             if (!progress.Ready)
                 return Task.FromResult(Results.Json(new { waitingFor = progress.WaitingFor }, statusCode: StatusCodes.Status202Accepted));
-            if (!state.TryClaim(q.RequestId))
+            if (!state.TryClaim(q.RequestId, q.SessionId))
                 return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
             return Cloud(async () =>
             {
-                var sent = false;
                 try
                 {
                     await cloud.AnswerQuestionAsync(q.SessionId, q, progress.Answers!, ct);
-                    sent = true;
                 }
-                finally
+                // A cancelled or timed-out call may still have been delivered, so its claim is kept (the poll or TTL ends it).
+                catch (Exception e) when (e is not OperationCanceledException)
                 {
-                    if (!sent) state.Release(q.RequestId);
+                    state.Release(q.RequestId);
+                    throw;
                 }
                 state.CompleteRequest(q.RequestId);
                 return Results.NoContent();

@@ -176,6 +176,27 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_SessionFails_KeepsAnswerClaim()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("q1", "builder-ab12", "requires_action", role: "builder"));
+        foreach (var e in FixtureEvents.Load("ask-user-pending.json")) _cloud.AddEvent("q1", e);
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        var q = Assert.Single(_state.Questions);
+        Assert.True(_state.TryClaim(q.RequestId, q.SessionId));
+        _state.CompleteRequest(q.RequestId);
+
+        _cloud.SkipCalls(1); // the tag listing succeeds
+        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom")); // reading q1's events fails
+        await runner.PollOnceAsync(default);
+        Assert.Empty(_state.Questions);
+
+        await runner.PollOnceAsync(default); // the control_response is not visible yet: still pending in the cloud
+        Assert.Empty(_state.Questions);
+        Assert.False(_state.TryClaim(q.RequestId));
+    }
+
+    [Fact]
     public async Task Poll_PendingQuestion_FoundAfterRestart()
     {
         _cloud.SetByTag("fyrd-hub", Hub("q1", "builder-ab12", "requires_action", role: "builder"));
