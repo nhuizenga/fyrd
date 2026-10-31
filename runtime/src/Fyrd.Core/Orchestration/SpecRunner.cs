@@ -12,9 +12,6 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
 {
     private const string AttentionPrefix = "Lead needs attention: ";
 
-    // Whether the lead's latest assistant turn contained a question; in-memory, rebuilt as events arrive.
-    private readonly Dictionary<string, bool> _lastTurnHadQuestion = new();
-
     public async Task PollOnceAsync(CancellationToken ct)
     {
         string? lastError = null;
@@ -64,7 +61,7 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         foreach (var ev in events.Where(e => e.Type == "assistant"))
         {
             var parsed = Protocol.Parse(ev.Text ?? "");
-            if (!string.IsNullOrEmpty(ev.Text)) _lastTurnHadQuestion[spec.Id] = parsed.Questions.Count > 0;
+            if (!string.IsNullOrEmpty(ev.Text)) state.SetQuestionFlag(spec.Id, parsed.Questions.Count > 0);
             if (parsed.Warnings.Count > 0)
                 warning ??= $"Ignored malformed fyrd block in {spec.Id}: {parsed.Warnings[0]}";
             if (parsed.Units is not null) ApplyUnits(spec.Id, parsed.Units);
@@ -90,7 +87,7 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         var needsAction = leadSession.Summary?.NeedsAction;
         if (leadSession.SessionStatus == "idle" && !string.IsNullOrWhiteSpace(needsAction)
             && leadSession.Summary?.StatusCategory != "completed"
-            && cursor is not null && !LastTurnHadQuestion(spec.Id)
+            && cursor is not null && !state.LastTurnHadQuestion(spec.Id)
             && !inbox.ListOpenFor(spec.Id).Any(c => c.SourceKey is not null && !c.SourceKey.Contains(":attention:")))
         {
             var key = $"{spec.Id}:attention:{cursor}";
@@ -100,15 +97,11 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         }
 
         // 3. Peers
-        var peers = await cloud.ListByTagAsync("fyrd-spec-" + spec.Id, ct);
+        var peers = (await cloud.ListByTagAsync("fyrd-spec-" + spec.Id, ct))
+            .Where(p => p.SessionStatus != "archived").ToList();
         foreach (var p in peers) state.Record(p);
         ApplyPeers(spec.Id, peers);
         return warning;
-    }
-
-    private bool LastTurnHadQuestion(string specId)
-    {
-        return _lastTurnHadQuestion.TryGetValue(specId, out var had) && had;
     }
 
     private void ApplyUnits(string specId, IReadOnlyList<UnitDecl> decls)

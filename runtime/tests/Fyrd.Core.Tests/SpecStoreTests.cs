@@ -14,7 +14,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var run = s.Create("Add export button", Repo, "# Export\nDo it.");
-        Assert.Equal("20261029-add-export-button", run.Id);
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$", run.Id);
         Assert.Equal(SpecStatus.Draft, run.Status);
         Assert.Equal("# Export\nDo it.", File.ReadAllText(Path.Combine(h.Paths.SpecDir(run.Id), "spec.md")));
         Assert.Equal("[]", File.ReadAllText(Path.Combine(h.Paths.SpecDir(run.Id), "units.json")).Trim());
@@ -29,8 +29,56 @@ public class SpecStoreTests
         s.Create("Add export button", Repo, "x");
         var second = s.Create("Add export button", Repo, "x");
         var third = s.Create("Add export button", Repo, "x");
-        Assert.Equal("20261029-add-export-button-2", second.Id);
-        Assert.Equal("20261029-add-export-button-3", third.Id);
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$", second.Id);
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$", third.Id);
+        Assert.NotEqual(second.Id, third.Id);
+    }
+
+    [Fact]
+    public void NewId_HasFourHexSuffix()
+    {
+        var id = SpecIds.NewId("Add export button", DateTimeOffset.Parse("2026-10-29T12:00:00Z"));
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}$", id);
+        Assert.True(SpecIds.IsValid(id));
+        Assert.True(SpecIds.IsValid(SpecIds.NewId(new string('a', 100), DateTimeOffset.UtcNow)));
+    }
+
+    [Fact]
+    public void CollisionTolerantPattern_MatchesSuffixedIds()
+    {
+        const string pattern = @"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$";
+        Assert.Matches(pattern, "20261029-add-export-button-ab12");
+        Assert.Matches(pattern, "20261029-add-export-button-ab12-2");
+        Assert.Matches(pattern, "20261029-add-export-button-ab12-10");
+        Assert.DoesNotMatch(pattern, "20261029-add-export-button-ab12-d");
+    }
+
+    [Fact]
+    public void NewId_SameTitleTwice_Differs()
+    {
+        var now = DateTimeOffset.Parse("2026-10-29T12:00:00Z");
+        var ids = Enumerable.Range(0, 20).Select(_ => SpecIds.NewId("Same", now)).Distinct().Count();
+        Assert.True(ids >= 19);
+    }
+
+    [Fact]
+    public void List_OldAndNewIdFormats()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var created = s.Create("New style", Repo, "x");
+        var oldDir = h.Paths.SpecDir("20260101-old-style");
+        Directory.CreateDirectory(oldDir);
+        File.Copy(Path.Combine(h.Paths.SpecDir(created.Id), "run.json"), Path.Combine(oldDir, "run.json"));
+        File.WriteAllText(Path.Combine(oldDir, "run.json"),
+            File.ReadAllText(Path.Combine(oldDir, "run.json")).Replace(created.Id, "20260101-old-style"));
+        File.WriteAllText(Path.Combine(oldDir, "spec.md"), "x");
+        File.WriteAllText(Path.Combine(oldDir, "units.json"), "[]");
+        var ids = s.List().Select(e => e.Id).ToList();
+        Assert.Contains("20260101-old-style", ids);
+        Assert.Contains(created.Id, ids);
+        Assert.All(s.List(), e => Assert.NotNull(e.Run));
+        Assert.True(SpecIds.IsValid("20260101-old-style"));
+        Assert.Equal("Research", System.Text.Json.JsonSerializer.Serialize(UnitStage.Research, Fyrd.Core.Json.Options).Trim('"'));
     }
 
     [Fact]
@@ -38,7 +86,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var run = s.Create("../../etc/Passwd ✨ now", Repo, "x");
-        Assert.Equal("20261029-etc-passwd-now", run.Id);
+        Assert.Matches(@"^20261029-etc-passwd-now-[0-9a-f]{4}(-\d+)?$", run.Id);
         var dir = Path.GetFullPath(h.Paths.SpecDir(run.Id));
         Assert.StartsWith(h.Paths.SpecsDir, dir);
         Assert.Equal(h.Paths.SpecsDir, Path.GetDirectoryName(dir));
@@ -48,9 +96,9 @@ public class SpecStoreTests
     public void Create_EmptyTitleAndLongTitle_StayValid()
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
-        Assert.Equal("20261029-spec", s.Create("✨✨", Repo, "x").Id);
+        Assert.Matches(@"^20261029-spec-[0-9a-f]{4}(-\d+)?$", s.Create("✨✨", Repo, "x").Id);
         var longId = s.Create(new string('a', 100), Repo, "x").Id;
-        Assert.Equal(9 + 40, longId.Length);
+        Assert.StartsWith("20261029-" + new string('a', 40) + "-", longId);
         Assert.True(SpecIds.IsValid(longId));
     }
 

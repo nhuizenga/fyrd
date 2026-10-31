@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -8,7 +9,7 @@ public static partial class SpecIds
     private const int MaxSlugLength = 40;
 
     public static string NewId(string title, DateTimeOffset now) =>
-        $"{now.UtcDateTime:yyyyMMdd}-{Slugify(title)}";
+        $"{now.UtcDateTime:yyyyMMdd}-{Slugify(title)}-{Convert.ToHexString(RandomNumberGenerator.GetBytes(2)).ToLowerInvariant()}";
 
     public static bool IsValid(string id) => id is not null && IdPattern().IsMatch(id);
 
