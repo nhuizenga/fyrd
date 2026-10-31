@@ -8,6 +8,9 @@ namespace Fyrd.Core.Hub;
 
 public sealed record ControllerInfo(string SessionId, string Url);
 
+/// <summary>The hub cannot act until the owner fixes a setting; the message says which.</summary>
+public sealed class HubConfigException(string message) : InvalidOperationException(message);
+
 /// <summary>Finds, creates and recreates the single Controller cloud session; its id is stored in <c>controller.json</c> under the hub dir.</summary>
 public sealed class ControllerManager
 {
@@ -104,7 +107,7 @@ public sealed class ControllerManager
     private async Task<ControllerInfo> CreateAsync(CancellationToken ct)
     {
         var config = _config.Load();
-        if (config.EnvironmentId is null) throw new InvalidOperationException("Set a cloud environment in Settings first.");
+        if (config.EnvironmentId is null) throw new HubConfigException("Set a cloud environment in Settings first.");
         var personas = _personas.List();
         var controller = personas.FirstOrDefault(p => p.Id == "controller")
             ?? throw new InvalidOperationException("The Controller persona is missing.");

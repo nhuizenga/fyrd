@@ -76,15 +76,17 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         }
     }
 
-    public void Delete(string id)
+    /// <summary>False when no such persona exists.</summary>
+    public bool Delete(string id)
     {
         lock (_gate)
         {
             SeedIfNeeded();
             var existing = Read(FileFor(Validate(id)));
-            if (existing is null) return;
+            if (existing is null) return false;
             if (existing.Locked) throw new InvalidOperationException($"Persona '{id}' is locked and cannot be deleted.");
             File.Delete(FileFor(id));
+            return true;
         }
     }
 

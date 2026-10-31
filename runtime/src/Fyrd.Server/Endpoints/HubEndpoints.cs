@@ -8,8 +8,6 @@ internal static class HubEndpoints
 {
     private const int MaxText = 20_000;
     private const int MessageCount = 50;
-    private const int EventPageLimit = 100;
-    private const int MaxEventPages = 50;
     private const string ResumeText = "Continue where you left off.";
     private const string NotPending = "This question is no longer waiting for an answer.";
 
@@ -41,8 +39,8 @@ internal static class HubEndpoints
         group.MapPost("/controller/recreate", (ControllerManager controller, CancellationToken ct) =>
             Cloud(async () => Results.Ok(await controller.RecreateAsync(ct))));
 
-        group.MapGet("/sessions/{id}/messages", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
-            InHub(id, state, () => Cloud(async () => Results.Ok(await RecentMessagesAsync(cloud, id, ct)))));
+        group.MapGet("/sessions/{id}/messages", (string id, HubState state) =>
+            InHub(id, state, () => Task.FromResult(Results.Ok(RecentMessages(state, id)))));
 
         group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
             InHub(id, state, () =>
@@ -83,11 +81,26 @@ internal static class HubEndpoints
             if (hasText && body!.Text!.Length > MaxText)
                 return Task.FromResult(Bad($"Text is longer than {MaxText} characters."));
 
-            var value = hasChoice ? body!.Choice! : body!.Text!;
+            // One can_use_tool request can carry several questions; it gets exactly one control_response with all answers.
+            var progress = state.RecordAnswer(q.Id, hasChoice ? body!.Choice! : body!.Text!);
+            if (!progress.Pending) return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
+            if (!progress.Ready)
+                return Task.FromResult(Results.Json(new { waitingFor = progress.WaitingFor }, statusCode: StatusCodes.Status202Accepted));
+            if (!state.TryClaim(q.RequestId))
+                return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
             return Cloud(async () =>
             {
-                await cloud.AnswerQuestionAsync(q.SessionId, q, new Dictionary<string, string> { [q.Question] = value }, ct);
-                state.RemoveQuestion(q.Id);
+                var sent = false;
+                try
+                {
+                    await cloud.AnswerQuestionAsync(q.SessionId, q, progress.Answers!, ct);
+                    sent = true;
+                }
+                finally
+                {
+                    if (!sent) state.Release(q.RequestId);
+                }
+                state.CompleteRequest(q.RequestId);
                 return Results.NoContent();
             });
         });
@@ -104,9 +117,13 @@ internal static class HubEndpoints
 
         group.MapDelete("/personas/{id}", (string id, HubPersonas personas) => ApiErrors.Run(() =>
         {
-            try { personas.Delete(id); }
+            try
+            {
+                return personas.Delete(id)
+                    ? Results.NoContent()
+                    : Results.Problem($"Persona '{id}' not found.", statusCode: StatusCodes.Status404NotFound);
+            }
             catch (InvalidOperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict); }
-            return Results.NoContent();
         }));
 
         group.MapGet("/memory", (HubMemory memory, HubPersonas personas) => ApiErrors.Run(() =>
@@ -159,24 +176,13 @@ internal static class HubEndpoints
         catch (InvalidOperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict); }
     });
 
-    private static async Task<IReadOnlyList<MessageView>> RecentMessagesAsync(ICloudSessions cloud, string id, CancellationToken ct)
-    {
-        var recent = new Queue<MessageView>();
-        string? after = null;
-        for (var page = 0; page < MaxEventPages; page++)
-        {
-            var p = await cloud.ListEventsAsync(id, EventPageLimit, after, null, ct);
-            foreach (var e in p.Events)
-            {
-                if (e.Type is not ("user" or "assistant") || string.IsNullOrWhiteSpace(e.Text)) continue;
-                recent.Enqueue(new MessageView(e.Type == "user" ? "user" : "agent", e.Text, e.CreatedAt));
-                if (recent.Count > MessageCount) recent.Dequeue();
-            }
-            if (!p.HasMore || p.LastId is null || p.LastId == after) break;
-            after = p.LastId;
-        }
-        return recent.ToList();
-    }
+    /// <summary>The last user/assistant messages from the poll's in-memory event window; no cloud calls.</summary>
+    private static IReadOnlyList<MessageView> RecentMessages(HubState state, string id) =>
+        state.RecentEvents(id)
+            .Where(e => e.Type is "user" or "assistant" && !string.IsNullOrWhiteSpace(e.Text))
+            .TakeLast(MessageCount)
+            .Select(e => new MessageView(e.Type == "user" ? "user" : "agent", e.Text!, e.CreatedAt))
+            .ToList();
 
     private static IResult? TextError(string? text) =>
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")
@@ -191,7 +197,7 @@ internal static class HubEndpoints
             ? action()
             : Task.FromResult(Results.Problem($"Session '{id}' is not a hub session.", statusCode: StatusCodes.Status404NotFound));
 
-    /// <summary>Runs a cloud call; auth and API failures become 502, a missing environment becomes 400.</summary>
+    /// <summary>Runs a cloud call; auth and API failures become 502, a missing hub setting becomes 400.</summary>
     private static Task<IResult> Cloud(Func<Task<IResult>> action) => ApiErrors.RunAsync(async () =>
     {
         try
@@ -210,7 +216,7 @@ internal static class HubEndpoints
         {
             return Results.Problem("Claude did not respond in time.", statusCode: StatusCodes.Status502BadGateway);
         }
-        catch (InvalidOperationException e)
+        catch (HubConfigException e)
         {
             return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest);
         }

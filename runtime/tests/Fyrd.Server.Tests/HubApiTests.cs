@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Fyrd.Core.CloudSessions;
 using Fyrd.Core.Config;
 using Fyrd.Core.Hub;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,20 +140,57 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task Messages_ReturnsUserAndAgentText()
+    public async Task Messages_ReturnsUserAndAgentText_FromPollWindow()
     {
         using var f = new FyrdFactory();
         Seed(f);
-        f.Cloud.AddEvent(SessionId, new("e1", "user", DateTimeOffset.UnixEpoch, "do it", Core.Tests.FakeCloudSessions.Empty));
-        f.Cloud.AddEvent(SessionId, new("e2", "system", DateTimeOffset.UnixEpoch, null, Core.Tests.FakeCloudSessions.Empty));
-        f.Cloud.AddAssistantEvent(SessionId, "e3", "done");
-        var body = await ReadJson(await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages"));
-        var list = body.EnumerateArray().ToList();
+        var empty = Core.Tests.FakeCloudSessions.Empty;
+        f.Services.GetRequiredService<HubState>().PublishRecent(new Dictionary<string, IReadOnlyList<SessionEvent>>
+        {
+            [SessionId] =
+            [
+                new("e1", "user", DateTimeOffset.UnixEpoch, "do it", empty),
+                new("e2", "system", DateTimeOffset.UnixEpoch, null, empty),
+                new("e3", "user", DateTimeOffset.UnixEpoch, "", empty),
+                new("e4", "assistant", DateTimeOffset.UnixEpoch, "done", empty),
+            ],
+        });
+        var list = (await ReadJson(await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages")))
+            .EnumerateArray().ToList();
         Assert.Equal(2, list.Count);
         Assert.Equal("user", list[0].GetProperty("role").GetString());
         Assert.Equal("do it", list[0].GetProperty("text").GetString());
         Assert.Equal("agent", list[1].GetProperty("role").GetString());
         Assert.True(list[1].TryGetProperty("at", out _));
+        Assert.Empty(f.Cloud.EventAfterIds); // served from memory, no cloud calls
+    }
+
+    [Fact]
+    public async Task Messages_KeepsLast50()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var events = Enumerable.Range(0, 120)
+            .Select(i => new SessionEvent("e" + i, "assistant", DateTimeOffset.UnixEpoch, "m" + i, Core.Tests.FakeCloudSessions.Empty))
+            .ToList();
+        f.Services.GetRequiredService<HubState>().PublishRecent(
+            new Dictionary<string, IReadOnlyList<SessionEvent>> { [SessionId] = events });
+        var list = (await ReadJson(await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages")))
+            .EnumerateArray().ToList();
+        Assert.Equal(50, list.Count);
+        Assert.Equal("m70", list[0].GetProperty("text").GetString());
+        Assert.Equal("m119", list[^1].GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task Messages_WindowNotPopulated_Empty()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var r = await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal(0, (await ReadJson(r)).GetArrayLength());
+        Assert.Empty(f.Cloud.EventAfterIds);
     }
 
     [Fact]
@@ -178,6 +216,7 @@ public class HubApiTests
             p => p.GetProperty("id").GetString() == "scout");
         Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync("/api/hub/personas/scout")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync("/api/hub/personas/scout")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync("/api/hub/personas/scout")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await c.DeleteAsync("/api/hub/personas/Bad_Id")).StatusCode);
     }
 
@@ -257,6 +296,74 @@ public class HubApiTests
             (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { })).StatusCode);
         Assert.Empty(f.Cloud.Answered);
         Assert.Single(f.Services.GetRequiredService<HubState>().Questions);
+    }
+
+    private static HubQuestion Sibling(string id, string text) => Question(id) with { Question = text };
+
+    [Fact]
+    public async Task Answer_TwoQuestionRequest_SendsOnceWithBoth()
+    {
+        using var f = new FyrdFactory();
+        var state = f.Services.GetRequiredService<HubState>();
+        state.Publish([View()], [Sibling("q1", "Pick a fruit"), Sibling("q2", "Pick a colour")]);
+        var c = f.CreateClient();
+
+        var first = await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" });
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        Assert.Equal(1, (await ReadJson(first)).GetProperty("waitingFor").GetInt32());
+        Assert.Empty(f.Cloud.Answered);
+
+        var second = await c.PostAsJsonAsync("/api/hub/questions/q2/answer", new { text = "Teal" });
+        Assert.Equal(HttpStatusCode.NoContent, second.StatusCode);
+        var answered = Assert.Single(f.Cloud.Answered);
+        Assert.Equal(2, answered.Answers.Count);
+        Assert.Equal("Banana", answered.Answers["Pick a fruit"]);
+        Assert.Equal("Teal", answered.Answers["Pick a colour"]);
+        Assert.Empty(state.Questions);
+    }
+
+    [Fact]
+    public async Task Answer_Concurrent_OnlyOneSent()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var c = f.CreateClient();
+        var results = await Task.WhenAll(
+            c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Apple" }),
+            c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" }));
+        Assert.Single(results, r => r.StatusCode == HttpStatusCode.NoContent);
+        Assert.Single(results, r => r.StatusCode == HttpStatusCode.Conflict);
+        Assert.Single(f.Cloud.Answered);
+    }
+
+    [Fact]
+    public async Task Answer_ThenStalePublish_StaysGone()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" })).StatusCode);
+        f.Services.GetRequiredService<HubState>().Publish([View()], [Question()]); // poll pass that started before the answer
+        Assert.Equal(0, (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("questions").GetArrayLength());
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Apple" })).StatusCode);
+        Assert.Single(f.Cloud.Answered);
+    }
+
+    [Fact]
+    public async Task Answer_CloudFails_502_ThenRetrySucceeds()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var c = f.CreateClient();
+        f.Cloud.ThrowOnNextCall(new Fyrd.Core.CloudSessions.CloudSessionApiException(500, "boom"));
+        Assert.Equal(HttpStatusCode.BadGateway,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" })).StatusCode);
+        Assert.Single(f.Services.GetRequiredService<HubState>().Questions);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana" })).StatusCode);
+        Assert.Single(f.Cloud.Answered);
     }
 
     [Fact]

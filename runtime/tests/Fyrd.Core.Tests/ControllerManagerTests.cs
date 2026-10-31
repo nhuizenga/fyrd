@@ -98,7 +98,7 @@ public sealed class ControllerManagerTests : IDisposable
     [Fact]
     public async Task FindOrCreate_NoEnvironment_Throws()
     {
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Make(withEnv: false).FindOrCreateAsync(default));
+        var ex = await Assert.ThrowsAsync<HubConfigException>(() => Make(withEnv: false).FindOrCreateAsync(default));
         Assert.Equal("Set a cloud environment in Settings first.", ex.Message);
     }
 
