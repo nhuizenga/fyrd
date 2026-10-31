@@ -46,6 +46,28 @@ it("no controller shows Start Controller", async () => {
   expect(open).toHaveBeenCalledWith("https://claude.ai/code/c", "_blank", "noopener");
 });
 
+it("Open Controller asks the server for a live Controller and opens that url", async () => {
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  vi.mocked(api.openController).mockResolvedValue({ sessionId: "c2", url: "https://claude.ai/code/c2" });
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: "Open Controller" }));
+  expect(api.openController).toHaveBeenCalled();
+  expect(open).toHaveBeenCalledWith("https://claude.ai/code/c2", "_blank", "noopener");
+  expect(open).not.toHaveBeenCalledWith("https://claude.ai/code/c", "_blank", "noopener");
+});
+
+it("Recreate Controller confirms, recreates and opens the new one", async () => {
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  vi.mocked(api.recreateController).mockResolvedValue({ sessionId: "c3", url: "https://claude.ai/code/c3" });
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: "Recreate Controller" }));
+  expect(api.recreateController).not.toHaveBeenCalled();
+  expect(screen.getByText("This archives the current Controller and starts a new one.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Archive and start new" }));
+  expect(api.recreateController).toHaveBeenCalled();
+  expect(open).toHaveBeenCalledWith("https://claude.ai/code/c3", "_blank", "noopener");
+});
+
 it("select session loads messages", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));

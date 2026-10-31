@@ -39,7 +39,7 @@ const renderSettings = async () => {
 
 it("environment save calls updateConfig", async () => {
   await renderSettings();
-  const field = screen.getByLabelText("Cloud environment name");
+  const field = screen.getByLabelText("Cloud environment id");
   await userEvent.type(field, "env_123");
   await userEvent.click(screen.getByRole("button", { name: "Save environment" }));
   expect(api.updateConfig).toHaveBeenCalledWith({ environmentId: "env_123" });
@@ -121,6 +121,22 @@ it("memory groups shared first; add, edit, delete entry", async () => {
   expect(screen.getByText("Delete this entry? Agents will stop seeing it.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
   expect(api.deleteMemory).toHaveBeenCalledWith("shared", "e1");
+});
+
+it("memory scope picker hides the Controller (its memory is Shared)", async () => {
+  vi.mocked(api.getHubMemory).mockResolvedValue({
+    scopes: [...memory.scopes, { scope: "controller", label: "Controller", entries: [] }],
+  });
+  await renderSettings();
+  await userEvent.click(screen.getByRole("combobox", { name: "Memory scope" }));
+  expect(await screen.findByRole("option", { name: "Builder" })).toBeInTheDocument();
+  expect(screen.queryByRole("option", { name: "Controller" })).not.toBeInTheDocument();
+});
+
+it("definition helper text appears once", async () => {
+  await renderSettings();
+  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
+  expect(screen.getAllByText("Instructions given to the agent at the start of every session that uses this persona.")).toHaveLength(1);
 });
 
 it("changes apply note", async () => {

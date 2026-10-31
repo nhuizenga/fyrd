@@ -58,7 +58,7 @@ function EnvironmentCard() {
       {error && <Alert status="danger" title={error} role="alert" />}
       {saved && <Text role="status">{saved}</Text>}
       <TextField
-        label="Cloud environment name"
+        label="Cloud environment id"
         description="The environment new sessions start in. Running sessions keep their current environment."
         value={env}
         onChange={(e) => setEnv(e.target.value)}
@@ -182,7 +182,6 @@ function PersonasCard() {
                 value={d.definition}
                 onChange={(e) => patch({ definition: e.target.value })}
               />
-              <Text size="small" subdued>Instructions given to the agent at the start of every session that uses this persona.</Text>
               <Text size="small" subdued>{APPLY_NOTE}</Text>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button appearance="primary" onClick={save}>Save persona</Button>
@@ -271,7 +270,9 @@ function MemoryCard() {
   useEffect(() => { void load(); }, [load]);
 
   const scopes = [...memory.scopes].sort((a, b) => Number(b.scope === "shared") - Number(a.scope === "shared"));
-  const scopeOptions = (scopes.length ? scopes : [{ scope: "shared", label: "Shared", entries: [] }]).map((s) => ({ id: s.scope, label: s.label }));
+  // The Controller's memory is Shared memory, so it is not offered as a scope of its own.
+  const pickable = scopes.filter((s) => s.scope !== "controller");
+  const scopeOptions = (pickable.length ? pickable : [{ scope: "shared", label: "Shared", entries: [] }]).map((s) => ({ id: s.scope, label: s.label }));
   const total = scopes.reduce((n, s) => n + s.entries.length, 0);
 
   const add = async () => {

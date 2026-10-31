@@ -11,6 +11,7 @@ export default function SessionsScreen({ state, onChanged, onOpenInbox }: Screen
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
+  const [confirmRecreate, setConfirmRecreate] = useState(false);
 
   const controllerId = state?.controller?.sessionId ?? null;
   const isController = (s: HubSessionView) => s.id === controllerId || s.tags.includes("fyrd-controller");
@@ -52,9 +53,18 @@ export default function SessionsScreen({ state, onChanged, onOpenInbox }: Screen
     }));
   }, [state?.sessions]);
 
-  const startController = () =>
+  // Always ask the server: it finds the live Controller or starts one, so an archived id never becomes a dead link.
+  const openController = () =>
     run(async () => {
       const info = await api.openController();
+      window.open(info.url, "_blank", "noopener");
+      await onChanged();
+    });
+
+  const recreateController = () =>
+    run(async () => {
+      setConfirmRecreate(false);
+      const info = await api.recreateController();
       window.open(info.url, "_blank", "noopener");
       await onChanged();
     });
@@ -69,13 +79,23 @@ export default function SessionsScreen({ state, onChanged, onOpenInbox }: Screen
       <Text subdued>{all.length} Claude Code sessions</Text>
       {error && <Alert status="danger" title={error} role="alert" />}
       <div>
-        {state && !state.controller && <Button appearance="primary" onClick={startController}>Start Controller</Button>}
+        {state && !state.controller && <Button appearance="primary" onClick={openController}>Start Controller</Button>}
         {state?.controller && (
-          <Button appearance="secondary" onClick={() => window.open(state.controller!.url, "_blank", "noopener")}>
-            Open Controller
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button appearance="secondary" onClick={openController}>Open Controller</Button>
+            <Button appearance="ghost" onClick={() => setConfirmRecreate(true)}>Recreate Controller</Button>
+          </div>
         )}
       </div>
+      {confirmRecreate && (
+        <Alert status="warning" title="Recreate the Controller?">
+          <Text>This archives the current Controller and starts a new one.</Text>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button appearance="primary" onClick={recreateController}>Archive and start new</Button>
+            <Button appearance="ghost" onClick={() => setConfirmRecreate(false)}>Cancel</Button>
+          </div>
+        </Alert>
+      )}
       <div className="split">
         <div className="card">
           <SearchField aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch("")} />

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
-import { hubState, question } from "../test/fixtures";
+import { hubState, question, session } from "../test/fixtures";
 import InboxScreen from "./InboxScreen";
 
 vi.mock("../api");
@@ -51,6 +51,29 @@ it("409 shows no-longer-waiting message and an Open in claude.ai link", async ()
   await userEvent.click(screen.getByRole("button", { name: "Apple" }));
   expect(await screen.findByText("This question is no longer waiting for an answer.")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open in claude.ai" })).toHaveAttribute("href", "https://claude.ai/code/s1");
+});
+
+it("card shows the session's repo and age, and loads the conversation on expand", async () => {
+  vi.mocked(api.getMessages).mockResolvedValue([{ role: "agent", text: "Which DB should I use?", at: "t" }]);
+  const askedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+  render(
+    <InboxScreen
+      state={hubState({
+        sessions: [session({ id: "s1", repo: "acme/web" })],
+        questions: [question({ askedAt })],
+      })}
+      onChanged={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(/acme\/web/)).toBeInTheDocument();
+  expect(screen.getByText(/5m ago/)).toBeInTheDocument();
+  expect(api.getMessages).not.toHaveBeenCalled();
+  const toggle = screen.getByRole("button", { name: "Conversation so far" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(toggle);
+  expect(api.getMessages).toHaveBeenCalledWith("s1");
+  expect(await screen.findByText("Which DB should I use?")).toBeInTheDocument();
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
 });
 
 it("202 marks the question answered and shows how many remain", async () => {
