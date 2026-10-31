@@ -255,6 +255,26 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task GetUndelivered_ListsFailedRelays()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
+        var inbox = f.Services.GetRequiredService<InboxStore>();
+        var card = inbox.Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
+        var c = f.CreateClient();
+        Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox/undelivered"))).EnumerateArray());
+
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
+        var list = (await ReadJson(await c.GetAsync("/api/inbox/undelivered"))).EnumerateArray().ToList();
+        var item = Assert.Single(list);
+        Assert.Equal(card.Id, item.GetProperty("id").GetString());
+        Assert.Equal("failed", item.GetProperty("answer").GetProperty("relayStatus").GetString());
+        Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox"))).EnumerateArray());
+    }
+
+    [Fact]
     public async Task PutConfig_SameCap_DoesNotRelay_ChangedCapRelays()
     {
         using var f = new FyrdFactory();
