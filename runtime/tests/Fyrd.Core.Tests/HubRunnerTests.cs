@@ -37,12 +37,19 @@ public sealed class HubRunnerTests : IDisposable
     private HubRunner Make() => new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time);
 
     private static CloudSession Hub(string id, string title, string status = "idle", string? role = null,
-        bool controller = false, string raw = "{}")
+        string raw = "{}")
     {
         var tags = new List<string> { "fyrd-hub" };
         if (role is not null) tags.Add("fyrd-role-" + role);
-        if (controller) tags.Add("fyrd-controller");
         return new CloudSession(id, title, status, "connected", null, tags, JsonDocument.Parse(raw).RootElement.Clone());
+    }
+
+    /// <summary>Adopts an untagged session the owner made on claude.ai, then forgets the prompt Fyrd sent it.</summary>
+    private async Task Adopt(string id, string title, string status = "idle")
+    {
+        _cloud.SetSession(new CloudSession(id, title, status, "connected", null, [], FakeCloudSessions.Empty));
+        await _controller.AdoptAsync(id, default);
+        _cloud.Sent.Clear();
     }
 
     private static string Remember(string scope, string text) =>
@@ -143,15 +150,83 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_ControllerRoleScope_GoesToShared()
     {
-        _cloud.SetByTag("fyrd-hub", Hub("ctl", "controller", role: "controller", controller: true));
-        _cloud.AddAssistantEvent("ctl", "e1", Remember("role", "Owner prefers small PRs."));
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("session_ctl", "controller", role: "builder"));
+        _cloud.AddAssistantEvent("session_ctl", "e1", Remember("role", "Owner prefers small PRs."));
 
         await Make().PollOnceAsync(default);
 
         var entry = Assert.Single(_memory.List(HubMemory.Shared));
         Assert.Equal("Owner prefers small PRs.", entry.Text);
         Assert.Equal("controller", entry.Source);
+        Assert.Empty(_memory.List("builder"));
+        Assert.Equal("controller", Assert.Single(_state.Sessions).Role);
+    }
+
+    [Fact]
+    public async Task Poll_AdoptedUntaggedController_PolledAsHubSession()
+    {
+        await Adopt("session_ctl", "My hub", "requires_action");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("session_ctl", "e1", Remember("role", "Owner prefers small PRs."));
+        foreach (var e in FixtureEvents.Load("ask-user-pending.json")) _cloud.AddEvent("session_ctl", e);
+
+        await Make().PollOnceAsync(default);
+
+        var entry = Assert.Single(_memory.List(HubMemory.Shared));
+        Assert.Equal("Owner prefers small PRs.", entry.Text);
+        Assert.Equal("My hub", entry.Source);
         Assert.Empty(_memory.List("controller"));
+        var view = _state.Sessions.Single(s => s.Id == "session_ctl");
+        Assert.Equal("controller", view.Role);
+        Assert.Equal("My hub", view.Title);
+        Assert.Equal("requires_action", view.Status);
+        Assert.Equal(2, _state.Sessions.Count);
+        var q = Assert.Single(_state.Questions);
+        Assert.Equal("session_ctl", q.SessionId);
+        Assert.Equal("My hub", q.SessionTitle);
+        Assert.Null(_state.LastError);
+    }
+
+    [Fact]
+    public async Task Poll_AdoptedController_UntitledFallsBackToController()
+    {
+        await Adopt("session_ctl", "");
+        _cloud.SetByTag("fyrd-hub");
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("controller", Assert.Single(_state.Sessions).Title);
+    }
+
+    [Fact]
+    public async Task Poll_AdoptedController_ArchivedOrGone_NotListed()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("s1", Assert.Single(_state.Sessions).Id);
+        Assert.Null(_state.LastError);
+    }
+
+    [Fact]
+    public async Task Poll_AdoptedController_FetchFails_KeepsPreviousViewAndRecordsError()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        Assert.Equal(2, _state.Sessions.Count);
+
+        _cloud.SkipCalls(1); // the tag listing succeeds
+        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom")); // GetAsync on the Controller fails
+        await runner.PollOnceAsync(default);
+
+        Assert.Contains("session_ctl", _state.LastError);
+        Assert.Equal(2, _state.Sessions.Count);
     }
 
     [Fact]
@@ -211,8 +286,8 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_MemoryChanged_PostsUpdateToControllerOnce()
     {
-        var ctl = await _controller.FindOrCreateAsync(default);
-        _cloud.SetByTag("fyrd-hub", Hub(ctl.SessionId, "controller", role: "controller", controller: true));
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
         var runner = Make();
         await runner.PollOnceAsync(default);
         Assert.Empty(_cloud.Sent);
@@ -222,7 +297,7 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default);
 
         var sent = Assert.Single(_cloud.Sent);
-        Assert.Equal(ctl.SessionId, sent.SessionId);
+        Assert.Equal("session_ctl", sent.SessionId);
         Assert.StartsWith("Fyrd memory update.", sent.Text);
         Assert.Contains("Ship on Fridays is fine.", sent.Text);
     }
@@ -230,8 +305,9 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_ControllerArchived_NoMemoryPost()
     {
-        await _controller.FindOrCreateAsync(default);
-        _cloud.SetByTag("fyrd-hub", Hub("created-1", "controller", "archived", role: "controller", controller: true));
+        await Adopt("session_ctl", "controller");
+        _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
+        _cloud.SetByTag("fyrd-hub");
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
 
         await Make().PollOnceAsync(default);

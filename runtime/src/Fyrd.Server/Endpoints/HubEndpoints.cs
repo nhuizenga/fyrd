@@ -9,9 +9,11 @@ internal static class HubEndpoints
     private const int MaxText = 20_000;
     private const int MessageCount = 50;
     private const string ResumeText = "Continue where you left off.";
+    private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
     private const string NotPending = "This question is no longer waiting for an answer.";
 
     private sealed record TextBody(string? Text);
+    private sealed record AdoptBody(string? SessionId);
     private sealed record AnswerBody(string? Choice, string? Text);
     private sealed record MessageView(string Role, string Text, DateTimeOffset At);
 
@@ -34,11 +36,21 @@ internal static class HubEndpoints
             });
         }));
 
+        // Fyrd never creates the Controller: the owner makes it on claude.ai (so it has connectors) and adopts it here.
         group.MapPost("/controller", (ControllerManager controller, CancellationToken ct) =>
-            Cloud(async () => Results.Ok(await controller.FindOrCreateAsync(ct))));
+            Cloud(async () => await controller.FindAsync(ct) is { } info
+                ? Results.Ok(info)
+                : Results.Problem(NoController, statusCode: StatusCodes.Status404NotFound)));
 
-        group.MapPost("/controller/recreate", (ControllerManager controller, CancellationToken ct) =>
-            Cloud(async () => Results.Ok(await controller.RecreateAsync(ct))));
+        group.MapPost("/controller/adopt", (AdoptBody? body, ControllerManager controller, CancellationToken ct) =>
+            Cloud(async () => Results.Ok(await controller.AdoptAsync(body?.SessionId ?? "", ct))));
+
+        group.MapPost("/controller/retire", (ControllerManager controller, CancellationToken ct) =>
+            Cloud(async () =>
+            {
+                await controller.RetireAsync(ct);
+                return Results.NoContent();
+            }));
 
         group.MapGet("/sessions/{id}/messages", (string id, HubState state) =>
             InHub(id, state, () => Task.FromResult(Results.Ok(RecentMessages(state, id)))));

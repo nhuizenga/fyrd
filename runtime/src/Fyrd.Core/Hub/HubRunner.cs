@@ -15,7 +15,6 @@ public sealed partial class HubRunner(
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
-    private const string ControllerTag = "fyrd-controller";
     private const string ControllerRole = "controller";
     private const string RequiresAction = "requires_action";
     private const int RecentEvents = 200;
@@ -32,6 +31,7 @@ public sealed partial class HubRunner(
     private readonly Dictionary<string, Window> _windows = new(StringComparer.Ordinal);
     private readonly string _cursorFile = Path.Combine(paths.HubDir, "cursors.json");
     private Dictionary<string, string>? _cursors;
+    private string? _controllerId;
 
     [GeneratedRegex("^[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex ScopeRegex();
@@ -61,6 +61,27 @@ public sealed partial class HubRunner(
         var views = new List<HubSessionView>();
         var questions = new List<HubQuestion>();
         var failed = new HashSet<string>(StringComparer.Ordinal);
+
+        // The owner creates the Controller on claude.ai, so it carries no fyrd-hub tag: fetch it by its stored id.
+        _controllerId = controller.CurrentId;
+        if (_controllerId is { } cid && sessions.All(s => s.Id != cid))
+        {
+            try
+            {
+                var c = await cloud.GetAsync(cid, ct);
+                if (c.SessionStatus != "archived") sessions.Add(c);
+            }
+            catch (CloudSessionApiException e) when (e.Status == 404) { }
+            catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
+                                      && (e is not OperationCanceledException || !ct.IsCancellationRequested))
+            {
+                // Unknown liveness: keep what the last pass showed, and do not post memory to it.
+                lastError ??= $"{cid}: {e.Message}";
+                failed.Add(cid);
+                if (previousViews.TryGetValue(cid, out var old)) views.Add(old);
+                questions.AddRange(previousQuestions[cid]);
+            }
+        }
         foreach (var s in sessions)
         {
             ct.ThrowIfCancellationRequested();
@@ -83,7 +104,7 @@ public sealed partial class HubRunner(
             }
         }
 
-        Prune(sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal));
+        Prune(sessions.Select(s => s.Id).Concat(failed).ToHashSet(StringComparer.Ordinal));
         state.PublishRecent(_windows.ToDictionary(
             kv => kv.Key, kv => (IReadOnlyList<SessionEvent>)kv.Value.Recent.ToArray(), StringComparer.Ordinal));
         state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed);
@@ -155,7 +176,7 @@ public sealed partial class HubRunner(
     private void Capture(CloudSession s, IEnumerable<SessionEvent> events, Dictionary<string, string> cursors)
     {
         var role = Role(s);
-        var isController = s.Tags.Contains(ControllerTag) || role == ControllerRole;
+        var isController = role == ControllerRole;
         var source = Title(s);
         foreach (var e in events)
         {
@@ -178,10 +199,10 @@ public sealed partial class HubRunner(
         }
     }
 
-    /// <summary>Posts only to a Controller this pass listed as live; an archived one is never written to.</summary>
+    /// <summary>Posts only to the Controller this pass read as live; an archived or unreadable one is never written to.</summary>
     private async Task PostMemoryUpdateAsync(IReadOnlySet<string> live, CancellationToken ct)
     {
-        if (controller.CurrentId is not { } controllerId || !live.Contains(controllerId)) return;
+        if (_controllerId is not { } controllerId || !live.Contains(controllerId)) return;
         var text = HubPrompt.MemoryUpdate(memory, personas.List());
         // Hashed over the exact text sent, so a concurrent memory edit cannot be marked as posted.
         var hash = ControllerManager.Hash(text);
@@ -197,17 +218,22 @@ public sealed partial class HubRunner(
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
     }
 
-    private static HubSessionView View(CloudSession s, DateTimeOffset? lastActivity)
+    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity)
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
         return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
             CreatedAt(s.Raw), lastActivity, s.Tags.ToList());
     }
 
-    private static string Title(CloudSession s) => string.IsNullOrEmpty(s.Title) ? s.Id : s.Title;
+    private bool IsController(CloudSession s) => s.Id == _controllerId;
 
-    private static string? Role(CloudSession s) =>
-        s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..];
+    private string Title(CloudSession s) =>
+        !string.IsNullOrEmpty(s.Title) ? s.Title : IsController(s) ? ControllerRole : s.Id;
+
+    /// <summary>The Controller is identified by its stored id (an adopted one has no role tag); others by their role tag.</summary>
+    private string? Role(CloudSession s) =>
+        IsController(s) ? ControllerRole
+        : s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..];
 
     private static DateTimeOffset? CreatedAt(JsonElement raw) =>
         Str(raw, "created_at") is { } v && DateTimeOffset.TryParse(v, out var at) ? at : null;

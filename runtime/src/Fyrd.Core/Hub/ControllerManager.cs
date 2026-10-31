@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Fyrd.Core.CloudSessions;
 using Fyrd.Core.Config;
 
@@ -11,11 +12,15 @@ public sealed record ControllerInfo(string SessionId, string Url);
 /// <summary>The hub cannot act until the owner fixes a setting; the message says which.</summary>
 public sealed class HubConfigException(string message) : InvalidOperationException(message);
 
-/// <summary>Finds, creates and recreates the single Controller cloud session; its id is stored in <c>controller.json</c> under the hub dir.</summary>
-public sealed class ControllerManager
+/// <summary>
+/// Adopts, finds and retires the single Controller cloud session. The owner creates it on claude.ai; Fyrd never creates it.
+/// Its id is stored in <c>controller.json</c> under the hub dir.
+/// </summary>
+public sealed partial class ControllerManager
 {
-    private const string ControllerTag = "fyrd-controller";
-    private const string FirstMessage = "You are online. Wait for the owner's first request.";
+    public const string PromptPreamble =
+        "You are the Fyrd Controller. Follow the instructions below for the rest of this session; they replace any earlier instructions.";
+    private const string Unavailable = "That session isn't available. Create a new one on claude.ai and paste its id.";
 
     private sealed record State(string? SessionId, string? PostedMemoryHash);
 
@@ -54,86 +59,84 @@ public sealed class ControllerManager
     public static string Hash(string text) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
-    public async Task<ControllerInfo> FindOrCreateAsync(CancellationToken ct)
+    /// <summary>
+    /// Adopts a session the owner created on claude.ai (Fyrd-created sessions get no claude.ai connectors, so they
+    /// cannot create sessions): checks it is live, archives a different live previous Controller, sends the Controller
+    /// prompt as a user message, and stores the id.
+    /// </summary>
+    public async Task<ControllerInfo> AdoptAsync(string sessionId, CancellationToken ct)
     {
+        var id = (sessionId ?? "").Trim();
+        if (!SessionIdRegex().IsMatch(id))
+            throw new HubConfigException("That isn't a session id. Paste the id that starts with session_ (the last part of the session's claude.ai URL).");
+
         await _gate.WaitAsync(ct);
         try
         {
-            if (CurrentId is { } stored)
+            if (!await IsLiveAsync(id, ct)) throw new HubConfigException(Unavailable);
+
+            // Built before any side effect, so a missing Controller persona leaves the current Controller alone.
+            var personas = _personas.List();
+            var hash = MemoryHash(_memory, personas);
+            var prompt = PromptPreamble + "\n\n" + HubPrompt.Controller(personas, _memory, _config.Load());
+
+            if (CurrentId is { } previous && previous != id && await IsLiveAsync(previous, ct))
             {
-                try
-                {
-                    var s = await _cloud.GetAsync(stored, ct);
-                    if (s.SessionStatus != "archived") return Info(stored);
-                }
+                try { await _cloud.ArchiveAsync(previous, ct); }
                 catch (CloudSessionApiException e) when (e.Status == 404) { }
             }
 
-            var live = (await _cloud.ListByTagAsync(ControllerTag, ct))
-                .Where(s => s.SessionStatus != "archived")
-                .OrderByDescending(CreatedAt)
-                .ToList();
-            if (live.Count > 0)
-            {
-                foreach (var extra in live.Skip(1))
-                {
-                    try { await _cloud.ArchiveAsync(extra.Id, ct); }
-                    catch (CloudSessionApiException e) when (e.Status == 404) { }
-                }
-                lock (_stateLock) SaveState(new State(live[0].Id, null));
-                return Info(live[0].Id);
-            }
-            return await CreateAsync(ct);
+            await _cloud.SendMessageAsync(id, prompt, ct);
+            lock (_stateLock) SaveState(new State(id, hash));
+            return Info(id);
         }
         finally { _gate.Release(); }
     }
 
-    public async Task<ControllerInfo> RecreateAsync(CancellationToken ct)
+    /// <summary>The stored Controller when it is still live; otherwise clears the stored id and returns null.
+    /// Errors other than 404 propagate and change nothing.</summary>
+    public async Task<ControllerInfo?> FindAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
         {
-            if (CurrentId is { } current)
-            {
-                try { await _cloud.ArchiveAsync(current, ct); }
-                catch (CloudSessionApiException e) when (e.Status == 404) { }
-                lock (_stateLock) SaveState(new State(null, null));
-            }
-            return await CreateAsync(ct);
+            if (CurrentId is not { } stored) return null;
+            if (await IsLiveAsync(stored, ct)) return Info(stored);
+            lock (_stateLock) SaveState(new State(null, null));
+            return null;
         }
         finally { _gate.Release(); }
     }
 
-    private async Task<ControllerInfo> CreateAsync(CancellationToken ct)
+    /// <summary>Archives the current Controller (404 ignored) and clears the stored id; the owner then adopts a new one.</summary>
+    public async Task RetireAsync(CancellationToken ct)
     {
-        var config = _config.Load();
-        if (config.EnvironmentId is null) throw new HubConfigException("Set a cloud environment in Settings first.");
-        var personas = _personas.List();
-        var controller = personas.FirstOrDefault(p => p.Id == "controller")
-            ?? throw new HubConfigException("The Controller persona is missing.");
-        var hash = MemoryHash(_memory, personas);
-        var created = await _cloud.CreateAsync(new CreateSessionRequest(
-            "controller",
-            ["fyrd-hub", "fyrd-role-controller", ControllerTag],
-            config.EnvironmentId,
-            FirstMessage,
-            controller.Model,
-            HubPrompt.Controller(personas, _memory, config),
-            null,
-            "auto"), ct);
-        lock (_stateLock) SaveState(new State(created.Id, hash));
-        return Info(created.Id);
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (CurrentId is not { } current) return;
+            try { await _cloud.ArchiveAsync(current, ct); }
+            catch (CloudSessionApiException e) when (e.Status == 404) { }
+            lock (_stateLock) SaveState(new State(null, null));
+        }
+        finally { _gate.Release(); }
     }
+
+    /// <summary>False when the session is archived or gone (404); other errors propagate.</summary>
+    private async Task<bool> IsLiveAsync(string id, CancellationToken ct)
+    {
+        try
+        {
+            var s = await _cloud.GetAsync(id, ct);
+            return s.SessionStatus != "archived";
+        }
+        catch (CloudSessionApiException e) when (e.Status == 404) { return false; }
+    }
+
+    [GeneratedRegex("^session_[A-Za-z0-9]+$", RegexOptions.CultureInvariant)]
+    private static partial Regex SessionIdRegex();
 
     private static ControllerInfo Info(string id) => new(id, "https://claude.ai/code/" + id);
-
-    private static DateTimeOffset CreatedAt(CloudSession s) =>
-        s.Raw.ValueKind == JsonValueKind.Object
-        && s.Raw.TryGetProperty("created_at", out var v)
-        && v.ValueKind == JsonValueKind.String
-        && DateTimeOffset.TryParse(v.GetString(), out var at)
-            ? at
-            : DateTimeOffset.MinValue;
 
     private State LoadState()
     {
