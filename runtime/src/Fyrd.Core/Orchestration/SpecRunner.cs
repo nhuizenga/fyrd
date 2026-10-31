@@ -139,8 +139,15 @@ public sealed class SpecRunner(
             {
                 if (parsed.SpecDraft is { } sd)
                 {
-                    specs.SaveProposal(spec.Id, sd.Markdown, sd.Summary ?? "", sd.OpenQuestions, lead);
-                    specs.Finish(spec.Id, SpecStatus.Draft, null, null);
+                    try
+                    {
+                        specs.SaveProposal(spec.Id, sd.Markdown, sd.Summary ?? "", sd.OpenQuestions, lead);
+                        specs.Finish(spec.Id, SpecStatus.Draft, null, null);
+                    }
+                    catch (InvalidOperationException e)
+                    {
+                        warning ??= $"Ignored spec draft for {spec.Id}: {e.Message}";
+                    }
                     finished = true;
                 }
                 else if (parsed.SpecDraftInvalid)
