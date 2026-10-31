@@ -46,6 +46,8 @@ var timeoutMin = int.TryParse(TakeOpt(argv, "--timeout"), out var tm) ? tm : 30;
 var leadOpt = TakeOpt(argv, "--lead");
 var viaOpt = TakeOpt(argv, "--via");
 var sessionOpt = TakeOpt(argv, "--session");
+var answerViaOpt = TakeOpt(argv, "--answer-via");
+var skillsProbe = argv.Remove("--skills-probe");
 var positional = argv.Skip(1).Where(a => !a.StartsWith("--")).ToList();
 var unknown = argv.Skip(1).Where(a => a.StartsWith("--") && a != "--fresh").ToList();
 if (unknown.Count > 0)
@@ -75,6 +77,7 @@ try
         case "q6": await Q6(); break;
         case "q7": await Q7(); break;
         case "q8": await Q8(); break;
+        case "q9": await Q9(); break;
         default: return Usage();
     }
     return 0;
@@ -530,6 +533,115 @@ async Task SendClear(string q, string sessionId)
     Log(q, "sent-clear", new JsonObject { ["session"] = sessionId, ["via"] = via });
 }
 
+// Q9: how does a console answer an AskUserQuestion? Creates a session that asks, finds the pending item (assistant
+// tool_use AskUserQuestion, or control_request can_use_tool), optionally answers "Banana" via --answer-via, prints the reply.
+// --skills-probe: instead create an API session with the claude.ai probe prompt (do fyrd-* account skills load? is the artifact readable?).
+async Task Q9()
+{
+    var q = "q9";
+    const string SkillsPrompt = "1. List your available skills and say whether any named fyrd-* appear.\n2. Fetch https://claude.ai/artifact/LyjRt8594EXGq4V8UsQn5E with any tool you have and say which tool worked.";
+    const string AskPrompt = "Use the AskUserQuestion tool to ask me \"Pick a fruit\" with options Apple and Banana, then tell me what I picked.";
+    var seen = new StatusSeen();
+    var s = await client.CreateAsync(new CreateSessionRequest(skillsProbe ? "fyrd spike q9 skills probe" : "fyrd spike q9 ask probe",
+        ["fyrd", SpikeTag, "fyrd-probe-q9"], envId, skillsProbe ? SkillsPrompt : AskPrompt, Model, null, new SessionSource(Repo, null), "auto"));
+    LogSession(q, "created", s);
+    Console.WriteLine($"[q9] session: {s.Id}");
+    Console.WriteLine($"[q9] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(10))}");
+    var events = await FetchAllEvents(q, s.Id, log: false);
+    await File.WriteAllLinesAsync(Path.Combine(outDir, "q9-events.jsonl"), events.Select(e => e.Raw.GetRawText()));
+    Console.WriteLine($"[q9] {events.Count} events -> out/q9-events.jsonl");
+    if (skillsProbe)
+    {
+        Console.WriteLine($"[q9] reply:\n{Trunc(LastAssistant(events)?.Text, 3000)}");
+    }
+    else
+    {
+        string? toolUseId = null, requestId = null;
+        JsonNode? input = null;
+        foreach (var e in events)
+        {
+            var node = JsonNode.Parse(e.Raw.GetRawText());
+            if (node is null) continue;
+            var tu = FindNodes(node, n => n is JsonObject o && o["type"]?.GetValue<string>() == "tool_use" && o["name"]?.GetValue<string>() == "AskUserQuestion").FirstOrDefault();
+            if (tu is not null)
+            {
+                toolUseId = tu["id"]?.GetValue<string>(); input = tu["input"];
+                Console.WriteLine($"[q9] PENDING tool_use AskUserQuestion id={toolUseId} input={input?.ToJsonString()}");
+            }
+            if (node["type"]?.GetValue<string>() == "control_request" && node["request"]?["subtype"]?.GetValue<string>() == "can_use_tool")
+            {
+                requestId = node["request_id"]?.GetValue<string>(); input = node["request"]?["input"] ?? input;
+                Console.WriteLine($"[q9] PENDING control_request can_use_tool request_id={requestId} tool_name={node["request"]?["tool_name"]} input={node["request"]?["input"]?.ToJsonString()}");
+            }
+        }
+        if (toolUseId is null && requestId is null) Console.WriteLine("[q9] NO pending AskUserQuestion tool_use or can_use_tool control_request found in the events");
+        else if (answerViaOpt is not null)
+        {
+            var baseline = events.Select(e => e.Uuid).ToHashSet();
+            JsonObject? payload = null;
+            if (answerViaOpt == "tool-result")
+            {
+                if (toolUseId is null) Console.WriteLine("[q9] no tool_use id; cannot answer via tool-result");
+                else payload = new JsonObject
+                {
+                    ["type"] = "user", ["uuid"] = Guid.NewGuid().ToString(), ["session_id"] = s.Id, ["parent_tool_use_id"] = null,
+                    ["message"] = new JsonObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = new JsonArray(new JsonObject { ["type"] = "tool_result", ["tool_use_id"] = toolUseId, ["content"] = "Banana" }),
+                    },
+                };
+            }
+            else if (answerViaOpt == "control-response")
+            {
+                if (requestId is null) Console.WriteLine("[q9] no can_use_tool control_request; cannot answer via control-response");
+                else
+                {
+                    var upd = input is JsonObject io ? (JsonObject)JsonNode.Parse(io.ToJsonString())! : new JsonObject();
+                    upd["answers"] = new JsonObject { ["Pick a fruit"] = "Banana" };
+                    payload = new JsonObject
+                    {
+                        ["type"] = "control_response",
+                        ["response"] = new JsonObject
+                        {
+                            ["subtype"] = "success", ["request_id"] = requestId,
+                            ["response"] = new JsonObject { ["behavior"] = "allow", ["updatedInput"] = upd },
+                        },
+                    };
+                }
+            }
+            else Console.WriteLine($"[q9] unknown --answer-via {answerViaOpt} (use tool-result or control-response)");
+            if (payload is not null)
+            {
+                var path = $"/v1/code/sessions/cse_{s.Id["session_".Length..]}/events";
+                var r = await raw.SendAsync(HttpMethod.Post, path, new JsonObject { ["events"] = new JsonArray(new JsonObject { ["payload"] = payload }) });
+                Log(q, "answer", r.Describe());
+                Console.WriteLine($"[q9] answer via {answerViaOpt} -> HTTP {r.Status} {Trunc(r.Text, 400)}");
+                if (r.Status < 300)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15));
+                    Console.WriteLine($"[q9] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(10), baseline)}");
+                    var after = await FetchAllEvents(q, s.Id, log: false);
+                    var fresh = after.Where(e => !baseline.Contains(e.Uuid)).ToList();
+                    await File.WriteAllLinesAsync(Path.Combine(outDir, "q9-answered.jsonl"), fresh.Select(e => e.Raw.GetRawText()));
+                    Console.WriteLine($"[q9] {fresh.Count} post-answer events -> out/q9-answered.jsonl");
+                    Console.WriteLine($"[q9] next assistant text:\n{Trunc(LastAssistant(fresh)?.Text, 1500)}");
+                }
+            }
+        }
+    }
+    await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
+    Console.WriteLine($"[q9] archived {s.Id}");
+}
+
+static IEnumerable<JsonNode> FindNodes(JsonNode? n, Func<JsonNode, bool> pred)
+{
+    if (n is null) yield break;
+    if (pred(n)) yield return n;
+    if (n is JsonObject o) foreach (var kv in o) foreach (var x in FindNodes(kv.Value, pred)) yield return x;
+    else if (n is JsonArray a) foreach (var v in a) foreach (var x in FindNodes(v, pred)) yield return x;
+}
+
 async Task<string> ContextUsage(string id) =>
     Trunc(SessionNode(await client.GetAsync(id))["context_usage"]?.ToJsonString() ?? "(none)", 200);
 
@@ -745,6 +857,7 @@ static int Usage()
           q6 [<childId>] [--fresh]    interrupt then archive
           q7                          token expiry / refresh check
           q8 [--via api|code|code-init] [--session <id>]  /clear via a direct user event: memory cleared, persona kept?
+          q9 [--answer-via tool-result|control-response] [--skills-probe]  AskUserQuestion pending item + answer route; or account-skills probe
         options: --env <id> (default env_011v4b3WBhRMaGGti6Qw747c)   --timeout <minutes> (default 30)
         """);
     return 2;
