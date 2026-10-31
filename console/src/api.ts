@@ -15,7 +15,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(detail ?? String(res.status));
+    // The status lets callers tell "not found" from other failures.
+    throw Object.assign(new Error(detail ?? String(res.status)), { status: res.status });
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -24,8 +25,13 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 const enc = encodeURIComponent;
 
 export const getHubState = () => call<HubState>("GET", "/api/hub/state");
+/** The live adopted Controller; rejects with status 404 when there is none. */
 export const openController = () => call<ControllerInfo>("POST", "/api/hub/controller");
-export const recreateController = () => call<ControllerInfo>("POST", "/api/hub/controller/recreate");
+/** The owner creates the Controller on claude.ai; Fyrd adopts it by id (Fyrd-created sessions get no connectors). */
+export const adoptController = (sessionId: string) =>
+  call<ControllerInfo>("POST", "/api/hub/controller/adopt", { sessionId });
+/** Archives the current Controller; the owner then adopts a new one. */
+export const retireController = () => call<void>("POST", "/api/hub/controller/retire");
 export const getMessages = (sessionId: string) =>
   call<HubMessage[]>("GET", `/api/hub/sessions/${enc(sessionId)}/messages`);
 export const sendMessage = (sessionId: string, text: string) =>

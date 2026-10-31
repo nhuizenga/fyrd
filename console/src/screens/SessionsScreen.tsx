@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, SearchField, Text, Textarea } from "@servicetitan/anvil2";
+import { Alert, Badge, Button, Link, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import * as api from "../api";
 import type { HubMessage, HubSessionView } from "../types";
 import type { ScreenProps } from "./ScreenProps";
@@ -11,10 +11,12 @@ export default function SessionsScreen({ state, onChanged, onOpenInbox }: Screen
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
-  const [confirmRecreate, setConfirmRecreate] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  const [adoptId, setAdoptId] = useState("");
 
   const controllerId = state?.controller?.sessionId ?? null;
-  const isController = (s: HubSessionView) => s.id === controllerId || s.tags.includes("fyrd-controller");
+  // The Controller is adopted from claude.ai, so it carries no Fyrd tags: identify it by id.
+  const isController = (s: HubSessionView) => s.id === controllerId;
   const all = [...(state?.sessions ?? [])].sort((a, b) => Number(isController(b)) - Number(isController(a)));
   const q = search.trim().toLowerCase();
   const sessions = q ? all.filter((s) => s.title.toLowerCase().includes(q)) : all;
@@ -53,19 +55,30 @@ export default function SessionsScreen({ state, onChanged, onOpenInbox }: Screen
     }));
   }, [state?.sessions]);
 
-  // Always ask the server: it finds the live Controller or starts one, so an archived id never becomes a dead link.
+  // Always ask the server: it checks the stored Controller is still live, so an archived id never becomes a dead link.
   const openController = () =>
     run(async () => {
-      const info = await api.openController();
-      window.open(info.url, "_blank", "noopener");
+      try {
+        const info = await api.openController();
+        window.open(info.url, "_blank", "noopener");
+      } catch (e) {
+        // Gone since the last poll: refreshing brings back the Adopt Controller panel.
+        if ((e as { status?: number }).status !== 404) throw e;
+      }
       await onChanged();
     });
 
-  const recreateController = () =>
+  const adoptController = () =>
     run(async () => {
-      setConfirmRecreate(false);
-      const info = await api.recreateController();
-      window.open(info.url, "_blank", "noopener");
+      await api.adoptController(adoptId.trim());
+      setAdoptId("");
+      await onChanged();
+    });
+
+  const replaceController = () =>
+    run(async () => {
+      setConfirmReplace(false);
+      await api.retireController();
       await onChanged();
     });
 
@@ -78,21 +91,31 @@ export default function SessionsScreen({ state, onChanged, onOpenInbox }: Screen
       <Text variant="headline" el="h2" size="large">Sessions</Text>
       <Text subdued>{all.length} Claude Code sessions</Text>
       {error && <Alert status="danger" title={error} role="alert" />}
-      <div>
-        {state && !state.controller && <Button appearance="primary" onClick={openController}>Start Controller</Button>}
-        {state?.controller && (
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button appearance="secondary" onClick={openController}>Open Controller</Button>
-            <Button appearance="ghost" onClick={() => setConfirmRecreate(true)}>Recreate Controller</Button>
+      {state && !state.controller && (
+        <section className="card" aria-labelledby="adopt-h">
+          <Text variant="headline" el="h3" size="medium" id="adopt-h">Adopt Controller</Text>
+          <Text>
+            Create a new session on claude.ai (no repo needed), then paste its session id here.{" "}
+            <Link href="https://claude.ai/code" target="_blank" rel="noopener noreferrer">Open claude.ai/code</Link>
+          </Text>
+          <TextField label="Session id" placeholder="session_..." value={adoptId} onChange={(e) => setAdoptId(e.target.value)} />
+          <div>
+            <Button appearance="primary" disabled={adoptId.trim() === ""} onClick={adoptController}>Adopt</Button>
           </div>
-        )}
-      </div>
-      {confirmRecreate && (
-        <Alert status="warning" title="Recreate the Controller?">
-          <Text>This archives the current Controller and starts a new one.</Text>
+        </section>
+      )}
+      {state?.controller && (
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button appearance="secondary" onClick={openController}>Open Controller</Button>
+          <Button appearance="ghost" onClick={() => setConfirmReplace(true)}>Replace Controller</Button>
+        </div>
+      )}
+      {confirmReplace && (
+        <Alert status="warning" title="Replace the Controller?">
+          <Text>This archives the current Controller. You'll then adopt a new one.</Text>
           <div style={{ display: "flex", gap: 8 }}>
-            <Button appearance="primary" onClick={recreateController}>Archive and start new</Button>
-            <Button appearance="ghost" onClick={() => setConfirmRecreate(false)}>Cancel</Button>
+            <Button appearance="primary" onClick={replaceController}>Archive and replace</Button>
+            <Button appearance="ghost" onClick={() => setConfirmReplace(false)}>Cancel</Button>
           </div>
         </Alert>
       )}

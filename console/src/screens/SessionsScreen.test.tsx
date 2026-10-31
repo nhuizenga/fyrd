@@ -25,7 +25,7 @@ const two = () =>
   hubState({
     sessions: [
       session({ id: "a", title: "alpha-1" }),
-      session({ id: "c", title: "controller", role: "controller", tags: ["fyrd-hub", "fyrd-controller"] }),
+      session({ id: "c", title: "controller", role: "controller", tags: [] }),
       session({ id: "b", title: "beta-2", status: "idle" }),
     ],
     controller: { sessionId: "c", url: "https://claude.ai/code/c" },
@@ -37,13 +37,34 @@ it("controller pinned first", () => {
   expect(rows[0]).toHaveTextContent("controller");
 });
 
-it("no controller shows Start Controller", async () => {
-  const open = vi.spyOn(window, "open").mockReturnValue(null);
-  vi.mocked(api.openController).mockResolvedValue({ sessionId: "c", url: "https://claude.ai/code/c" });
+it("no controller shows the Adopt Controller panel", () => {
   renderScreen(hubState());
-  await userEvent.click(screen.getByRole("button", { name: "Start Controller" }));
-  expect(api.openController).toHaveBeenCalled();
-  expect(open).toHaveBeenCalledWith("https://claude.ai/code/c", "_blank", "noopener");
+  expect(screen.getByText("Create a new session on claude.ai (no repo needed), then paste its session id here.")).toBeInTheDocument();
+  const link = screen.getByRole("link", { name: "Open claude.ai/code" });
+  expect(link).toHaveAttribute("href", "https://claude.ai/code");
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(screen.queryByRole("button", { name: "Open Controller" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Start Controller" })).not.toBeInTheDocument();
+});
+
+it("Adopt sends the trimmed session id and refreshes", async () => {
+  vi.mocked(api.adoptController).mockResolvedValue({ sessionId: "session_abc", url: "https://claude.ai/code/session_abc" });
+  const onChanged = renderScreen(hubState());
+  expect(screen.getByRole("button", { name: "Adopt" })).toBeDisabled();
+  await userEvent.type(screen.getByLabelText("Session id"), "  session_abc ");
+  await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
+  expect(api.adoptController).toHaveBeenCalledWith("session_abc");
+  expect(onChanged).toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("Adopt error shows in an alert", async () => {
+  vi.mocked(api.adoptController).mockRejectedValue(
+    new Error("That session isn't available. Create a new one on claude.ai and paste its id."));
+  renderScreen(hubState());
+  await userEvent.type(screen.getByLabelText("Session id"), "session_gone");
+  await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("That session isn't available.");
 });
 
 it("Open Controller asks the server for a live Controller and opens that url", async () => {
@@ -56,16 +77,34 @@ it("Open Controller asks the server for a live Controller and opens that url", a
   expect(open).not.toHaveBeenCalledWith("https://claude.ai/code/c", "_blank", "noopener");
 });
 
-it("Recreate Controller confirms, recreates and opens the new one", async () => {
+it("Open Controller on 404 refreshes state instead of opening", async () => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
-  vi.mocked(api.recreateController).mockResolvedValue({ sessionId: "c3", url: "https://claude.ai/code/c3" });
+  vi.mocked(api.openController).mockRejectedValue(
+    Object.assign(new Error("No Controller yet. Create a session on claude.ai and adopt it."), { status: 404 }));
+  const onChanged = renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: "Open Controller" }));
+  expect(onChanged).toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("Replace Controller confirms, retires and refreshes", async () => {
+  vi.mocked(api.retireController).mockResolvedValue(undefined);
+  const onChanged = renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: "Replace Controller" }));
+  expect(api.retireController).not.toHaveBeenCalled();
+  expect(screen.getByText("This archives the current Controller. You'll then adopt a new one.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Archive and replace" }));
+  expect(api.retireController).toHaveBeenCalled();
+  expect(onChanged).toHaveBeenCalled();
+  expect(screen.queryByText("This archives the current Controller. You'll then adopt a new one.")).not.toBeInTheDocument();
+});
+
+it("Replace Controller can be cancelled", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: "Recreate Controller" }));
-  expect(api.recreateController).not.toHaveBeenCalled();
-  expect(screen.getByText("This archives the current Controller and starts a new one.")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Archive and start new" }));
-  expect(api.recreateController).toHaveBeenCalled();
-  expect(open).toHaveBeenCalledWith("https://claude.ai/code/c3", "_blank", "noopener");
+  await userEvent.click(screen.getByRole("button", { name: "Replace Controller" }));
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(api.retireController).not.toHaveBeenCalled();
 });
 
 it("select session loads messages", async () => {
