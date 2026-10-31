@@ -605,7 +605,11 @@ async Task Q9()
                         ["response"] = new JsonObject
                         {
                             ["subtype"] = "success", ["request_id"] = requestId,
-                            ["response"] = new JsonObject { ["behavior"] = "allow", ["updatedInput"] = upd },
+                            // Same shape the claude.ai client sent in the 2026-10-31 runs.
+                            ["response"] = new JsonObject
+                            {
+                                ["behavior"] = "allow", ["toolUseID"] = toolUseId, ["tool_name"] = "AskUserQuestion", ["updatedInput"] = upd,
+                            },
                         },
                     };
                 }

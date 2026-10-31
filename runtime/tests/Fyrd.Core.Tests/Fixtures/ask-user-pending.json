@@ -1,0 +1,1048 @@
+[
+ {
+  "created_at": "2026-10-31T20:54:46.381658Z",
+  "request": {
+   "mode": "auto",
+   "subtype": "set_permission_mode"
+  },
+  "request_id": "set-mode-d031173d3333426f8d48cb6cb58f7ca3",
+  "type": "control_request",
+  "uuid": "5539ae25-85df-462f-b890-e720b7b1c4e1"
+ },
+ {
+  "created_at": "2026-10-31T20:54:46.389591Z",
+  "message": {
+   "content": "Use the AskUserQuestion tool to ask me \"Pick a fruit\" with options Apple and Banana, then tell me what I picked.",
+   "role": "user"
+  },
+  "parent_tool_use_id": null,
+  "session_id": "",
+  "trace_context": "00-3dedae2de3ebbf023f2131e01214cc23-430e53aca28d7baf-00",
+  "type": "user",
+  "uuid": "52b1f266-22d6-4f6b-9a1e-f689397e9404"
+ },
+ {
+  "created_at": "2026-10-31T20:54:46.442149Z",
+  "data": {
+   "category": "init",
+   "content": "Allocating sandbox",
+   "extra": {
+    "step_id": "provision",
+    "step_status": "started"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:46.43045404Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "6a52fbfd-6268-44ba-a80f-974ca8fda386"
+ },
+ {
+  "created_at": "2026-10-31T20:54:48.296770Z",
+  "data": {
+   "category": "init",
+   "content": "Restored saved setup",
+   "extra": {
+    "checkpoint_built_at": "2026-10-31T18:32:26Z",
+    "setup_script_duration_ms": 32266,
+    "setup_source": "checkpoint"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:48.285788066Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "3933987e-3f15-4ead-937e-13d7ac8c560b"
+ },
+ {
+  "created_at": "2026-10-31T20:54:48.992892Z",
+  "data": {
+   "category": "init",
+   "content": "Launching Claude Code from /opt/claude-code/bin/claude (mount)",
+   "extra": {
+    "claude_path": "/opt/claude-code/bin/claude",
+    "claude_path_source": "mount"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:48.680048865Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "ab993343-7497-46e0-81bc-272e51023588"
+ },
+ {
+  "created_at": "2026-10-31T20:54:48.992892Z",
+  "data": {
+   "category": "init",
+   "content": "Environment runner started",
+   "extra": {
+    "expected_steps": "provision,clone,setup_script,start_cc",
+    "session_mode": "resume-cached",
+    "step_id": "provision",
+    "step_status": "completed"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:48.690749926Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "ce8efd26-5b09-4d03-949e-60d142c59325"
+ },
+ {
+  "created_at": "2026-10-31T20:54:48.992892Z",
+  "data": {
+   "category": "init",
+   "content": "Fetching repository servicetitan/titan-lens-ossie",
+   "extra": {
+    "step_detail": "github",
+    "step_id": "clone",
+    "step_status": "started"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:48.905143326Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "09186a84-acc4-4b72-a246-4ad03b252aef"
+ },
+ {
+  "created_at": "2026-10-31T20:54:50.178669Z",
+  "data": {
+   "category": "init",
+   "content": "Fetching repository servicetitan/titan-lens-ossie",
+   "extra": {
+    "step_detail": "github",
+    "step_id": "clone",
+    "step_status": "completed"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:50.105785657Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "3b0e19c6-abe8-42c7-a4e6-6647f689dc30"
+ },
+ {
+  "created_at": "2026-10-31T20:54:50.258994Z",
+  "data": {
+   "category": "init",
+   "content": "Finished processing sources",
+   "extra": {
+    "step_id": "clone",
+    "step_status": "completed"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:50.105872039Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "ffc38059-e7e9-4bb2-a812-f9dc6374cf7f"
+ },
+ {
+  "created_at": "2026-10-31T20:54:50.258994Z",
+  "data": {
+   "category": "init",
+   "content": "Setup script cached from previous run",
+   "extra": {
+    "step_id": "setup_script",
+    "step_status": "completed"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:50.11178704Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "749b6928-aaf5-40e6-abe6-ba4a695c08db"
+ },
+ {
+  "created_at": "2026-10-31T20:54:50.258994Z",
+  "data": {
+   "category": "init",
+   "content": "Starting Claude Code",
+   "extra": {
+    "step_id": "start_cc",
+    "step_status": "started"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:50.125829382Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "b0906991-f21c-4001-801f-a3208280b2da"
+ },
+ {
+  "created_at": "2026-10-31T20:54:50.258994Z",
+  "data": {
+   "category": "init",
+   "content": "Claude Code process started (warm spare)",
+   "extra": {
+    "step_id": "start_cc",
+    "step_status": "completed"
+   },
+   "level": "info",
+   "timestamp": "2026-10-31T20:54:50.12667248Z"
+  },
+  "type": "env_manager_log",
+  "uuid": "3e2d8603-af94-4561-b67b-70897e4f3160"
+ },
+ {
+  "created_at": "2026-10-31T20:54:51.336892Z",
+  "no_query_first": true,
+  "requires_rewind_request_id": true,
+  "session_id": "f850cf18-169e-430c-9f96-72253a7704fc",
+  "shared_message_id": true,
+  "staged_files": true,
+  "subtype": "turn_handoff_available",
+  "tools": [
+   "Bash",
+   "Write",
+   "Edit",
+   "Read",
+   "Glob",
+   "Grep",
+   "Agent",
+   "NotebookEdit",
+   "WebFetch",
+   "WebSearch",
+   "TaskStop",
+   "SearchMcpRegistry",
+   "SuggestConnectors",
+   "ListConnectors",
+   "Skill",
+   "Artifact",
+   "mcp__claude-code-remote__list_triggers",
+   "mcp__claude-code-remote__create_trigger",
+   "mcp__claude-code-remote__update_trigger",
+   "mcp__claude-code-remote__delete_trigger",
+   "mcp__claude-code-remote__fire_trigger",
+   "mcp__claude-code-remote__send_later",
+   "mcp__claude-code-remote__add_repo",
+   "mcp__claude-code-remote__check_repo_access",
+   "mcp__claude-code-remote__list_repos"
+  ],
+  "type": "system",
+  "uuid": "d736e9ba-3934-4925-a3a2-0ae8ec58d126",
+  "v": 1,
+  "worker_epoch": 1
+ },
+ {
+  "created_at": "2026-10-31T20:54:51.423512Z",
+  "session_id": "6546fc18-30da-5e54-872b-559dd06736fd",
+  "type": "autocompact_state",
+  "uuid": "7b00a2cf-decf-48b6-836d-8bf8c720d04d",
+  "value": {
+   "effective_window": 980000,
+   "enabled": true,
+   "enforced": true,
+   "source": "model-default",
+   "threshold": 784000
+  }
+ },
+ {
+  "created_at": "2026-10-31T20:54:51.423512Z",
+  "response": {
+   "request_id": "set-mode-d031173d3333426f8d48cb6cb58f7ca3",
+   "response": {
+    "mode": "auto"
+   },
+   "subtype": "success"
+  },
+  "type": "control_response",
+  "uuid": "3bf78366-b8a7-4fd4-b63d-4316c92bd05c"
+ },
+ {
+  "additional_directories": [],
+  "agents": [
+   "claude",
+   "claude-code-guide",
+   "Explore",
+   "general-purpose",
+   "Plan",
+   "statusline-setup"
+  ],
+  "analytics_disabled": false,
+  "apiKeySource": "none",
+  "capabilities": [
+   "interrupt_receipt_v1",
+   "interrupt_cancel_queued_v1",
+   "interrupt_send_now_v1",
+   "interrupt_requeue_taken_v1",
+   "msg_lifecycle_v1",
+   "request_marker_lists_v1",
+   "ask_user_question_unanswered_v1",
+   "task_list_restore_v1",
+   "queued_notifications",
+   "sdk_mcp_tools_list_changed",
+   "mcp_read_resource_v1",
+   "mcp_tool_ui_meta_v1",
+   "start_shell_task_v1"
+  ],
+  "claude_code_version": "2.1.316",
+  "created_at": "2026-10-31T20:54:51.931350Z",
+  "cwd": "/home/user/titan-lens-ossie",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "fast_mode_state": "off",
+  "mcp_servers": [
+   {
+    "name": "claude-code-remote",
+    "source": "dynamic",
+    "status": "connected"
+   },
+   {
+    "name": "github",
+    "source": "dynamic",
+    "status": "pending"
+   }
+  ],
+  "messaging_socket_path": "/tmp/cc-socks/165.sock",
+  "model": "claude-sonnet-5-5",
+  "original_cwd": "/home/user/titan-lens-ossie",
+  "output_style": "default",
+  "per_turn_effort_active": true,
+  "permissionMode": "auto",
+  "plugins": [
+   {
+    "name": "cc-plugin-sec-default",
+    "path": "builtin",
+    "source": "cc-plugin-sec-default@builtin"
+   },
+   {
+    "name": "cc-plugin-agents-md",
+    "path": "builtin",
+    "source": "cc-plugin-agents-md@builtin"
+   },
+   {
+    "name": "cc-plugin-telemetry",
+    "path": "builtin",
+    "source": "cc-plugin-telemetry@builtin"
+   },
+   {
+    "name": "cc-plugin-plugin-authoring",
+    "path": "builtin",
+    "source": "cc-plugin-plugin-authoring@builtin"
+   }
+  ],
+  "product_feedback_disabled": false,
+  "scratchpad_path": "/tmp/claude-0/-home-user-titan-lens-ossie/6546fc18-30da-5e54-872b-559dd06736fd/scratchpad",
+  "session_id": "6546fc18-30da-5e54-872b-559dd06736fd",
+  "skills": [
+   "session-start-hook",
+   "deep-research",
+   "design",
+   "slides",
+   "design-sync",
+   "dataviz",
+   "artifact-diagramming",
+   "artifact-capabilities",
+   "update-config",
+   "verify",
+   "debug",
+   "code-review",
+   "simplify",
+   "batch",
+   "fewer-permission-prompts",
+   "doctor",
+   "loop",
+   "claude-api",
+   "workflow-authoring",
+   "run",
+   "run-skill-generator",
+   "plugin-authoring",
+   "anthropic-skills:docx",
+   "anthropic-skills:servicetitan-presentation-builder",
+   "anthropic-skills:tenant-talk",
+   "anthropic-skills:servicetitan-ai-solution-advisor",
+   "anthropic-skills:servicetitan-brand-companion",
+   "anthropic-skills:manager-quarterly-checkin",
+   "anthropic-skills:titan-quarterly-checkin",
+   "anthropic-skills:built-in-browser",
+   "anthropic-skills:chrome-browser",
+   "anthropic-skills:computer-use",
+   "anthropic-skills:deep-research",
+   "anthropic-skills:docs",
+   "anthropic-skills:google-workspace",
+   "anthropic-skills:import-memory",
+   "anthropic-skills:morning",
+   "anthropic-skills:pdf",
+   "anthropic-skills:pptx",
+   "anthropic-skills:skill-creator",
+   "anthropic-skills:xlsx"
+  ],
+  "slash_commands": [
+   "session-start-hook",
+   "deep-research",
+   "design",
+   "slides",
+   "design-sync",
+   "dataviz",
+   "artifact-diagramming",
+   "artifact-capabilities",
+   "update-config",
+   "verify",
+   "debug",
+   "code-review",
+   "simplify",
+   "batch",
+   "fewer-permission-prompts",
+   "doctor",
+   "loop",
+   "claude-api",
+   "workflow-authoring",
+   "run",
+   "run-skill-generator",
+   "plugin-authoring",
+   "anthropic-skills:docs",
+   "anthropic-skills:google-workspace",
+   "anthropic-skills:computer-use",
+   "anthropic-skills:chrome-browser",
+   "anthropic-skills:built-in-browser",
+   "anthropic-skills:deep-research",
+   "anthropic-skills:import-memory",
+   "anthropic-skills:morning",
+   "anthropic-skills:skill-creator",
+   "anthropic-skills:xlsx",
+   "anthropic-skills:pptx",
+   "anthropic-skills:pdf",
+   "anthropic-skills:docx",
+   "anthropic-skills:servicetitan-presentation-builder",
+   "anthropic-skills:tenant-talk",
+   "anthropic-skills:servicetitan-ai-solution-advisor",
+   "anthropic-skills:servicetitan-brand-companion",
+   "anthropic-skills:manager-quarterly-checkin",
+   "anthropic-skills:titan-quarterly-checkin",
+   "add-dir",
+   "advisor",
+   "agents",
+   "autocompact",
+   "clear",
+   "color",
+   "compact",
+   "config",
+   "output-style",
+   "context",
+   "effort",
+   "fast",
+   "focus",
+   "heapdump",
+   "init",
+   "mcp",
+   "import",
+   "model",
+   "__remote-workflow",
+   "workflow-launch-exec",
+   "reload-plugins",
+   "reload-skills",
+   "rename",
+   "security-review",
+   "usage",
+   "insights",
+   "recap",
+   "skill-doctor",
+   "goal",
+   "design-consent",
+   "design-revoke",
+   "list-agents",
+   "team-onboarding"
+  ],
+  "startup_timing": {
+   "cli_trial_keys": 0,
+   "entrypoint": "remote",
+   "flag_fetch_kick": "settings_pending_empty",
+   "flag_fetch_kick_judged_at_ms": 1492,
+   "hooks_init_source": "startup",
+   "kick_on_warm_cache": false,
+   "phase_start_ms": {
+    "agent_proxy_init_ms": 1415,
+    "agent_proxy_inputs_ms": 1419,
+    "agent_proxy_relay_up_ms": 1469,
+    "agent_proxy_trust_write_ms": 1460,
+    "first_message_handle_ms": 2556,
+    "first_message_read_from_spawn_ms": 1263,
+    "first_message_read_ms": 0,
+    "grove_check_ms": 2154,
+    "growthbook_init_ms": 1940,
+    "headless_post_load_ms": 2436,
+    "headless_prologue_ms": 2140,
+    "hooks_init_ms": 2434,
+    "init_emit_ms": 2988,
+    "initial_messages_load_ms": 2183,
+    "input_ready_from_spawn_ms": 1263,
+    "input_ready_ms": 0,
+    "mcp_client_module_load_ms": 2332,
+    "mcp_connect_ms": 2134,
+    "mcp_policy_settings_wait_ms": 1522,
+    "mcp_prewait_ms": 2814,
+    "model_catalog_decision_ms": 1964,
+    "node_boot_ms": 0,
+    "permission_context_ms": 1803,
+    "plugin_state_refresh_inline_ms": 2735,
+    "pre_action_client_data_url_ms": 1491,
+    "pre_action_init_ms": 1369,
+    "pre_action_managed_settings_ms": 1493,
+    "pre_action_mdm_keychain_ms": 1365,
+    "pre_action_migrations_ms": 1492,
+    "pre_action_ms": 1365,
+    "print_import_ms": 2137,
+    "prompt_submit_hooks_ms": 2947,
+    "qe_plugin_skills_load_ms": 2985,
+    "qe_system_prompt_ms": 2830,
+    "resume_deserialize_ms": 2422,
+    "resume_hydrate_fetch_ms": 2163,
+    "resume_hydrate_ms": 2186,
+    "resume_live_check_ms": 2418,
+    "resume_worker_init_join_ms": 2186,
+    "sdk_mcp_update_ms": 2556,
+    "settings_load_ms": 1359,
+    "setup_file_watcher_ms": 1874,
+    "setup_hooks_snapshot_ms": 1874,
+    "setup_import_ms": 1824,
+    "setup_ms": 1831,
+    "setup_release_notes_ms": 1875,
+    "setup_uds_dir_ms": 1837,
+    "setup_uds_listen_ms": 1866,
+    "setup_uds_messaging_ms": 1829,
+    "setup_uds_publish_ms": 1867,
+    "skills_load_ms": 1830,
+    "skills_sync_commands_refresh_ms": 2714,
+    "skills_sync_wait_ms": 2560,
+    "spare_claim_apply_ms": 1270,
+    "spare_claim_module_wait_ms": 1270,
+    "spare_claim_read_from_spawn_ms": 1263,
+    "spare_claim_token_file_wait_ms": 1273,
+    "sse_connect_ms": 2163,
+    "tools_commands_load_ms": 1946,
+    "worker_init_ms": 2158
+   },
+   "phases": {
+    "agent_proxy_init_ms": 71,
+    "agent_proxy_inputs_ms": 40,
+    "agent_proxy_relay_up_ms": 7,
+    "agent_proxy_trust_write_ms": 9,
+    "first_message_handle_cpu_ms": 313,
+    "first_message_handle_loop_lag_ms": 19,
+    "first_message_handle_ms": 230,
+    "first_message_read_from_spawn_ms": 1293,
+    "first_message_read_ms": 2556,
+    "grove_check_ms": 0,
+    "growthbook_init_ms": 0,
+    "headless_post_load_ms": 9,
+    "headless_prologue_ms": 43,
+    "hooks_init_ms": 1,
+    "init_emit_ms": 2,
+    "initial_messages_load_ms": 253,
+    "input_ready_from_spawn_ms": 1211,
+    "input_ready_ms": 2474,
+    "mcp_client_module_load_ms": 22,
+    "mcp_connect_ms": 2,
+    "mcp_policy_settings_wait_ms": 266,
+    "mcp_prewait_ms": 2,
+    "model_catalog_decision_ms": 149,
+    "node_boot_ms": 508,
+    "permission_context_ms": 19,
+    "plugin_state_refresh_inline_ms": 51,
+    "plugins_sync_install_ms": 0,
+    "plugins_sync_mcp_ms": 6,
+    "pre_action_client_data_url_ms": 0,
+    "pre_action_init_ms": 122,
+    "pre_action_managed_settings_ms": 5,
+    "pre_action_mdm_keychain_ms": 4,
+    "pre_action_migrations_ms": 0,
+    "pre_action_ms": 147,
+    "print_import_ms": 1,
+    "prompt_submit_hooks_ms": 2,
+    "qe_plugin_skills_load_ms": 3,
+    "qe_system_prompt_ms": 111,
+    "resume_deserialize_ms": 12,
+    "resume_hydrate_fetch_ms": 237,
+    "resume_hydrate_ms": 223,
+    "resume_live_check_ms": 3,
+    "resume_worker_init_join_ms": 210,
+    "sdk_mcp_update_ms": 4,
+    "settings_load_ms": 1,
+    "setup_file_watcher_ms": 0,
+    "setup_hooks_snapshot_ms": 0,
+    "setup_import_ms": 1,
+    "setup_ms": 49,
+    "setup_release_notes_ms": 5,
+    "setup_uds_dir_ms": 29,
+    "setup_uds_listen_ms": 1,
+    "setup_uds_messaging_ms": 44,
+    "setup_uds_publish_ms": 1,
+    "skills_load_ms": 37,
+    "skills_sync_commands_refresh_ms": 20,
+    "skills_sync_wait_ms": 154,
+    "spare_claim_apply_ms": 87,
+    "spare_claim_module_wait_ms": 0,
+    "spare_claim_read_from_spawn_ms": 6,
+    "spare_claim_token_file_wait_ms": 16,
+    "sse_connect_ms": 157,
+    "tools_commands_load_ms": 17,
+    "worker_init_ms": 236
+   },
+   "plugin_full_loads": 1,
+   "plugins_sync_round": "ok",
+   "process_start_tuning": 7,
+   "process_stretches": {
+    "to_claim": {
+     "children_cpu_ms": 0,
+     "children_minor_faults": 0,
+     "cpu_ms": 7,
+     "major_faults": 15,
+     "minor_faults": 123,
+     "storage_read_kib": 1292,
+     "wall_ms": 737
+    },
+    "to_first_message": {
+     "children_cpu_ms": 0,
+     "children_minor_faults": 0,
+     "cpu_ms": 119,
+     "major_faults": 21,
+     "minor_faults": 2743,
+     "storage_read_kib": 2104,
+     "wall_ms": 82
+    },
+    "to_first_turn": {
+     "children_cpu_ms": 10,
+     "children_minor_faults": 264,
+     "cpu_ms": 379,
+     "major_faults": 41,
+     "minor_faults": 6291,
+     "storage_read_kib": 3164,
+     "wall_ms": 273
+    },
+    "to_input_ready": {
+     "children_cpu_ms": 120,
+     "children_minor_faults": 2507,
+     "cpu_ms": 1289,
+     "major_faults": 541,
+     "minor_faults": 27717,
+     "storage_read_kib": 60524,
+     "wall_ms": 1203
+    },
+    "to_spare_loaded": {
+     "children_cpu_ms": 0,
+     "children_minor_faults": 0,
+     "cpu_ms": 564,
+     "major_faults": 523,
+     "minor_faults": 15655,
+     "storage_read_kib": 51356,
+     "wall_ms": 536
+    }
+   },
+   "resume_hydrate_ccr_bytes": 11,
+   "resume_hydrate_ccr_events": 0,
+   "resume_hydrate_delta_events": 0,
+   "resume_hydrate_delta_fetch_attempted": false,
+   "resume_hydrate_on_disk_bytes": 0,
+   "resume_hydrate_prefetch": "pending",
+   "sdk_mcp_dial_runs": 0,
+   "sdk_mcp_servers_dialed": 0,
+   "time_origin_ms": 1793480088862.0537,
+   "user_context_builds": 2,
+   "warm_spare_claimed": true,
+   "warm_wake_early_fetch": false
+  },
+  "subtype": "init",
+  "terminal_slash_commands": [
+   "doctor",
+   "color",
+   "focus",
+   "reload-plugins"
+  ],
+  "tools": [
+   "Task",
+   "Artifact",
+   "ArtifactComments",
+   "ArtifactData",
+   "AskUserQuestion",
+   "Bash",
+   "CronCreate",
+   "CronDelete",
+   "CronList",
+   "DesignSync",
+   "Edit",
+   "EnterPlanMode",
+   "EnterWorktree",
+   "ExitPlanMode",
+   "ExitWorktree",
+   "Glob",
+   "Grep",
+   "ListAgents",
+   "ListConnectors",
+   "ListPlugins",
+   "ListSkills",
+   "Monitor",
+   "NotebookEdit",
+   "PublishPlugin",
+   "PushNotification",
+   "Read",
+   "ReadNotifications",
+   "ReportFindings",
+   "ScheduleWakeup",
+   "SearchMcpRegistry",
+   "SearchPlugins",
+   "SearchSkills",
+   "SendMessage",
+   "SendUserFile",
+   "ShareOnboardingGuide",
+   "ShowOnboardingRolePicker",
+   "Skill",
+   "SuggestConnectors",
+   "SuggestPluginInstall",
+   "SuggestSkills",
+   "TaskCreate",
+   "TaskGet",
+   "TaskList",
+   "TaskStop",
+   "TaskUpdate",
+   "ToolSearch",
+   "WebFetch",
+   "WebSearch",
+   "Workflow",
+   "Write",
+   "mcp__claude-code-remote__add_repo",
+   "mcp__claude-code-remote__archive_session",
+   "mcp__claude-code-remote__check_repo_access",
+   "mcp__claude-code-remote__confirm_repository_trust",
+   "mcp__claude-code-remote__create_session",
+   "mcp__claude-code-remote__create_trigger",
+   "mcp__claude-code-remote__delete_trigger",
+   "mcp__claude-code-remote__fire_trigger",
+   "mcp__claude-code-remote__get_event",
+   "mcp__claude-code-remote__get_session",
+   "mcp__claude-code-remote__get_trigger",
+   "mcp__claude-code-remote__interrupt_session",
+   "mcp__claude-code-remote__list_computer_folders",
+   "mcp__claude-code-remote__list_environments",
+   "mcp__claude-code-remote__list_events",
+   "mcp__claude-code-remote__list_repos",
+   "mcp__claude-code-remote__list_sessions",
+   "mcp__claude-code-remote__list_triggers",
+   "mcp__claude-code-remote__read_documentation",
+   "mcp__claude-code-remote__register_repo_root",
+   "mcp__claude-code-remote__request_computer_folder",
+   "mcp__claude-code-remote__send_later",
+   "mcp__claude-code-remote__send_message",
+   "mcp__claude-code-remote__set_session_tags",
+   "mcp__claude-code-remote__set_session_title",
+   "mcp__claude-code-remote__subscribe_pr_activity",
+   "mcp__claude-code-remote__unarchive_session",
+   "mcp__claude-code-remote__unsubscribe_pr_activity",
+   "mcp__claude-code-remote__unwatch_url",
+   "mcp__claude-code-remote__update_trigger",
+   "mcp__claude-code-remote__watch_url"
+  ],
+  "type": "system",
+  "ultrathink_available": false,
+  "uuid": "063bf8d2-f6ca-41c4-85b5-08b3bee09b56",
+  "view_mode": "default"
+ },
+ {
+  "created_at": "2026-10-31T20:54:52.040510Z",
+  "session_id": "6546fc18-30da-5e54-872b-559dd06736fd",
+  "status": "requesting",
+  "subtype": "status",
+  "type": "system",
+  "uuid": "2c5ef909-8619-432e-9154-04272d59ea62"
+ },
+ {
+  "created_at": "2026-10-31T20:54:54.041386Z",
+  "message": {
+   "container": null,
+   "content": [
+    {
+     "caller": {
+      "type": "direct"
+     },
+     "id": "toolu_01Amojjvp8qbuPwgLVyQZNex",
+     "input": {
+      "questions": [
+       {
+        "header": "Fruit",
+        "multiSelect": false,
+        "options": [
+         {
+          "description": "Pick Apple",
+          "label": "Apple"
+         },
+         {
+          "description": "Pick Banana",
+          "label": "Banana"
+         }
+        ],
+        "question": "Pick a fruit"
+       }
+      ]
+     },
+     "name": "AskUserQuestion",
+     "type": "tool_use"
+    }
+   ],
+   "context_management": null,
+   "diagnostics": null,
+   "id": "msg_011CgayqiwDFdTCqFazUJS9F",
+   "input_transformations": [],
+   "model": "claude-sonnet-5-5",
+   "role": "assistant",
+   "stop_details": null,
+   "stop_reason": null,
+   "stop_sequence": null,
+   "type": "message",
+   "usage": {
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 11919,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "cache_creation_input_tokens": 11919,
+    "cache_read_input_tokens": 55579,
+    "inference_geo": "global",
+    "input_tokens": 2,
+    "output_tokens": 24,
+    "service_tier": "standard",
+    "speed": "standard"
+   }
+  },
+  "parent_tool_use_id": null,
+  "request_id": "req_011Cgayqie7PEbngMYrKwkLg",
+  "session_id": "6546fc18-30da-5e54-872b-559dd06736fd",
+  "timestamp": "2026-10-31T20:54:53.945Z",
+  "type": "assistant",
+  "uuid": "78f67bb6-494e-49c7-afa7-e993dfc88891",
+  "wire_tool_inputs": {
+   "toolu_01Amojjvp8qbuPwgLVyQZNex": {
+    "questions": [
+     {
+      "header": "Fruit",
+      "multiSelect": false,
+      "options": [
+       {
+        "description": "Pick Apple",
+        "label": "Apple"
+       },
+       {
+        "description": "Pick Banana",
+        "label": "Banana"
+       }
+      ],
+      "question": "Pick a fruit"
+     }
+    ]
+   }
+  }
+ },
+ {
+  "created_at": "2026-10-31T20:54:54.124225Z",
+  "request": {
+   "analytics_tool_name": "AskUserQuestion",
+   "display_name": "AskUserQuestion",
+   "input": {
+    "questions": [
+     {
+      "header": "Fruit",
+      "multiSelect": false,
+      "options": [
+       {
+        "description": "Pick Apple",
+        "label": "Apple"
+       },
+       {
+        "description": "Pick Banana",
+        "label": "Banana"
+       }
+      ],
+      "question": "Pick a fruit"
+     }
+    ]
+   },
+   "requires_user_interaction": true,
+   "subtype": "can_use_tool",
+   "tool_name": "AskUserQuestion",
+   "tool_use_id": "toolu_01Amojjvp8qbuPwgLVyQZNex"
+  },
+  "request_id": "bda7e33e-50a0-41aa-bc1b-4cd5c14452da",
+  "type": "control_request",
+  "uuid": "ff7782cf-37d3-417e-a767-6d23dc5ef5f4"
+ },
+ {
+  "created_at": "2026-10-31T20:54:54.724643Z",
+  "rate_limit_info": {
+   "isUsingOverage": false,
+   "overageInUse": true,
+   "overageResetsAt": 1793491200,
+   "overageStatus": "allowed",
+   "rateLimitType": "overage",
+   "resetsAt": 1793491200,
+   "status": "allowed"
+  },
+  "session_id": "6546fc18-30da-5e54-872b-559dd06736fd",
+  "type": "rate_limit_event",
+  "uuid": "6a7084ac-49d9-4b5c-8165-40e11cac031d"
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.267198Z",
+  "request": {
+   "sdkMcpServers": [
+    "ccd_session"
+   ],
+   "subtype": "initialize"
+  },
+  "request_id": "8c1moqra64g",
+  "type": "control_request",
+  "uuid": "0873db29-b91f-415d-8703-53311f0ed7e7"
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.395114Z",
+  "type": "control_response",
+  "uuid": "86000480-2f16-4de1-b7b5-4c55c0f8ccc0",
+  "response": {
+   "request_id": "8c1moqra64g",
+   "subtype": "success",
+   "response": "<trimmed>"
+  }
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.465828Z",
+  "session_id": "6546fc18-30da-5e54-872b-559dd06736fd",
+  "subtype": "background_tasks_changed",
+  "tasks": [],
+  "type": "system",
+  "uuid": "400e3f9b-4236-49cc-a53f-7b4b6478999e"
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.465828Z",
+  "request": {
+   "message": {
+    "id": 0,
+    "jsonrpc": "2.0",
+    "method": "initialize",
+    "params": {
+     "capabilities": {},
+     "clientInfo": {
+      "description": "Anthropic's agentic coding tool",
+      "name": "claude-code",
+      "title": "Claude Code",
+      "version": "2.1.316",
+      "websiteUrl": "https://claude.com/claude-code"
+     },
+     "protocolVersion": "2025-11-25"
+    }
+   },
+   "server_name": "ccd_session",
+   "subtype": "mcp_message"
+  },
+  "request_id": "4be76f88-4396-4645-b2c8-9bcb58462866",
+  "type": "control_request",
+  "uuid": "ac8e10b2-d4e5-4abd-8443-62f5f5bf229b"
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.645510Z",
+  "request": {
+   "subtype": "get_context_usage"
+  },
+  "request_id": "get_context_usage-1793480105547-ejvo3u",
+  "type": "control_request",
+  "uuid": "b7327aa3-6170-46b2-a3b8-7ed01c3d3d23"
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.830311Z",
+  "response": {
+   "request_id": "4be76f88-4396-4645-b2c8-9bcb58462866",
+   "response": {
+    "mcp_response": {
+     "id": 0,
+     "jsonrpc": "2.0",
+     "result": {
+      "capabilities": {
+       "tools": {
+        "listChanged": true
+       }
+      },
+      "protocolVersion": "2025-11-25",
+      "serverInfo": {
+       "name": "ccd_session",
+       "version": "1.0.0"
+      }
+     }
+    }
+   },
+   "subtype": "success"
+  },
+  "type": "control_response",
+  "uuid": "7f02a61d-c37c-4ed5-859e-d6cb3cb96e76"
+ },
+ {
+  "created_at": "2026-10-31T20:55:05.918275Z",
+  "request": {
+   "subtype": "get_context_usage"
+  },
+  "request_id": "get_context_usage-1793480105809-y6q559",
+  "type": "control_request",
+  "uuid": "3d2428ce-e889-4dbd-8b38-e4bc8b57d1c3"
+ },
+ {
+  "created_at": "2026-10-31T20:55:06.012485Z",
+  "request": {
+   "message": {
+    "jsonrpc": "2.0",
+    "method": "notifications/initialized"
+   },
+   "server_name": "ccd_session",
+   "subtype": "mcp_message"
+  },
+  "request_id": "6685a510-7f4e-44f0-9d0e-626944fbbc90",
+  "type": "control_request",
+  "uuid": "3ab57fbb-e870-4dff-a4f6-75535886494d"
+ },
+ {
+  "created_at": "2026-10-31T20:55:06.162158Z",
+  "type": "control_response",
+  "uuid": "979bed3c-d730-4708-b206-40b90287ae51",
+  "response": {
+   "request_id": "get_context_usage-1793480105547-ejvo3u",
+   "subtype": "success",
+   "response": "<trimmed>"
+  }
+ },
+ {
+  "created_at": "2026-10-31T20:55:06.183102Z",
+  "response": {
+   "request_id": "6685a510-7f4e-44f0-9d0e-626944fbbc90",
+   "response": {
+    "mcp_response": {
+     "id": 0,
+     "jsonrpc": "2.0",
+     "result": {}
+    }
+   },
+   "subtype": "success"
+  },
+  "type": "control_response",
+  "uuid": "9b3a9b3b-e9f2-441d-afa6-3c54c62fe0eb"
+ },
+ {
+  "created_at": "2026-10-31T20:55:06.300309Z",
+  "type": "control_response",
+  "uuid": "6e101d15-9c05-4eec-aed2-f85c660c5458",
+  "response": {
+   "request_id": "get_context_usage-1793480105809-y6q559",
+   "subtype": "success",
+   "response": "<trimmed>"
+  }
+ },
+ {
+  "created_at": "2026-10-31T20:55:06.383657Z",
+  "request": {
+   "message": {
+    "id": 1,
+    "jsonrpc": "2.0",
+    "method": "tools/list"
+   },
+   "server_name": "ccd_session",
+   "subtype": "mcp_message"
+  },
+  "request_id": "e4b1fde6-beb4-477b-84c1-e0fa5f8c914b",
+  "type": "control_request",
+  "uuid": "a74dafcf-e656-4f7c-abdd-3a056b0bcb11"
+ },
+ {
+  "created_at": "2026-10-31T20:55:06.541377Z",
+  "type": "control_response",
+  "uuid": "78c1ba6c-d541-460f-aa05-996789725432",
+  "response": {
+   "request_id": "e4b1fde6-beb4-477b-84c1-e0fa5f8c914b",
+   "subtype": "success",
+   "response": "<trimmed>"
+  }
+ }
+]
