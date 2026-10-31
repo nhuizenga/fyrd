@@ -14,7 +14,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var run = s.Create("Add export button", Repo, "# Export\nDo it.");
-        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-d+)?$", run.Id);
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$", run.Id);
         Assert.Equal(SpecStatus.Draft, run.Status);
         Assert.Equal("# Export\nDo it.", File.ReadAllText(Path.Combine(h.Paths.SpecDir(run.Id), "spec.md")));
         Assert.Equal("[]", File.ReadAllText(Path.Combine(h.Paths.SpecDir(run.Id), "units.json")).Trim());
@@ -29,8 +29,8 @@ public class SpecStoreTests
         s.Create("Add export button", Repo, "x");
         var second = s.Create("Add export button", Repo, "x");
         var third = s.Create("Add export button", Repo, "x");
-        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-d+)?$", second.Id);
-        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-d+)?$", third.Id);
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$", second.Id);
+        Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$", third.Id);
         Assert.NotEqual(second.Id, third.Id);
     }
 
@@ -41,6 +41,16 @@ public class SpecStoreTests
         Assert.Matches(@"^20261029-add-export-button-[0-9a-f]{4}$", id);
         Assert.True(SpecIds.IsValid(id));
         Assert.True(SpecIds.IsValid(SpecIds.NewId(new string('a', 100), DateTimeOffset.UtcNow)));
+    }
+
+    [Fact]
+    public void CollisionTolerantPattern_MatchesSuffixedIds()
+    {
+        const string pattern = @"^20261029-add-export-button-[0-9a-f]{4}(-\d+)?$";
+        Assert.Matches(pattern, "20261029-add-export-button-ab12");
+        Assert.Matches(pattern, "20261029-add-export-button-ab12-2");
+        Assert.Matches(pattern, "20261029-add-export-button-ab12-10");
+        Assert.DoesNotMatch(pattern, "20261029-add-export-button-ab12-d");
     }
 
     [Fact]
@@ -76,7 +86,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var run = s.Create("../../etc/Passwd ✨ now", Repo, "x");
-        Assert.Matches(@"^20261029-etc-passwd-now-[0-9a-f]{4}(-d+)?$", run.Id);
+        Assert.Matches(@"^20261029-etc-passwd-now-[0-9a-f]{4}(-\d+)?$", run.Id);
         var dir = Path.GetFullPath(h.Paths.SpecDir(run.Id));
         Assert.StartsWith(h.Paths.SpecsDir, dir);
         Assert.Equal(h.Paths.SpecsDir, Path.GetDirectoryName(dir));
@@ -86,9 +96,9 @@ public class SpecStoreTests
     public void Create_EmptyTitleAndLongTitle_StayValid()
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
-        Assert.Matches(@"^20261029-spec-[0-9a-f]{4}(-d+)?$", s.Create("✨✨", Repo, "x").Id);
+        Assert.Matches(@"^20261029-spec-[0-9a-f]{4}(-\d+)?$", s.Create("✨✨", Repo, "x").Id);
         var longId = s.Create(new string('a', 100), Repo, "x").Id;
-        Assert.InRange(longId.Length, 9 + 40 + 5, 9 + 40 + 5 + 3);
+        Assert.StartsWith("20261029-" + new string('a', 40) + "-", longId);
         Assert.True(SpecIds.IsValid(longId));
     }
 
