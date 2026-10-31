@@ -9,7 +9,10 @@ public sealed class FyrdPaths
         SpecsDir = Path.Combine(Root, "specs");
         InboxDir = Path.Combine(Root, "inbox");
         MemoryDir = Path.Combine(Root, "memory");
-        foreach (var dir in new[] { Root, SpecsDir, InboxDir, MemoryDir })
+        HubDir = Path.Combine(Root, "hub");
+        HubPersonasDir = Path.Combine(HubDir, "personas");
+        HubMemoryDir = Path.Combine(HubDir, "memory");
+        foreach (var dir in new[] { Root, SpecsDir, InboxDir, MemoryDir, HubDir, HubPersonasDir, HubMemoryDir })
             Directory.CreateDirectory(dir);
     }
 
@@ -18,6 +21,9 @@ public sealed class FyrdPaths
     public string SpecsDir { get; }
     public string InboxDir { get; }
     public string MemoryDir { get; }
+    public string HubDir { get; }
+    public string HubPersonasDir { get; }
+    public string HubMemoryDir { get; }
 
     public string SpecDir(string specId) => Path.Combine(SpecsDir, specId);
 

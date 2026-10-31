@@ -42,6 +42,23 @@ public class ConfigStoreTests
     { using var h = new TempHome(); var s = new ConfigStore(h.Paths);
       s.Save(new FyrdConfig(4, "env_01Abc")); Assert.Equal("env_01Abc", s.Load().EnvironmentId); }
 
+    [Fact] public void Load_Default_SessionCapIs20()
+    { using var home = new TempHome(); Assert.Equal(20, new ConfigStore(home.Paths).Load().SessionCap); }
+
+    [Fact] public void Load_OutOfRangeSessionCap_Clamped()
+    { using var home = new TempHome(); File.WriteAllText(home.Paths.ConfigFile, "{\"sessionCap\":500}");
+      Assert.Equal(100, new ConfigStore(home.Paths).Load().SessionCap); }
+
+    [Fact] public void Save_SessionCapZero_Throws()
+    { using var home = new TempHome();
+      Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(home.Paths).Save(new FyrdConfig(SessionCap: 0))); }
+
+    [Fact] public void Paths_CreateHubDirs()
+    { using var home = new TempHome();
+      Assert.True(Directory.Exists(home.Paths.HubDir));
+      Assert.True(Directory.Exists(home.Paths.HubPersonasDir));
+      Assert.True(Directory.Exists(home.Paths.HubMemoryDir)); }
+
     [Fact] public void Config_Load_EmptyModelFallsBack()
     { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{\"leadModel\": \"\", \"peerModel\": null}");
       var c = new ConfigStore(h.Paths).Load();
