@@ -32,8 +32,9 @@ export const sendMessage = (sessionId: string, text: string) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/message`, { text });
 export const pause = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pause`);
 export const resume = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/resume`);
+/** 202 with `{ waitingFor }` while sibling questions of the same request are unanswered; 204 (undefined) once sent. */
 export const answerQuestion = (id: string, body: AnswerBody) =>
-  call<void>("POST", `/api/hub/questions/${enc(id)}/answer`, body);
+  call<{ waitingFor: number } | undefined>("POST", `/api/hub/questions/${enc(id)}/answer`, body);
 
 export const getPersonas = () => call<HubPersona[]>("GET", "/api/hub/personas");
 export const savePersona = (p: HubPersona) => call<HubPersona>("PUT", `/api/hub/personas/${enc(p.id)}`, p);
