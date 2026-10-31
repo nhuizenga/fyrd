@@ -52,7 +52,7 @@ Controller, Researcher, Builder (the owner prefers "builder" to "implementer"), 
 
 ### Personas
 
-Personas are managed in the console under **Settings › Personas** (owner's decision). Each has a name, a model and a definition. They are stored by the service in `~/.fyrd/data/personas/`, not in a repo.
+Personas are managed in the console under **Settings › Personas** (owner's decision). Each has a name, a model and a definition. They are stored by the service in `~/.fyrd/data/hub/personas/*.json` (one file per persona, so each can be edited and deleted on its own), not in a repo.
 
 - **Seeding:** this work adds the six personas to Settings: Controller, Researcher, Builder, Reviewer, Validator and Monitor. Their starting text comes from the owner's `personas/controller.md` (hardened per §11) and from new drafts. Builder is adapted from `implementer.md`. The pipeline's persona files are not used here. *(Claude's call: the seed text is checked in, for example under `personas/hub/`, and copied into `~/.fyrd` only when a persona doesn't exist there yet.)*
 - **Model:** `create_session` gets the persona's model.
@@ -115,9 +115,11 @@ When a request would go over the cap, the Controller asks the owner with `AskUse
 
 ### Files
 
-In `~/.fyrd/data/memory/`:
-- `shared.md` is shared memory, which is also the Controller's memory.
-- `roles/<role>.md` holds each role's memory, for example `roles/builder.md`.
+In `~/.fyrd/data/hub/memory/`, one JSON file per scope (`<scope>.json`):
+- `shared.json` is shared memory, which is also the Controller's memory. The Controller always writes `scope: shared`.
+- `<role>.json` holds each role's memory, for example `builder.json`.
+
+*(As built: JSON per scope rather than markdown, so the console can edit and delete single entries, each with its own id, source and date.)*
 
 The existing `owner-proxy.md`, `global.md` and per-repo files stay with the pipeline and are not used here. *(Claude's call.)*
 
@@ -133,7 +135,7 @@ Always ask before doing X.
 ````
 
 - `scope: role` goes to the writer's role file. The service takes the role from the session's `fyrd-role-*` tag.
-- `scope: shared` goes to `shared.md`.
+- `scope: shared` goes to `shared.json`.
 
 The service only appends. Each entry gets the date and the source session's title.
 
