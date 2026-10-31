@@ -48,6 +48,9 @@ var viaOpt = TakeOpt(argv, "--via");
 var sessionOpt = TakeOpt(argv, "--session");
 var answerViaOpt = TakeOpt(argv, "--answer-via");
 var skillsProbe = argv.Remove("--skills-probe");
+var noRepo = argv.Remove("--no-repo");
+var createVia = TakeOpt(argv, "--create-via");
+var connectorsFrom = TakeOpt(argv, "--connectors-from");
 var positional = argv.Skip(1).Where(a => !a.StartsWith("--")).ToList();
 var unknown = argv.Skip(1).Where(a => a.StartsWith("--") && a != "--fresh").ToList();
 if (unknown.Count > 0)
@@ -78,6 +81,7 @@ try
         case "q7": await Q7(); break;
         case "q8": await Q8(); break;
         case "q9": await Q9(); break;
+        case "q10": await Q10(); break;
         default: return Usage();
     }
     return 0;
@@ -533,6 +537,23 @@ async Task SendClear(string q, string sessionId)
     Log(q, "sent-clear", new JsonObject { ["session"] = sessionId, ["via"] = via });
 }
 
+// Q10 (read-only): print a session's /v1/code/sessions config (mcp_connector_ids, sources) and its init MCP servers.
+async Task Q10()
+{
+    var id = sessionOpt ?? throw new InvalidOperationException("q10 needs --session <session_id>");
+    var r = await raw.SendAsync(HttpMethod.Get, $"/v1/code/sessions/{id}", null);
+    var root = r.Status < 300 ? JsonNode.Parse(r.Text) : null;
+    Console.WriteLine($"[q10] GET /v1/code/sessions/{id} -> HTTP {r.Status}");
+    var cfg = root?["response_shape"]?["config"] ?? root?["session"]?["config"] ?? root?["config"];
+    Console.WriteLine($"[q10] config keys: {string.Join(", ", (cfg as JsonObject)?.Select(kv => kv.Key) ?? [])}");
+    Console.WriteLine($"[q10] mcp_connector_ids: {cfg?["mcp_connector_ids"]?.ToJsonString() ?? "(absent)"}");
+    Console.WriteLine($"[q10] sources: {cfg?["sources"]?.ToJsonString() ?? "(absent)"}");
+    Console.WriteLine($"[q10] top-level keys: {string.Join(", ", (root as JsonObject)?.Select(kv => kv.Key) ?? [])}");
+    var events = await FetchAllEvents("q10", id, log: false);
+    foreach (var init in events.Where(e => e.Type == "system" && e.Raw.TryGetProperty("subtype", out var st) && st.GetString() == "init").Take(1))
+        Console.WriteLine($"[q10] first init mcp_servers: {(init.Raw.TryGetProperty("mcp_servers", out var ms) ? ms.GetRawText() : "(none)")}");
+}
+
 // Q9: how does a console answer an AskUserQuestion? Creates a session that asks, finds the pending item (assistant
 // tool_use AskUserQuestion, or control_request can_use_tool), optionally answers "Banana" via --answer-via, prints the reply.
 // --skills-probe: instead create an API session with the claude.ai probe prompt (do fyrd-* account skills load? is the artifact readable?).
@@ -542,14 +563,58 @@ async Task Q9()
     const string SkillsPrompt = "1. List your available skills and say whether any named fyrd-* appear.\n2. Fetch https://claude.ai/artifact/LyjRt8594EXGq4V8UsQn5E with any tool you have and say which tool worked.";
     const string AskPrompt = "Use the AskUserQuestion tool to ask me \"Pick a fruit\" with options Apple and Banana, then tell me what I picked.";
     var seen = new StatusSeen();
-    var s = await client.CreateAsync(new CreateSessionRequest(skillsProbe ? "fyrd spike q9 skills probe" : "fyrd spike q9 ask probe",
-        ["fyrd", SpikeTag, "fyrd-probe-q9"], envId, skillsProbe ? SkillsPrompt : AskPrompt, Model, null, new SessionSource(Repo, null), "auto"));
+    CloudSession s;
+    if (createVia == "code")
+    {
+        // The web UI's create: POST /v1/code/sessions with `config` (not `session_context`), then the prompt as a user event.
+        var connectorIds = new JsonArray();
+        if (connectorsFrom is not null)
+        {
+            var src = await raw.SendAsync(HttpMethod.Get, $"/v1/code/sessions/{connectorsFrom}", null);
+            var srcCfg = JsonNode.Parse(src.Text)?["response_shape"]?["config"];
+            foreach (var cid in srcCfg?["mcp_connector_ids"]?.AsArray() ?? []) connectorIds.Add(cid?.GetValue<string>());
+            Console.WriteLine($"[q9] copying {connectorIds.Count} mcp_connector_ids from {connectorsFrom}");
+        }
+        var sources = new JsonArray();
+        if (!noRepo) sources.Add(new JsonObject { ["type"] = "git_repository", ["url"] = Repo });
+        var cr = await raw.SendAsync(HttpMethod.Post, "/v1/code/sessions", new JsonObject
+        {
+            ["title"] = "fyrd spike q9 create-via-code",
+            ["tags"] = new JsonArray("fyrd", SpikeTag, "fyrd-probe-q9"),
+            ["environment_id"] = envId,
+            ["config"] = new JsonObject { ["model"] = Model, ["sources"] = sources, ["outcomes"] = new JsonArray(), ["mcp_connector_ids"] = connectorIds },
+        });
+        Console.WriteLine($"[q9] create via /v1/code/sessions -> HTTP {cr.Status} {Trunc(cr.Text, 400)}");
+        if (cr.Status >= 300) throw new InvalidOperationException("the /v1/code/sessions create was rejected");
+        var created = JsonNode.Parse(cr.Text);
+        Console.WriteLine($"[q9] created config: {created?["session"]?["config"]?.ToJsonString()}");
+        var createdId = (created?["session"]?["id"] ?? created?["id"])?.GetValue<string>() ?? throw new InvalidOperationException("no id in create response");
+        var sessionId = createdId.StartsWith("cse_") ? "session_" + createdId["cse_".Length..] : createdId;
+        var ev = await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/cse_{sessionId["session_".Length..]}/events", new JsonObject
+        {
+            ["events"] = new JsonArray(new JsonObject
+            {
+                ["payload"] = new JsonObject
+                {
+                    ["type"] = "user", ["uuid"] = Guid.NewGuid().ToString(), ["session_id"] = sessionId, ["parent_tool_use_id"] = null,
+                    ["message"] = new JsonObject { ["role"] = "user", ["content"] = skillsProbe ? SkillsPrompt : AskPrompt },
+                },
+            }),
+        });
+        Console.WriteLine($"[q9] first message -> HTTP {ev.Status} {Trunc(ev.Text, 200)}");
+        s = await client.GetAsync(sessionId);
+    }
+    else
+        s = await client.CreateAsync(new CreateSessionRequest(skillsProbe ? "fyrd spike q9 skills probe" : "fyrd spike q9 ask probe",
+            ["fyrd", SpikeTag, "fyrd-probe-q9"], envId, skillsProbe ? SkillsPrompt : AskPrompt, Model, null, noRepo ? null : new SessionSource(Repo, null), "auto"));
     LogSession(q, "created", s);
     Console.WriteLine($"[q9] session: {s.Id}");
     Console.WriteLine($"[q9] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(10))}");
     var events = await FetchAllEvents(q, s.Id, log: false);
     await File.WriteAllLinesAsync(Path.Combine(outDir, "q9-events.jsonl"), events.Select(e => e.Raw.GetRawText()));
-    Console.WriteLine($"[q9] {events.Count} events -> out/q9-events.jsonl");
+    Console.WriteLine($"[q9] {events.Count} events -> out/q9-events.jsonl (source: {(noRepo ? "none" : Repo)})");
+    foreach (var init in events.Where(e => e.Type == "system" && e.Raw.TryGetProperty("subtype", out var st) && st.GetString() == "init"))
+        Console.WriteLine($"[q9] init mcp_servers: {(init.Raw.TryGetProperty("mcp_servers", out var ms) ? ms.GetRawText() : "(none)")}");
     if (skillsProbe)
     {
         Console.WriteLine($"[q9] reply:\n{Trunc(LastAssistant(events)?.Text, 3000)}");
@@ -861,7 +926,8 @@ static int Usage()
           q6 [<childId>] [--fresh]    interrupt then archive
           q7                          token expiry / refresh check
           q8 [--via api|code|code-init] [--session <id>]  /clear via a direct user event: memory cleared, persona kept?
-          q9 [--answer-via tool-result|control-response] [--skills-probe]  AskUserQuestion pending item + answer route; or account-skills probe
+          q9 [--answer-via tool-result|control-response] [--skills-probe] [--no-repo] [--create-via code [--connectors-from <session_id>]]
+          q10 --session <id>  read-only: session config (mcp_connector_ids) and init MCP servers  AskUserQuestion pending item + answer route; or account-skills probe
         options: --env <id> (default env_011v4b3WBhRMaGGti6Qw747c)   --timeout <minutes> (default 30)
         """);
     return 2;
