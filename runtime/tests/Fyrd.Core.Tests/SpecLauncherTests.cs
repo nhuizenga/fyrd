@@ -18,8 +18,10 @@ public class SpecLauncherTests : IDisposable
         _specs = new SpecStore(_home.Paths, TimeProvider.System);
         _config = new ConfigStore(_home.Paths);
         _config.Save(new FyrdConfig(SquadCap: 3, EnvironmentId: "env_abc"));
-        var personas = new Personas("LEAD {{SPEC_ID}} {{ENVIRONMENT_ID}}", "I", "R", "V");
-        _launcher = new SpecLauncher(_specs, _config, new DecisionMemory(_home.Paths), _cloud, personas);
+        var personas = new Personas("LEAD {{SPEC_ID}} {{ENVIRONMENT_ID}}", "I", "R", "V",
+            "RLEAD {{SPEC_ID}} {{ENVIRONMENT_ID}} {{RESEARCHER_PERSONA}}", "RESEARCHER");
+        _launcher = new SpecLauncher(_specs, _config, new DecisionMemory(_home.Paths), _cloud, personas,
+            new OwnerProxy(_home.Paths));
     }
 
     public void Dispose() => _home.Dispose();
@@ -49,6 +51,35 @@ public class SpecLauncherTests : IDisposable
         Assert.Contains(id, req.FirstMessage);
         Assert.Equal(SpecStatus.Building, run.Status);
         Assert.Equal("created-1", run.SessionId);
+    }
+
+    [Fact]
+    public async Task Research_LaunchesResearchLeadWithAutoAndTags()
+    {
+        var id = _specs.Create("Add export", "servicetitan/titan-lens-ossie", "# spec").Id;
+        Assert.True(_specs.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching));
+        var run = await _launcher.LaunchResearchAsync(id, default);
+
+        var req = Assert.Single(_cloud.Created);
+        Assert.Equal("auto", req.PermissionMode);
+        Assert.Contains("fyrd-role-research-lead", req.Tags);
+        Assert.Contains($"fyrd-spec-{id}", req.Tags);
+        Assert.Equal("Fyrd research · Add export", req.Title);
+        Assert.Equal("https://github.com/servicetitan/titan-lens-ossie", req.Source!.RepoUrl);
+        Assert.Contains("RESEARCHER", req.FirstMessage);
+        Assert.Equal(SpecStatus.Researching, run.Status);
+        Assert.Equal("created-1", run.SessionId);
+        Assert.Null(run.LastEventId);
+    }
+
+    [Fact]
+    public async Task Research_ApiFailure_RevertsToDraft()
+    {
+        var id = _specs.Create("Add export", "servicetitan/titan-lens-ossie", "# spec").Id;
+        Assert.True(_specs.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching));
+        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom"));
+        await Assert.ThrowsAsync<CloudSessionApiException>(() => _launcher.LaunchResearchAsync(id, default));
+        Assert.Equal(SpecStatus.Draft, _specs.Get(id)!.Status);
     }
 
     [Fact]

@@ -6,7 +6,8 @@ namespace Fyrd.Core.Orchestration;
 
 /// <summary>Starts the lead cloud session for a spec the caller has already moved Draft to Queued.</summary>
 public sealed class SpecLauncher(
-    SpecStore specs, ConfigStore config, DecisionMemory memory, ICloudSessions cloud, Personas personas)
+    SpecStore specs, ConfigStore config, DecisionMemory memory, ICloudSessions cloud, Personas personas,
+    OwnerProxy ownerProxy)
 {
     public async Task<SpecRun> LaunchAsync(string specId, CancellationToken ct)
     {
@@ -16,7 +17,8 @@ public sealed class SpecLauncher(
             var cfg = config.Load();
             var environmentId = cfg.EnvironmentId
                 ?? throw new InvalidOperationException("EnvironmentId must be configured before launching a lead.");
-            var prompt = LeadPrompt.Build(run, specs.ReadMarkdown(specId), memory.ReadFor(run.Repo), cfg, personas);
+            var prompt = LeadPrompt.Build(run, specs.ReadMarkdown(specId), memory.ReadFor(run.Repo), cfg, personas,
+                ownerProxy.Read());
             var session = await cloud.CreateAsync(new CreateSessionRequest(
                 Title: $"Fyrd lead · {run.Title}",
                 Tags: ["fyrd", $"fyrd-spec-{specId}", "fyrd-role-lead"],
@@ -31,6 +33,35 @@ public sealed class SpecLauncher(
         catch
         {
             specs.TryTransition(specId, SpecStatus.Queued, SpecStatus.Draft);
+            throw;
+        }
+    }
+
+    /// <summary>Starts the research lead for a spec the caller has already moved Draft to Researching.</summary>
+    public async Task<SpecRun> LaunchResearchAsync(string specId, CancellationToken ct)
+    {
+        try
+        {
+            var run = specs.Get(specId) ?? throw new KeyNotFoundException($"Spec '{specId}' not found.");
+            var cfg = config.Load();
+            var environmentId = cfg.EnvironmentId
+                ?? throw new InvalidOperationException("EnvironmentId must be configured before launching a research lead.");
+            var prompt = LeadPrompt.BuildResearch(run, specs.ReadMarkdown(specId), memory.ReadFor(run.Repo),
+                ownerProxy.Read(), cfg, personas);
+            var session = await cloud.CreateAsync(new CreateSessionRequest(
+                Title: $"Fyrd research · {run.Title}",
+                Tags: ["fyrd", $"fyrd-spec-{specId}", "fyrd-role-research-lead"],
+                EnvironmentId: environmentId,
+                FirstMessage: prompt,
+                Model: cfg.LeadModel,
+                AppendSystemPrompt: null,
+                Source: new SessionSource($"https://github.com/{run.Repo}", null),
+                PermissionMode: "auto"), ct);
+            return specs.SetResearchLead(specId, session.Id);
+        }
+        catch
+        {
+            specs.TryTransition(specId, SpecStatus.Researching, SpecStatus.Draft);
             throw;
         }
     }

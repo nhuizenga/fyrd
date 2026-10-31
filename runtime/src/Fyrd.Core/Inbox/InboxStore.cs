@@ -66,9 +66,70 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
                     ?? throw new KeyNotFoundException($"Spec '{card.SpecId}' not found.");
                 memory.Record(repo, scope, card.Question, text, now, card.SpecId);
             }
-            var answered = card with { Answer = new CardAnswer(text, remember, scope, now) };
+            var answered = card with { Answer = new CardAnswer(text, remember, scope, now,
+                RelayStatus: string.IsNullOrEmpty(card.SourceKey) ? null : "pending") };
             Write(answered);
             return answered;
+        }
+    }
+
+    public InboxCard Get(string cardId)
+    {
+        if (!CardIdPattern().IsMatch(cardId)) throw new ArgumentException($"Invalid card id '{cardId}'.", nameof(cardId));
+        lock (_gate) return Read(PathFor(cardId)) ?? throw new KeyNotFoundException($"Card '{cardId}' not found.");
+    }
+
+    public const int MaxRelayAttempts = 5;
+
+    /// <summary>Records relay progress; a <c>failed</c> status counts one more attempt. Message only, never a body or token.</summary>
+    public InboxCard SetRelay(string cardId, string status, string? error) =>
+        MutateAnswered(cardId, a => a with
+        {
+            RelayStatus = status,
+            RelayError = status == "sent" ? null : error,
+            RelayAttempts = status == "failed" ? a.RelayAttempts + 1 : a.RelayAttempts,
+        });
+
+    /// <summary>Marks the answer as pending delivery again with a fresh attempt budget.</summary>
+    public InboxCard ResetRelay(string cardId) =>
+        MutateAnswered(cardId, a => a with { RelayStatus = "pending", RelayAttempts = 0, RelayError = null });
+
+    public IReadOnlyList<InboxCard> ListRelaysToRetry()
+    {
+        lock (_gate)
+        {
+            return Directory.EnumerateFiles(paths.InboxDir, "*.json")
+                .Select(ReadOrSkip).OfType<InboxCard>()
+                .Where(c => c.Answer is { RelayStatus: "pending" or "failed" } a
+                            && a.RelayAttempts < MaxRelayAttempts && !string.IsNullOrEmpty(c.SourceKey))
+                .OrderBy(c => c.CreatedAt)
+                .ToList();
+        }
+    }
+
+    /// <summary>Answered cards whose relay to the lead failed.</summary>
+    public IReadOnlyList<InboxCard> ListUndelivered()
+    {
+        lock (_gate)
+        {
+            return Directory.EnumerateFiles(paths.InboxDir, "*.json")
+                .Select(ReadOrSkip).OfType<InboxCard>()
+                .Where(c => c.Answer is { RelayStatus: "failed" })
+                .OrderBy(c => c.CreatedAt)
+                .ToList();
+        }
+    }
+
+    private InboxCard MutateAnswered(string cardId, Func<CardAnswer, CardAnswer> change)
+    {
+        if (!CardIdPattern().IsMatch(cardId)) throw new ArgumentException($"Invalid card id '{cardId}'.", nameof(cardId));
+        lock (_gate)
+        {
+            var card = Read(PathFor(cardId)) ?? throw new KeyNotFoundException($"Card '{cardId}' not found.");
+            if (card.Answer is null) throw new CardNotAnsweredException(cardId);
+            var updated = card with { Answer = change(card.Answer) };
+            Write(updated);
+            return updated;
         }
     }
 

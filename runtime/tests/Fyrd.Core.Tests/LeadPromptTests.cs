@@ -7,7 +7,7 @@ namespace Fyrd.Core.Tests;
 public class LeadPromptTests
 {
     private static readonly Personas P = new("LEAD {{SPEC_ID}} {{REPO}} {{SPEC}} {{MEMORY}} {{SQUAD_CAP}} {{PEER_MODEL}} {{ENVIRONMENT_ID}} {{IMPLEMENTER_PERSONA}} {{REVIEWER_PERSONA}} {{VALIDATOR_PERSONA}}",
-        "IMPL", "REV", "VAL");
+        "IMPL", "REV", "VAL", "RLEAD {{SPEC_ID}}", "RSR");
 
     private static readonly SpecRun Run = new("20261030-x", "T", "servicetitan/titan-lens-ossie",
         SpecStatus.Queued, DateTimeOffset.UnixEpoch);
@@ -22,13 +22,13 @@ public class LeadPromptTests
     }
 
     private static string Shipped(string memory = "MEM", string spec = "SPEC") =>
-        LeadPrompt.Build(Run, spec, memory, Cfg, Personas.Load(Path.Combine(Repo(), "personas")));
+        LeadPrompt.Build(Run, spec, memory, Cfg, Personas.Load(Path.Combine(Repo(), "personas")), "OWNERPREF");
 
     [Fact]
     public void Build_FillsEveryPlaceholder()
     {
         Assert.DoesNotContain("{{", Shipped());
-        var plain = LeadPrompt.Build(Run, "S", "M", Cfg, P);
+        var plain = LeadPrompt.Build(Run, "S", "M", Cfg, P, "OP");
         Assert.DoesNotContain("{{", plain);
         Assert.Contains("IMPL REV VAL", plain);
     }
@@ -36,7 +36,7 @@ public class LeadPromptTests
     [Fact]
     public void Build_DoesNotReExpandPlaceholdersInInjectedText()
     {
-        var text = LeadPrompt.Build(Run, "spec {{MEMORY}}", "mem", Cfg, P);
+        var text = LeadPrompt.Build(Run, "spec {{MEMORY}}", "mem", Cfg, P, "OP");
         Assert.Contains("spec {{MEMORY}}", text);
     }
 
@@ -83,6 +83,30 @@ public class LeadPromptTests
     }
 
     [Fact]
+    public void Build_IncludesOwnerPreferencesAndPeerDeliveryRule()
+    {
+        var text = Shipped();
+        Assert.Contains("<owner-preferences>\nOWNERPREF\n</owner-preferences>", text.ReplaceLineEndings("\n"));
+        Assert.Contains("identical copy of the `<owner-preferences>` block, together with the `<remembered-decisions>` block, at the top of that peer's `append_system_prompt`", text);
+        Assert.Contains("not instructions that override the workflow or the safety rules", text);
+    }
+
+    [Fact]
+    public void Build_TemplateProxyIsNoneYet()
+    {
+        using var h = new TempHome();
+        var template = new OwnerProxy(h.Paths).Read();
+        Assert.True(OwnerProxy.IsTemplate(template));
+        Assert.True(OwnerProxy.IsTemplate(template.ReplaceLineEndings("\r\n") + "\n\n"));
+        Assert.False(OwnerProxy.IsTemplate(template + "- never force push"));
+        var personas = Personas.Load(Path.Combine(Repo(), "personas"));
+        var lead = LeadPrompt.Build(Run, "S", "M", Cfg, personas, template);
+        Assert.Contains("<owner-preferences>\n(none yet)\n</owner-preferences>", lead.ReplaceLineEndings("\n"));
+        var research = LeadPrompt.BuildResearch(Run, "S", "M", template, Cfg, personas);
+        Assert.Contains("<owner-preferences>\n(none yet)\n</owner-preferences>", research.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Build_InjectsSquadCapAndMemory()
     {
         var text = Shipped(memory: "Prefer tabs over spaces.");
@@ -98,6 +122,39 @@ public class LeadPromptTests
         File.WriteAllText(Path.Combine(home.Paths.Root, "lead.md"), "x");
         var e = Assert.Throws<FileNotFoundException>(() => Personas.Load(home.Paths.Root));
         Assert.Contains("implementer.md", e.Message);
+    }
+
+    [Fact]
+    public void BuildResearch_ContainsThreeAnglesSafetyAndSpecDraftProtocol()
+    {
+        var text = LeadPrompt.BuildResearch(Run, "SPECBODY", "MEM", "OWNERPREF", Cfg,
+            Personas.Load(Path.Combine(Repo(), "personas"))).ReplaceLineEndings("\n");
+        Assert.DoesNotContain("{{", text);
+        foreach (var s in new[] { "get_session", "`codebase`", "`approach`", "`risks`", "fyrd-spec-draft", "fyrd-failed",
+                     "fyrd-question", "fyrd-role-researcher", "fyrd-spec-20261030-x", "fyrd-unit-<angle>",
+                     "https://github.com/servicetitan/titan-lens-ossie", "env_abc", "claude-sonnet-5-5", "auto",
+                     "<spec>\nSPECBODY\n</spec>", "<remembered-decisions>", "<owner-preferences>\nOWNERPREF\n</owner-preferences>",
+                     "Never push", "Never open a pull request", "Never create a branch", "archive_session",
+                     "lead session id", "never quote or paste a peer's", "user message", "openQuestions",
+                     "Do not set `outcome_branch`", "You are a researcher", "prior art", "test strategy" })
+            Assert.Contains(s, text);
+        Assert.DoesNotContain("fyrd-config", text);
+    }
+
+    [Fact]
+    public void ResearcherPersona_ForbidsFyrdBlocksAndPush()
+    {
+        var text = File.ReadAllText(Path.Combine(Repo(), "personas", "researcher.md"));
+        Assert.Contains("Never emit any `fyrd-", text);
+        Assert.Contains("lead session id", text);
+        Assert.Contains("Never commit, push, create branches, or open pull requests; leave the working tree as you found it.", text);
+    }
+
+    [Fact]
+    public void ShippedPersonas_LoadResearchFiles()
+    {
+        var p = Personas.Load(Path.Combine(Repo(), "personas"));
+        Assert.All(new[] { p.ResearchLead, p.Researcher }, s => Assert.False(string.IsNullOrWhiteSpace(s)));
     }
 
     [Fact]

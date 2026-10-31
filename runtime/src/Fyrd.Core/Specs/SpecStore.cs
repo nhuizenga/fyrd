@@ -9,6 +9,8 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
     private const string RunFile = "run.json";
     private const string MarkdownFile = "spec.md";
     private const string UnitsFile = "units.json";
+    private const string ProposalMarkdownFile = "proposal.md";
+    private const string ProposalMetaFile = "proposal.json";
 
     public SpecRun Create(string title, string repo, string markdown)
     {
@@ -88,8 +90,113 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
         }
     }
 
+    /// <summary>
+    /// Claims a Draft for a new launch: requires Draft with no pending proposal, and clears the previous run's
+    /// session, cursor and error in the same write. Null when the spec is not claimable.
+    /// </summary>
+    public SpecRun? TryClaim(string id, SpecStatus to)
+    {
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != SpecStatus.Draft || run.HasProposal) return null;
+            var claimed = run with { Status = to, SessionId = null, LastEventId = null, Error = null };
+            WriteRun(claimed, id);
+            return claimed;
+        }
+    }
+
     public SpecRun SetLead(string id, string sessionId) =>
-        Mutate(id, r => r with { SessionId = sessionId, Status = SpecStatus.Building });
+        Mutate(id, r => r with { SessionId = sessionId, Status = SpecStatus.Building, LastEventId = null });
+
+    public SpecRun SetResearchLead(string id, string sessionId) =>
+        Mutate(id, r => r with { SessionId = sessionId, Status = SpecStatus.Researching, LastEventId = null });
+
+    private sealed record ProposalMeta(string Summary, IReadOnlyList<string> OpenQuestions, string SessionId);
+
+    public void SaveProposal(string id, string markdown, string summary, IReadOnlyList<string> openQuestions, string sessionId)
+    {
+        var dir = DirFor(id);
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != SpecStatus.Researching)
+                throw new InvalidOperationException("A proposal can only be saved while the spec is Researching.");
+            AtomicFile.Write(Path.Combine(dir, ProposalMarkdownFile), markdown);
+            AtomicFile.Write(Path.Combine(dir, ProposalMetaFile),
+                JsonSerializer.Serialize(new ProposalMeta(summary, openQuestions, sessionId), Json.Options));
+            WriteRun(run with { HasProposal = true }, id);
+        }
+    }
+
+    public Proposal? GetProposal(string id)
+    {
+        var dir = DirFor(id);
+        lock (_gate)
+        {
+            var md = Path.Combine(dir, ProposalMarkdownFile);
+            var meta = Path.Combine(dir, ProposalMetaFile);
+            if (!File.Exists(md) || !File.Exists(meta)) return null;
+            var m = JsonSerializer.Deserialize<ProposalMeta>(File.ReadAllText(meta), Json.Options);
+            return m is null ? null : new Proposal(File.ReadAllText(md), m.Summary, m.OpenQuestions ?? [], m.SessionId);
+        }
+    }
+
+    /// <summary>Replaces spec.md with the proposal (or the owner's edit of it), keeping the old text as spec.v&lt;N&gt;.md.</summary>
+    public SpecRun AcceptProposal(string id, string? editedMarkdown)
+    {
+        var dir = DirFor(id);
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != SpecStatus.Draft || !run.HasProposal)
+                throw new InvalidOperationException("There is no proposal to accept, or the spec is not a Draft.");
+            var proposal = GetProposal(id) ?? throw new InvalidOperationException("The proposal files are missing.");
+            var specPath = Path.Combine(dir, MarkdownFile);
+            var n = 1;
+            while (File.Exists(Path.Combine(dir, $"spec.v{n}.md"))) n++;
+            AtomicFile.Write(Path.Combine(dir, $"spec.v{n}.md"), File.ReadAllText(specPath));
+            AtomicFile.Write(specPath, string.IsNullOrWhiteSpace(editedMarkdown) ? proposal.Markdown : editedMarkdown);
+            DeleteProposalFiles(dir);
+            var updated = run with { HasProposal = false, Error = null };
+            WriteRun(updated, id);
+            return updated;
+        }
+    }
+
+    public SpecRun DiscardProposal(string id)
+    {
+        var dir = DirFor(id);
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            DeleteProposalFiles(dir);
+            var updated = run with { HasProposal = false };
+            WriteRun(updated, id);
+            return updated;
+        }
+    }
+
+    public SpecRun UpdateMarkdown(string id, string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+            throw new ArgumentException("Spec markdown must not be empty.", nameof(markdown));
+        var dir = DirFor(id);
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != SpecStatus.Draft) throw new InvalidOperationException("Only a Draft spec can be edited.");
+            AtomicFile.Write(Path.Combine(dir, MarkdownFile), markdown);
+            WriteRun(run, id);
+            return run;
+        }
+    }
+
+    private static void DeleteProposalFiles(string dir)
+    {
+        File.Delete(Path.Combine(dir, ProposalMarkdownFile));
+        File.Delete(Path.Combine(dir, ProposalMetaFile));
+    }
 
     public SpecRun SetCursor(string id, string lastEventId) => Mutate(id, r => r with { LastEventId = lastEventId });
 
@@ -104,8 +211,19 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
 
     public IReadOnlyList<SpecRun> ListActive() =>
         List().Select(e => e.Run).OfType<SpecRun>()
-            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Building or SpecStatus.FinalReview)
+            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Researching or SpecStatus.Building or SpecStatus.FinalReview)
             .ToList();
+
+    /// <summary>Queued or researching runs that never got a session and have not been touched for <paramref name="olderThan"/>.</summary>
+    public IReadOnlyList<SpecRun> ListStaleLaunches(TimeSpan olderThan)
+    {
+        var cutoff = time.GetUtcNow() - olderThan;
+        return List().Select(e => e.Run).OfType<SpecRun>()
+            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Researching
+                        && string.IsNullOrEmpty(r.SessionId)
+                        && (r.UpdatedAt ?? r.CreatedAt) < cutoff)
+            .ToList();
+    }
 
     private SpecRun Mutate(string id, Func<SpecRun, SpecRun> change)
     {
@@ -143,7 +261,8 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
     }
 
     private void WriteRun(SpecRun run, string? id = null) =>
-        AtomicFile.Write(Path.Combine(paths.SpecDir(id ?? run.Id), RunFile), JsonSerializer.Serialize(run, Json.Options));
+        AtomicFile.Write(Path.Combine(paths.SpecDir(id ?? run.Id), RunFile),
+            JsonSerializer.Serialize(run with { UpdatedAt = time.GetUtcNow() }, Json.Options));
 
     [GeneratedRegex(@"^[\w.-]+/[\w.-]+\z")]
     private static partial Regex RepoPattern();

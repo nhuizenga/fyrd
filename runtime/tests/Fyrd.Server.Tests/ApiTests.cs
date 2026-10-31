@@ -230,6 +230,51 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task RelayRoute_ResetsAndSends()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
+        var inbox = f.Services.GetRequiredService<InboxStore>();
+        var card = inbox.Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
+        var c = f.CreateClient();
+
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/inbox/{card.Id}/relay", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/inbox/abcdef123456/relay", null)).StatusCode);
+
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
+        Assert.Equal("failed", inbox.Get(card.Id).Answer!.RelayStatus);
+        Assert.Empty(f.Cloud.Sent);
+
+        var r = await c.PostAsync($"/api/inbox/{card.Id}/relay", null);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Single(f.Cloud.Sent);
+        var after = inbox.Get(card.Id).Answer!;
+        Assert.Equal(("sent", 0), (after.RelayStatus, after.RelayAttempts));
+    }
+
+    [Fact]
+    public async Task GetUndelivered_ListsFailedRelays()
+    {
+        using var f = new FyrdFactory();
+        var specId = (await ReadJson(await CreateSpec(f.CreateClient()))).GetProperty("id").GetString()!;
+        f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
+        var inbox = f.Services.GetRequiredService<InboxStore>();
+        var card = inbox.Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
+        var c = f.CreateClient();
+        Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox/undelivered"))).EnumerateArray());
+
+        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
+        var list = (await ReadJson(await c.GetAsync("/api/inbox/undelivered"))).EnumerateArray().ToList();
+        var item = Assert.Single(list);
+        Assert.Equal(card.Id, item.GetProperty("id").GetString());
+        Assert.Equal("failed", item.GetProperty("answer").GetProperty("relayStatus").GetString());
+        Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox"))).EnumerateArray());
+    }
+
+    [Fact]
     public async Task PutConfig_SameCap_DoesNotRelay_ChangedCapRelays()
     {
         using var f = new FyrdFactory();
@@ -408,6 +453,9 @@ public class ApiTests
         state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_x", "Peer", "idle", "connected", null,
             ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-implementer", "fyrd-unit-u1"], default));
 
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_old", "Old", "archived", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-reviewer", "fyrd-unit-u1"], default));
+
         var board = await ReadJson(await c.GetAsync("/api/board"));
         Assert.Equal("poll failed", board.GetProperty("lastError").GetString());
         Assert.False(board.GetProperty("signedOut").GetBoolean());
@@ -423,6 +471,22 @@ public class ApiTests
         Assert.Equal("https://claude.ai/code/session_x", peer.GetProperty("url").GetString());
         Assert.Equal("implementer", peer.GetProperty("role").GetString());
         Assert.Equal("u1", peer.GetProperty("unitId").GetString());
+    }
+
+    [Fact]
+    public async Task Board_ArchivedPeerNotListed()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var specs = f.Services.GetRequiredService<SpecStore>();
+        var run = specs.Create("Archived board", Repo, "# x");
+        specs.SetLead(run.Id, "session_lead");
+        var state = f.Services.GetRequiredService<Fyrd.Core.Orchestration.RunnerState>();
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_old", "Old", "archived", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-reviewer", "fyrd-unit-u1"], default));
+        var board = await ReadJson(await c.GetAsync("/api/board"));
+        var spec = Assert.Single(board.GetProperty("specs").EnumerateArray());
+        Assert.Equal(0, spec.GetProperty("peers").GetArrayLength());
     }
 
     [Fact]
@@ -470,5 +534,194 @@ public class ApiTests
         Assert.Contains("No such host is known", await r.Content.ReadAsStringAsync());
         var spec = await ReadJson(await c.GetAsync($"/api/specs/{id}"));
         Assert.Equal("Draft", spec.GetProperty("run").GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_RoundTripsExactly()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        const string text = "a\r\nb \u00e9\u4e2d\U0001F600\r\n";
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/owner-proxy", new { text = text + "o" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/global", new { text = text + "g" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/repo?repo=" + Repo, new { text = text + "r" })).StatusCode);
+
+        var got = await ReadJson(await c.GetAsync("/api/memory"));
+        Assert.Equal(text + "o", got.GetProperty("ownerProxy").GetString());
+        Assert.Equal(text + "g", got.GetProperty("global").GetString());
+        var repo = Assert.Single(got.GetProperty("repos").EnumerateArray());
+        Assert.Equal(Repo, repo.GetProperty("repo").GetString());
+        Assert.Equal(text + "r", repo.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_StaleVersion_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var v0 = (await ReadJson(await c.GetAsync("/api/memory"))).GetProperty("globalVersion").GetString();
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/global", new { text = "newer" })).StatusCode);
+        var r = await c.PutAsJsonAsync("/api/memory/global", new { text = "mine", baseVersion = v0 });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("This file changed since you loaded it", await r.Content.ReadAsStringAsync());
+        Assert.Equal("newer", (await ReadJson(await c.GetAsync("/api/memory"))).GetProperty("global").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_MatchingVersion_Saves()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/repo?repo=" + Repo, new { text = "one" })).StatusCode);
+        var got = await ReadJson(await c.GetAsync("/api/memory"));
+        var repo = Assert.Single(got.GetProperty("repos").EnumerateArray());
+        var version = repo.GetProperty("version").GetString();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PutAsJsonAsync("/api/memory/repo?repo=" + Repo, new { text = "two", baseVersion = version })).StatusCode);
+        var ownerVersion = got.GetProperty("ownerProxyVersion").GetString();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PutAsJsonAsync("/api/memory/owner-proxy", new { text = "own", baseVersion = ownerVersion })).StatusCode);
+        var after = await ReadJson(await c.GetAsync("/api/memory"));
+        Assert.Equal("two", Assert.Single(after.GetProperty("repos").EnumerateArray()).GetProperty("text").GetString());
+        Assert.Equal("own", after.GetProperty("ownerProxy").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_NoVersion_Overwrites()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await c.PutAsJsonAsync("/api/memory/global", new { text = "a" });
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/global", new { text = "b" })).StatusCode);
+        Assert.Equal("b", (await ReadJson(await c.GetAsync("/api/memory"))).GetProperty("global").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_TooLarge_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var r = await c.PutAsJsonAsync("/api/memory/global", new { text = new string('x', 200 * 1024 + 1) });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PutAsJsonAsync("/api/memory/global", new { text = new string('x', 200 * 1024) })).StatusCode);
+    }
+
+    [Fact]
+    public async Task PutMemory_BadRepo_Returns400()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        foreach (var url in new[] { "/api/memory/repo?repo=../..", "/api/memory/repo?repo=nope", "/api/memory/repo" })
+            Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync(url, new { text = "x" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Research_LaunchesAndMovesToResearching()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        var r = await c.PostAsync($"/api/specs/{id}/research", null);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("Researching", (await ReadJson(r)).GetProperty("status").GetString());
+        Assert.Contains("fyrd-role-research-lead", Assert.Single(f.Cloud.Created).Tags);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/specs/{id}/research", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Research_WithoutEnvironment_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/specs/{id}/research", null)).StatusCode);
+        Assert.Empty(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Research_WithProposal_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        Propose(f.Services.GetRequiredService<SpecStore>(), id, "# n");
+        var r = await c.PostAsync($"/api/specs/{id}/research", null);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Attack_WithProposal_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        Propose(f.Services.GetRequiredService<SpecStore>(), id, "# n");
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("Review the research proposal first", await r.Content.ReadAsStringAsync());
+        Assert.Empty(f.Cloud.Created);
+        Assert.Equal(SpecStatus.Draft, f.Services.GetRequiredService<SpecStore>().Get(id)!.Status);
+    }
+
+    [Fact]
+    public async Task Proposal_GetAcceptDiscard()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/api/specs/{id}/proposal")).StatusCode);
+        var store = f.Services.GetRequiredService<SpecStore>();
+        Propose(store, id, "# new");
+        var got = await ReadJson(await c.GetAsync($"/api/specs/{id}/proposal"));
+        Assert.Equal("# new", got.GetProperty("markdown").GetString());
+        var acc = await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { markdown = "# edited" });
+        Assert.Equal(HttpStatusCode.OK, acc.StatusCode);
+        Assert.Equal("# edited", store.ReadMarkdown(id));
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { })).StatusCode);
+
+        Propose(store, id, "# again");
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/proposal/discard", null)).StatusCode);
+        Assert.Null(store.GetProposal(id));
+    }
+
+    [Fact]
+    public async Task AcceptProposal_WhileResearching_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/research", null)).StatusCode);
+        var store = f.Services.GetRequiredService<SpecStore>();
+        store.SaveProposal(id, "# new", "sum", [], "x");
+        var r = await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.NotEqual("# new", store.ReadMarkdown(id));
+    }
+
+    [Fact]
+    public async Task PutMarkdown_DraftOnly()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = "# v2" })).StatusCode);
+        Assert.Equal("# v2", f.Services.GetRequiredService<SpecStore>().ReadMarkdown(id));
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = " " })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/attack", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = "# v3" })).StatusCode);
+    }
+
+    private static void Propose(SpecStore store, string id, string markdown)
+    {
+        Assert.True(store.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching));
+        store.SaveProposal(id, markdown, "sum", [], "x");
+        store.Finish(id, SpecStatus.Draft, null, null);
     }
 }

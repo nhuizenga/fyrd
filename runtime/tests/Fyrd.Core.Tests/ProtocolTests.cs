@@ -125,4 +125,26 @@ public class ProtocolTests
         Assert.Contains("fyrd-config", s);
         Assert.Contains("{\"squadCap\":3}", s);
     }
+
+    [Fact]
+    public void Parse_SpecDraft()
+    {
+        var text = F + "fyrd-spec-draft\n{\"markdown\":\"# Spec\\nbody\",\"summary\":\"s\",\"openQuestions\":[\"q1\"]}\n" + F;
+        var r = Protocol.Parse(text);
+        Assert.NotNull(r.SpecDraft);
+        Assert.Equal("# Spec\nbody", r.SpecDraft!.Markdown);
+        Assert.Equal("s", r.SpecDraft.Summary);
+        Assert.Equal(["q1"], r.SpecDraft.OpenQuestions);
+        Assert.False(r.SpecDraftInvalid);
+        Assert.Empty(r.Warnings);
+    }
+
+    [Fact]
+    public void Parse_SpecDraftWithoutMarkdown_Flagged()
+    {
+        var r = Protocol.Parse(F + "fyrd-spec-draft\n{\"summary\":\"s\"}\n" + F);
+        Assert.Null(r.SpecDraft);
+        Assert.True(r.SpecDraftInvalid);
+        Assert.Single(r.Warnings);
+    }
 }

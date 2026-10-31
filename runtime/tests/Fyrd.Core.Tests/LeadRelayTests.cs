@@ -13,7 +13,7 @@ public class LeadRelayTests
         var run = specs.Create("Add export", Repo, "x");
         if (lead) { specs.SetLead(run.Id, "sess-" + run.Id); specs.UpdateStatus(run.Id, SpecStatus.Building); }
         var cloud = new FakeCloudSessions();
-        return (specs, cloud, new LeadRelay(specs, cloud), run);
+        return (specs, cloud, new LeadRelay(specs, cloud, new RunnerState(), new InboxStore(h.Paths, specs, new DecisionMemory(h.Paths), new FixedTime(DateTimeOffset.Parse("2026-10-29T12:00:00Z")))), run);
     }
 
     private static InboxCard Card(string specId, string? key) =>
@@ -54,6 +54,25 @@ public class LeadRelayTests
         using var h = new TempHome(); var (_, cloud, relay, run) = Setup(h, lead: false);
         await relay.RelayAnswerAsync(Card(run.Id, run.Id + ":q1"), default);
         Assert.Empty(cloud.Sent);
+    }
+
+    [Fact]
+    public async Task RelayAnswer_InactiveSpec_SendsNothing()
+    {
+        using var h = new TempHome(); var (specs, cloud, relay, run) = Setup(h);
+        specs.Finish(run.Id, SpecStatus.ReadyForHandoff, "b", null);
+        Assert.False(await relay.RelayAnswerAsync(Card(run.Id, run.Id + ":q1"), default));
+        Assert.Empty(cloud.Sent);
+    }
+
+    [Fact]
+    public async Task RelayConfig_SkipsResearchLeads()
+    {
+        using var h = new TempHome(); var (specs, cloud, relay, run) = Setup(h);
+        var research = specs.Create("Research it", Repo, "x");
+        specs.SetResearchLead(research.Id, "sess-research");
+        await relay.RelayConfigAsync(6, default);
+        Assert.Equal("sess-" + run.Id, Assert.Single(cloud.Sent).SessionId);
     }
 
     [Fact]

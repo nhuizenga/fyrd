@@ -20,7 +20,7 @@ internal static class ApiErrors
         {
             return await action();
         }
-        catch (Exception e) when (e is CardAlreadyAnsweredException or KeyNotFoundException or System.Text.Json.JsonException or ArgumentException)
+        catch (Exception e) when (e is CardAlreadyAnsweredException or CardNotAnsweredException or KeyNotFoundException or System.Text.Json.JsonException or ArgumentException)
         {
             return Run(() => throw e);
         }
@@ -32,7 +32,7 @@ internal static class ApiErrors
         {
             return action();
         }
-        catch (CardAlreadyAnsweredException e)
+        catch (Exception e) when (e is CardAlreadyAnsweredException or CardNotAnsweredException)
         {
             return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict);
         }

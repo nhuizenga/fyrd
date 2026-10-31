@@ -26,7 +26,8 @@ public class SpecRunnerTests
             Runner = NewRunner();
         }
 
-        public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time);
+        public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time, Relay);
+        public LeadRelay Relay => new(Specs, Cloud, State, Inbox);
 
         public string NewSpec(string title = "Add export button", string lead = "lead1")
         {
@@ -131,6 +132,223 @@ public class SpecRunnerTests
         Assert.Equal(UnitState.WaitingOnOwner, units["b"].State);
         Assert.True(r.State.Sessions.ContainsKey("p3"));
         Assert.True(r.State.Sessions.ContainsKey("lead1"));
+    }
+
+    [Fact]
+    public async Task Poll_ArchivedPeerIgnoredForStage()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Units("[{\"id\":\"a\",\"title\":\"A\"}]"));
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("p1", "running", ["fyrd-role-implementer", "fyrd-unit-a"], T),
+            FakeCloudSessions.Session("p2", "archived", ["fyrd-role-reviewer", "fyrd-unit-a"], T.AddMinutes(5)));
+        await r.Runner.PollOnceAsync(default);
+        var u = Assert.Single(r.Specs.ListUnits(id));
+        Assert.Equal(UnitStage.Implement, u.Stage);
+        Assert.DoesNotContain("p2", r.State.Sessions.Keys);
+    }
+
+    [Fact]
+    public async Task Poll_AttentionCardAfterAnsweredQuestion()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Question("{\"id\":\"q1\",\"question\":\"Pick?\"}"));
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Waiting for input"));
+        await r.Runner.PollOnceAsync(default);
+        var q = Assert.Single(r.Inbox.ListOpenFor(id));
+        Assert.True(r.State.LastTurnHadQuestion(id));
+
+        var relay = r.Relay;
+        var answered = r.Inbox.Answer(q.Id, "blue");
+        await relay.RelayAnswerAsync(answered, default);
+        Assert.False(r.State.LastTurnHadQuestion(id));
+
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Approve Bash: ls"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Contains(r.Inbox.ListOpenFor(id), c => c.Question == "Lead needs attention: Approve Bash: ls");
+    }
+
+    [Fact]
+    public async Task Poll_RetriesPendingRelay_Once()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var answered = r.Inbox.Answer(q.Id, "blue");
+        r.Inbox.SetRelay(answered.Id, "pending", null);
+
+        await r.NewRunner().PollOnceAsync(default); // simulates a restarted runner
+        await r.NewRunner().PollOnceAsync(default);
+
+        Assert.Single(r.Cloud.Sent);
+        Assert.Equal("sent", r.Inbox.Get(q.Id).Answer!.RelayStatus);
+    }
+
+    [Fact]
+    public async Task Poll_FailedRelay_RecordsFailureAndRetries()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var card = r.Inbox.SetRelay(r.Inbox.Answer(q.Id, "blue").Id, "pending", null);
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        Assert.Equal("boom", await r.Relay.DeliverAsync(card, default));
+        var failed = r.Inbox.Get(q.Id).Answer!;
+        Assert.Equal("failed", failed.RelayStatus);
+        Assert.Equal("boom", failed.RelayError);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal("sent", r.Inbox.Get(q.Id).Answer!.RelayStatus);
+    }
+
+    [Fact]
+    public async Task Poll_SpecErrors_StillRetriesRelayAndReconciles()
+    {
+        using var r = new Rig();
+        var ok = r.NewSpec("Other spec", "leadok");
+        var q = r.Inbox.Add(ok, null, "Pick?", [], null, null, null, true, ok + ":q1");
+        r.Inbox.Answer(q.Id, "blue");
+        var stale = r.Specs.Create("Stale one", "owner/repo", "x").Id;
+        r.Specs.UpdateStatus(stale, SpecStatus.Queued);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("poll boom")); // the spec poll errors
+        await r.Runner.PollOnceAsync(default);
+        Assert.NotNull(r.State.LastError);
+        Assert.Single(r.Cloud.Sent);
+        Assert.Equal(SpecStatus.Draft, r.Specs.Get(stale)!.Status);
+    }
+
+    [Fact]
+    public async Task Poll_RelayAndLaunchErrors_AreJoined()
+    {
+        using var r = new Rig();
+        var ok = r.NewSpec("Other spec", "leadok");
+        var q = r.Inbox.Add(ok, null, "Pick?", [], null, null, null, true, ok + ":q1");
+        r.Inbox.Answer(q.Id, "blue");
+        r.Specs.UpdateStatus(r.Specs.Create("Stale one", "owner/repo", "x").Id, SpecStatus.Queued);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        r.Cloud.SkipCalls(SkippedPollCalls); // the healthy spec poll
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("relay boom"));
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("launch boom"));
+        await r.Runner.PollOnceAsync(default);
+        var error = r.State.LastError!;
+        Assert.Contains("relay boom", error);
+        Assert.Contains("launch boom", error);
+    }
+
+    private const int SkippedPollCalls = 3;
+
+    [Fact]
+    public async Task Deliver_NoLeadSession_NothingSent_StaysPending()
+    {
+        using var r = new Rig();
+        var id = r.Specs.Create("No lead", "owner/repo", "x").Id;
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var card = r.Inbox.Answer(q.Id, "blue");
+        Assert.Null(await r.Relay.DeliverAsync(card, default));
+        Assert.Empty(r.Cloud.Sent);
+        Assert.Equal("pending", r.Inbox.Get(q.Id).Answer!.RelayStatus);
+    }
+
+    [Fact]
+    public async Task Poll_StaleSnapshot_DoesNotResendDeliveredCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var snapshot = r.Inbox.Answer(q.Id, "blue");
+        r.Inbox.SetRelay(q.Id, "sent", null);
+        Assert.Null(await r.Relay.DeliverAsync(snapshot, default));
+        Assert.Empty(r.Cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_InactiveSpec_PendingCardNotSent()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        r.Inbox.Answer(q.Id, "blue");
+        r.Specs.Finish(id, SpecStatus.ReadyForHandoff, "b", null);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Empty(r.Cloud.Sent);
+        var a = r.Inbox.Get(q.Id).Answer!;
+        Assert.Equal(("pending", 0), (a.RelayStatus, a.RelayAttempts));
+    }
+
+    private static string StaleSpec(Rig r, SpecStatus status)
+    {
+        var id = r.Specs.Create("Add export button", "owner/repo", "x").Id;
+        r.Specs.UpdateStatus(id, status);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        return id;
+    }
+
+    [Fact]
+    public async Task Reconcile_AdoptsExistingLead()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Queued);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("old", "running", ["fyrd-spec-" + id, "fyrd-role-lead"], T),
+            FakeCloudSessions.Session("arch", "archived", ["fyrd-spec-" + id, "fyrd-role-lead"], T.AddHours(1)));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal("old", run.SessionId);
+        Assert.Equal(SpecStatus.Building, run.Status);
+    }
+
+    [Fact]
+    public async Task Reconcile_AdoptsExistingResearchLead()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Researching);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("rl", "running", ["fyrd-spec-" + id, "fyrd-role-research-lead"], T),
+            FakeCloudSessions.Session("lead", "running", ["fyrd-spec-" + id, "fyrd-role-lead"], T.AddHours(2)),
+            FakeCloudSessions.Session("old", "archived", ["fyrd-spec-" + id, "fyrd-role-research-lead"], T.AddHours(1)));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal("rl", run.SessionId);
+        Assert.Equal(SpecStatus.Researching, run.Status);
+    }
+
+    [Fact]
+    public async Task Reconcile_IgnoresResearchLeadFromEarlierRun()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Researching);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("first-run", "idle", ["fyrd-spec-" + id, "fyrd-role-research-lead"], T.AddHours(-2)));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.NotEqual("first-run", run.SessionId);
+        Assert.Equal("Launch interrupted; try again", run.Error);
+    }
+
+    [Fact]
+    public async Task Reconcile_NoSession_RevertsToDraftWithError()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Researching);
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("Launch interrupted; try again", run.Error);
+    }
+
+    [Fact]
+    public async Task Reconcile_RecentLaunch_Untouched()
+    {
+        using var r = new Rig();
+        var id = r.Specs.Create("Add export button", "owner/repo", "x").Id;
+        r.Specs.UpdateStatus(id, SpecStatus.Queued);
+        r.Time.Advance(TimeSpan.FromSeconds(30));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(SpecStatus.Queued, r.Specs.Get(id)!.Status);
+        Assert.Null(r.Specs.Get(id)!.Error);
     }
 
     [Fact]
@@ -320,5 +538,222 @@ public class SpecRunnerTests
         r.Cloud.AddAssistantEvent("lead1", "e1", F + "fyrd-done" + (char)10 + "{\"nobranch\":1}" + (char)10 + F);
         await r.Runner.PollOnceAsync(default);
         Assert.StartsWith($"Ignored malformed fyrd block in {id}: fyrd-done: missing branch", r.State.LastError);
+    }
+
+    private static string Draft(string json) => F + "fyrd-spec-draft\n" + json + "\n" + F;
+
+    private static string ResearchSpec(Rig r)
+    {
+        var id = r.Specs.Create("Research me", "owner/repo", "x").Id;
+        r.Specs.SetResearchLead(id, "rl1");
+        r.Cloud.SetSession(FakeCloudSessions.Session("rl1", "running"));
+        return id;
+    }
+
+    private static async Task<string> ResearchToDraftAsync(Rig r)
+    {
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"markdown\":\"# S\",\"summary\":\"sum\",\"openQuestions\":[]}"));
+        await r.Runner.PollOnceAsync(default);
+        r.Specs.DiscardProposal(id);
+        return id;
+    }
+
+    [Fact]
+    public async Task Attack_AfterResearch_ClearsOldSession()
+    {
+        using var r = new Rig();
+        var id = await ResearchToDraftAsync(r);
+        var run = r.Specs.TryClaim(id, SpecStatus.Queued)!;
+        Assert.Null(run.SessionId);
+        Assert.Null(run.LastEventId);
+        var calls = r.Cloud.EventAfterIds.Count;
+        r.Cloud.SetSession(FakeCloudSessions.Session("rl1", "idle", needsAction: "waiting"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(calls, r.Cloud.EventAfterIds.Count);
+        Assert.Empty(r.Inbox.ListOpen());
+    }
+
+    [Fact]
+    public async Task Reconcile_AfterResearch_RevertsToDraft()
+    {
+        using var r = new Rig();
+        var id = await ResearchToDraftAsync(r);
+        r.Specs.TryClaim(id, SpecStatus.Researching);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("Launch interrupted; try again", run.Error);
+    }
+
+    [Fact]
+    public async Task Poll_SpecDraft_SavesProposalAndReturnsToDraft()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Draft("{\"markdown\":\"# S\",\"summary\":\"sum\",\"openQuestions\":[\"a?\"]}"));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Null(run.Error);
+        Assert.True(run.HasProposal);
+        var p = r.Specs.GetProposal(id)!;
+        Assert.Equal("# S", p.Markdown);
+        Assert.Equal("sum", p.Summary);
+        Assert.Equal("rl1", p.SessionId);
+        Assert.Equal("e1", run.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_SpecDraftWithoutMarkdown_SetsError()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"summary\":\"s\"}"));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("Research returned no spec", run.Error);
+        Assert.Null(r.Specs.GetProposal(id));
+    }
+
+    [Fact]
+    public async Task Poll_ResearchFailed_ReturnsToDraftWithReason()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", F + "fyrd-failed\n{\"reason\":\"no repo access\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("no repo access", run.Error);
+    }
+
+    [Fact]
+    public async Task Poll_ResearcherPeers_StageResearch()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("c1", "running", ["fyrd-role-researcher", "fyrd-unit-codebase"]),
+            FakeCloudSessions.Session("a1", "idle", ["fyrd-role-researcher", "fyrd-unit-approach"]),
+            FakeCloudSessions.Session("k1", "running", ["fyrd-role-researcher", "fyrd-unit-risks"]));
+        r.Inbox.Add(id, "risks", "Q?", [], null, null, null, true, id + ":q");
+        await r.Runner.PollOnceAsync(default);
+        var units = r.Specs.ListUnits(id).ToDictionary(u => u.Id);
+        Assert.Equal(3, units.Count);
+        Assert.All(units.Values, u => Assert.Equal(UnitStage.Research, u.Stage));
+        Assert.Equal(UnitState.Running, units["codebase"].State);
+        Assert.Equal(UnitState.Idle, units["approach"].State);
+        Assert.Equal(UnitState.WaitingOnOwner, units["risks"].State);
+    }
+
+    [Fact]
+    public async Task Poll_ResearchUnitsDoneWhenLeavingResearching()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("c1", "running", ["fyrd-role-researcher", "fyrd-unit-codebase"]));
+        await r.Runner.PollOnceAsync(default);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"markdown\":\"# S\"}"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.All(r.Specs.ListUnits(id), u => Assert.Equal(UnitStage.Done, u.Stage));
+    }
+
+    [Fact]
+    public async Task Poll_ResearchLeadDone_Ignored()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", F + "fyrd-done\n{\"branch\":\"b\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(SpecStatus.Researching, r.Specs.Get(id)!.Status);
+        Assert.Contains("fyrd-done", r.State.LastError);
+    }
+
+    [Fact]
+    public async Task Poll_BuildLeadSpecDraft_Ignored()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Draft("{\"markdown\":\"# S\"}"));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Building, run.Status);
+        Assert.False(run.HasProposal);
+        Assert.Contains("fyrd-spec-draft", r.State.LastError);
+    }
+
+    private sealed class RacingCloud(FakeCloudSessions inner, Action onListEvents) : ICloudSessions
+    {
+        public Task<CloudSession> CreateAsync(CreateSessionRequest r, CancellationToken ct = default) => inner.CreateAsync(r, ct);
+        public Task<CloudSession> GetAsync(string id, CancellationToken ct = default) => inner.GetAsync(id, ct);
+        public Task<EventPage> ListEventsAsync(string id, int limit = 100, string? after = null, string? before = null, CancellationToken ct = default)
+        {
+            onListEvents();
+            return inner.ListEventsAsync(id, limit, after, before, ct);
+        }
+        public Task SendMessageAsync(string id, string text, CancellationToken ct = default) => inner.SendMessageAsync(id, text, ct);
+        public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => inner.ListByTagAsync(tag, ct);
+        public Task InterruptAsync(string id, CancellationToken ct = default) => inner.InterruptAsync(id, ct);
+        public Task ArchiveAsync(string id, CancellationToken ct = default) => inner.ArchiveAsync(id, ct);
+    }
+
+    [Fact]
+    public async Task Poll_SpecDraftWhenSpecNoLongerResearching_WarnsAndSavesNothing()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"markdown\":\"# S\"}"));
+        // The runner snapshotted the spec as Researching; the owner abandons it before the batch is applied.
+        var racing = new RacingCloud(r.Cloud, () => r.Specs.Finish(id, SpecStatus.Draft, null, null));
+        var runner = new SpecRunner(r.Specs, r.Inbox, racing, r.State, r.Time, r.Relay);
+        await runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.False(run.HasProposal);
+        Assert.Null(r.Specs.GetProposal(id));
+        Assert.Contains("Ignored spec draft", r.State.LastError);
+        // Deliberate: the cursor still advances so the consumed draft is not replayed forever.
+        Assert.Equal("e1", run.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_DraftAndQuestionInSameTurn_SavesProposalNoCard()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Question("{\"id\":\"q1\",\"question\":\"Stale?\"}") + "\n" + Draft("{\"markdown\":\"# S\"}"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.True(r.Specs.Get(id)!.HasProposal);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_FailedAndQuestionInSameTurn_NoCard()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Question("{\"id\":\"q1\",\"question\":\"Stale?\"}") + "\n" + F + "fyrd-failed\n{\"reason\":\"x\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(SpecStatus.Draft, r.Specs.Get(id)!.Status);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_InvalidDraftAndQuestionInSameTurn_NoCard()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Question("{\"id\":\"q1\",\"question\":\"Stale?\"}") + "\n" + Draft("{\"summary\":\"s\"}"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal("Research returned no spec", r.Specs.Get(id)!.Error);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
     }
 }

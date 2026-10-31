@@ -22,6 +22,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ConfigStore>();
 builder.Services.AddSingleton<SpecStore>();
 builder.Services.AddSingleton<DecisionMemory>();
+builder.Services.AddSingleton<OwnerProxy>();
 builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
@@ -44,7 +45,8 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton(sp => new SpecLauncher(sp.GetRequiredService<SpecStore>(),
     sp.GetRequiredService<ConfigStore>(), sp.GetRequiredService<DecisionMemory>(),
     sp.GetRequiredService<ICloudSessions>(),
-    sp.GetRequiredService<PersonasSource>().Value ?? throw new InvalidOperationException("Personas not loaded.")));
+    sp.GetRequiredService<PersonasSource>().Value ?? throw new InvalidOperationException("Personas not loaded."),
+    sp.GetRequiredService<OwnerProxy>()));
 
 var app = builder.Build();
 
@@ -65,6 +67,7 @@ app.MapSpecs();
 app.MapInbox();
 app.MapConfig();
 app.MapBoard();
+app.MapMemory();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 

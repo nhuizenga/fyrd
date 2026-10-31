@@ -187,4 +187,64 @@ public class InboxStoreTests
         Assert.False(File.Exists(RepoFile(home)));
         Assert.Empty(Directory.GetFiles(home.Paths.MemoryDir));
     }
+
+    private static InboxCard AnsweredKeyed(InboxStore s, string specId)
+    {
+        var c = s.Add(specId, null, Question, [], null, null, null, true, specId + ":q1");
+        return s.Answer(c.Id, "Unit", remember: false);
+    }
+
+    [Fact]
+    public void Answer_KeyedCard_IsPendingImmediately_UnkeyedIsNot()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var keyed = AnsweredKeyed(s, spec);
+        Assert.Equal("pending", keyed.Answer!.RelayStatus);
+        Assert.Equal(keyed.Id, Assert.Single(s.ListRelaysToRetry()).Id);
+        var plain = s.Answer(AddCard(s, spec).Id, "x", remember: false);
+        Assert.Null(plain.Answer!.RelayStatus);
+    }
+
+    [Fact]
+    public void SetRelay_FailedIncrementsAttempts()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var c = AnsweredKeyed(s, spec);
+        s.SetRelay(c.Id, "pending", null);
+        var f = s.SetRelay(c.Id, "failed", "boom").Answer!;
+        Assert.Equal(("failed", 1, "boom"), (f.RelayStatus, f.RelayAttempts, f.RelayError));
+        var sent = s.SetRelay(c.Id, "sent", null).Answer!;
+        Assert.Equal(("sent", 1, null), (sent.RelayStatus, sent.RelayAttempts, sent.RelayError));
+    }
+
+    [Fact]
+    public void ListRelaysToRetry_StopsAtFive()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var c = AnsweredKeyed(s, spec);
+        for (var i = 0; i < 4; i++) s.SetRelay(c.Id, "failed", "x");
+        Assert.Single(s.ListRelaysToRetry());
+        s.SetRelay(c.Id, "failed", "x");
+        Assert.Empty(s.ListRelaysToRetry());
+        s.ResetRelay(c.Id);
+        var again = Assert.Single(s.ListRelaysToRetry());
+        Assert.Equal(("pending", 0), (again.Answer!.RelayStatus, again.Answer.RelayAttempts));
+    }
+
+    [Fact]
+    public void ListUndelivered_OnlyFailedRelays()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var failed = AnsweredKeyed(s, spec);
+        s.SetRelay(failed.Id, "failed", "boom");
+        AnsweredKeyed(s, spec); // pending
+        AddCard(s, spec); // open
+        Assert.Equal(failed.Id, Assert.Single(s.ListUndelivered()).Id);
+        s.SetRelay(failed.Id, "sent", null);
+        Assert.Empty(s.ListUndelivered());
+    }
 }

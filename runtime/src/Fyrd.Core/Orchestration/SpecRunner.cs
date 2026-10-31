@@ -8,12 +8,16 @@ namespace Fyrd.Core.Orchestration;
 /// Polls each active spec's lead session and peer sessions and turns what it sees into units, inbox cards and
 /// spec status. Passes must run sequentially: the inbox's HasSourceKey-then-Add is not atomic.
 /// </summary>
-public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions cloud, RunnerState state, TimeProvider time)
+public sealed class SpecRunner(
+    SpecStore specs, InboxStore inbox, ICloudSessions cloud, RunnerState state, TimeProvider time, LeadRelay relay)
 {
+    private static readonly TimeSpan StaleLaunch = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(30);
+
     private const string AttentionPrefix = "Lead needs attention: ";
 
-    // Whether the lead's latest assistant turn contained a question; in-memory, rebuilt as events arrive.
-    private readonly Dictionary<string, bool> _lastTurnHadQuestion = new();
+    private static string? JoinErrors(string? a, string? b) =>
+        a is null ? b : b is null ? a : $"{a}; {b}";
 
     public async Task PollOnceAsync(CancellationToken ct)
     {
@@ -38,9 +42,66 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
                 lastError = $"{spec.Id}: {e.Message}";
             }
         }
+        var relayErr = await RetryRelaysAsync(ct);
+        var launchErr = await ReconcileLaunchesAsync(ct);
+        lastError ??= JoinErrors(relayErr, launchErr);
         state.SignedOut = false;
         state.LastError = lastError ?? warning;
         state.LastPollAt = time.GetUtcNow();
+    }
+
+    /// <summary>Re-sends answers whose delivery is pending or failed; returns the first error message, or null.</summary>
+    private async Task<string?> RetryRelaysAsync(CancellationToken ct)
+    {
+        string? error = null;
+        var active = specs.ListActive().Where(s => !string.IsNullOrEmpty(s.SessionId)).Select(s => s.Id).ToHashSet();
+        foreach (var card in inbox.ListRelaysToRetry())
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!active.Contains(card.SpecId)) continue;
+            try
+            {
+                var e = await relay.DeliverAsync(card, ct);
+                if (e is not null) error ??= $"{card.SpecId}: relay failed: {e}";
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                error ??= $"{card.SpecId}: relay failed: {e.Message}";
+            }
+        }
+        return error;
+    }
+
+    /// <summary>Adopts a session started by an interrupted launch, or sends the spec back to Draft.</summary>
+    private async Task<string?> ReconcileLaunchesAsync(CancellationToken ct)
+    {
+        string? error = null;
+        foreach (var run in specs.ListStaleLaunches(StaleLaunch))
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var researching = run.Status == SpecStatus.Researching;
+                var role = researching ? "fyrd-role-research-lead" : "fyrd-role-lead";
+                // Only sessions created by this launch attempt: finished leads from an earlier run are not archived.
+                var claimed = (run.UpdatedAt ?? run.CreatedAt) - ClockSkew;
+                var found = (await cloud.ListByTagAsync("fyrd-spec-" + run.Id, ct))
+                    .Where(s => s.SessionStatus != "archived" && s.Tags.Contains(role) && CreatedAt(s) >= claimed)
+                    .OrderByDescending(CreatedAt)
+                    .FirstOrDefault();
+                if (found is not null)
+                {
+                    if (researching) specs.SetResearchLead(run.Id, found.Id);
+                    else specs.SetLead(run.Id, found.Id);
+                }
+                else specs.Finish(run.Id, SpecStatus.Draft, null, "Launch interrupted; try again");
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                error ??= $"{run.Id}: {e.Message}";
+            }
+        }
+        return error;
     }
 
     /// <summary>Returns a short note about ignored malformed protocol blocks, or null.</summary>
@@ -59,17 +120,58 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
             after = page.LastId;
         }
 
+        var researching = spec.Status == SpecStatus.Researching;
         var finished = false;
         string? warning = null;
         foreach (var ev in events.Where(e => e.Type == "assistant"))
         {
             var parsed = Protocol.Parse(ev.Text ?? "");
-            if (!string.IsNullOrEmpty(ev.Text)) _lastTurnHadQuestion[spec.Id] = parsed.Questions.Count > 0;
+            if (!string.IsNullOrEmpty(ev.Text)) state.SetQuestionFlag(spec.Id, parsed.Questions.Count > 0);
             if (parsed.Warnings.Count > 0)
                 warning ??= $"Ignored malformed fyrd block in {spec.Id}: {parsed.Warnings[0]}";
-            if (parsed.Units is not null) ApplyUnits(spec.Id, parsed.Units);
-            foreach (var q in parsed.Questions) AddQuestion(spec.Id, q);
-            if (parsed.Done is { } done)
+            if (researching)
+            {
+                if (parsed.Units is not null || parsed.Done is not null)
+                    warning ??= $"Ignored fyrd-units/fyrd-done from research lead in {spec.Id}";
+            }
+            else
+            {
+                if (parsed.SpecDraft is not null || parsed.SpecDraftInvalid)
+                    warning ??= $"Ignored fyrd-spec-draft from build lead in {spec.Id}";
+                if (parsed.Units is not null) ApplyUnits(spec.Id, parsed.Units);
+            }
+            // Research that ends in this turn leaves no one to answer: skip its questions.
+            var researchOver = researching && (parsed.SpecDraft is not null || parsed.SpecDraftInvalid || parsed.Failed is not null);
+            if (!researchOver)
+                foreach (var q in parsed.Questions) AddQuestion(spec.Id, q);
+            if (researching)
+            {
+                if (parsed.SpecDraft is { } sd)
+                {
+                    try
+                    {
+                        specs.SaveProposal(spec.Id, sd.Markdown, sd.Summary ?? "", sd.OpenQuestions, lead);
+                        specs.Finish(spec.Id, SpecStatus.Draft, null, null);
+                    }
+                    catch (InvalidOperationException e)
+                    {
+                        warning ??= $"Ignored spec draft for {spec.Id}: {e.Message}";
+                    }
+                    finished = true;
+                }
+                else if (parsed.SpecDraftInvalid)
+                {
+                    specs.Finish(spec.Id, SpecStatus.Draft, null, "Research returned no spec");
+                    finished = true;
+                }
+                else if (parsed.Failed is { } rf)
+                {
+                    specs.Finish(spec.Id, SpecStatus.Draft, null, rf.Reason);
+                    finished = true;
+                }
+                if (finished) break;
+            }
+            else if (parsed.Done is { } done)
             {
                 specs.Finish(spec.Id, SpecStatus.ReadyForHandoff, done.Branch, null);
                 finished = true;
@@ -82,7 +184,11 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         }
         var cursor = events.Count > 0 ? events[^1].Uuid : spec.LastEventId;
         if (events.Count > 0) specs.SetCursor(spec.Id, cursor!);
-        if (finished) return warning;
+        if (finished)
+        {
+            if (researching) CompleteResearchUnits(spec.Id);
+            return warning;
+        }
 
         // 2. Lead status
         var leadSession = await cloud.GetAsync(lead, ct);
@@ -90,7 +196,7 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         var needsAction = leadSession.Summary?.NeedsAction;
         if (leadSession.SessionStatus == "idle" && !string.IsNullOrWhiteSpace(needsAction)
             && leadSession.Summary?.StatusCategory != "completed"
-            && cursor is not null && !LastTurnHadQuestion(spec.Id)
+            && cursor is not null && !state.LastTurnHadQuestion(spec.Id)
             && !inbox.ListOpenFor(spec.Id).Any(c => c.SourceKey is not null && !c.SourceKey.Contains(":attention:")))
         {
             var key = $"{spec.Id}:attention:{cursor}";
@@ -100,15 +206,40 @@ public sealed class SpecRunner(SpecStore specs, InboxStore inbox, ICloudSessions
         }
 
         // 3. Peers
-        var peers = await cloud.ListByTagAsync("fyrd-spec-" + spec.Id, ct);
+        var peers = (await cloud.ListByTagAsync("fyrd-spec-" + spec.Id, ct))
+            .Where(p => p.SessionStatus != "archived").ToList();
         foreach (var p in peers) state.Record(p);
-        ApplyPeers(spec.Id, peers);
+        if (researching) ApplyResearchPeers(spec.Id, peers);
+        else ApplyPeers(spec.Id, peers);
         return warning;
     }
 
-    private bool LastTurnHadQuestion(string specId)
+    private static readonly string[] ResearchAngles = ["codebase", "approach", "risks"];
+
+    private void ApplyResearchPeers(string specId, IReadOnlyList<CloudSession> peers)
     {
-        return _lastTurnHadQuestion.TryGetValue(specId, out var had) && had;
+        var openUnitIds = inbox.ListOpenFor(specId).Select(c => c.UnitId).Where(u => u is not null).ToHashSet();
+        var units = new List<Unit>();
+        foreach (var angle in ResearchAngles)
+        {
+            var peer = peers
+                .Where(p => p.Tags.Contains("fyrd-role-researcher") && p.Tags.Contains("fyrd-unit-" + angle))
+                .OrderByDescending(CreatedAt).FirstOrDefault();
+            if (peer is null) continue;
+            var st = openUnitIds.Contains(angle) ? UnitState.WaitingOnOwner
+                : peer.SessionStatus == "idle" ? UnitState.Idle
+                : UnitState.Running;
+            units.Add(new Unit(angle, specId, angle, UnitStage.Research, st));
+        }
+        if (units.Count > 0) specs.WriteUnits(specId, units);
+    }
+
+    /// <summary>Research is over: mark its angle units Done so the board does not show them as running.</summary>
+    private void CompleteResearchUnits(string specId)
+    {
+        var units = specs.ListUnits(specId);
+        if (units.Count == 0) return;
+        specs.WriteUnits(specId, units.Select(u => u with { Stage = UnitStage.Done, State = UnitState.Done }).ToList());
     }
 
     private void ApplyUnits(string specId, IReadOnlyList<UnitDecl> decls)

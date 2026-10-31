@@ -1,7 +1,7 @@
 export type SpecStatus =
   | "Draft" | "Queued" | "Researching" | "Building"
   | "FinalReview" | "ReadyForHandoff" | "PrOpened" | "Failed";
-export type UnitStage = "Implement" | "Review" | "Validate" | "Done";
+export type UnitStage = "Research" | "Implement" | "Review" | "Validate" | "Done";
 export type UnitState = "Running" | "Idle" | "WaitingOnOwner" | "Blocked" | "Done";
 export type MemoryScope = "Repo" | "Global";
 
@@ -15,6 +15,7 @@ export interface SpecRun {
   costCents: number;
   branch?: string | null;
   error?: string | null;
+  hasProposal?: boolean;
 }
 
 export interface Unit {
@@ -36,6 +37,9 @@ export interface CardAnswer {
   remember: boolean;
   scope: MemoryScope;
   answeredAt: string;
+  relayStatus?: "pending" | "sent" | "failed" | null;
+  relayAttempts?: number;
+  relayError?: string | null;
 }
 
 export interface InboxCard {
@@ -111,3 +115,20 @@ export interface NewSpec {
   repo: string;
   markdown: string;
 }
+
+export interface Proposal {
+  markdown: string;
+  summary: string;
+  openQuestions: string[];
+  sessionId: string | null;
+}
+
+export interface MemoryDoc {
+  ownerProxy: string;
+  ownerProxyVersion: string;
+  global: string;
+  globalVersion: string;
+  repos: { repo: string; text: string; version: string }[];
+}
+
+export type MemoryKind = "owner-proxy" | "global" | "repo";
