@@ -2,7 +2,8 @@ using Fyrd.Core.Hub;
 
 namespace Fyrd.Server;
 
-/// <summary>Runs <see cref="HubRunner"/> passes sequentially: every 10 s, or every 60 s while signed out.</summary>
+/// <summary>Runs <see cref="HubRunner"/> passes sequentially: every 10 s, or every 60 s while signed out, and at once
+/// after <see cref="HubState.RequestPoll"/>.</summary>
 public sealed class HubRunnerService(HubRunner runner, HubState state, ILogger<HubRunnerService> log)
     : BackgroundService
 {
@@ -10,6 +11,7 @@ public sealed class HubRunnerService(HubRunner runner, HubState state, ILogger<H
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            state.ResetPollRequest();
             try
             {
                 await runner.PollOnceAsync(stoppingToken);
@@ -26,7 +28,10 @@ public sealed class HubRunnerService(HubRunner runner, HubState state, ILogger<H
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(state.SignedOut ? 60 : 10), stoppingToken);
+                using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(state.SignedOut ? 60 : 10), delayCts.Token), state.PollRequested);
+                delayCts.Cancel();
+                stoppingToken.ThrowIfCancellationRequested();
             }
             catch (OperationCanceledException)
             {

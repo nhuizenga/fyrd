@@ -71,10 +71,57 @@ public class HubApiTests
         using var f = new FyrdFactory();
         var c = f.CreateClient();
         await Adopt(f, c);
-        // The last poll did not list the stored Controller (archived elsewhere): no dead link.
-        f.Services.GetRequiredService<HubState>().Publish([View()], []);
+        // A poll after the adoption did not list the stored Controller (archived elsewhere): no dead link.
+        var state = f.Services.GetRequiredService<HubState>();
+        state.Publish([View()], []);
+        state.LastPollAt = DateTimeOffset.UtcNow.AddMinutes(1);
         var body = await ReadJson(await c.GetAsync("/api/hub/state"));
         Assert.Equal(JsonValueKind.Null, body.GetProperty("controller").ValueKind);
+    }
+
+    [Fact]
+    public async Task State_JustAdopted_ShowsControllerBeforeAnyPoll()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await Adopt(f, c);
+        var ctl = (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("controller");
+        Assert.Equal("session_ctl1", ctl.GetProperty("sessionId").GetString());
+    }
+
+    [Fact]
+    public async Task State_AdoptedAfterLastPoll_ShowsController()
+    {
+        using var f = new FyrdFactory();
+        var state = f.Services.GetRequiredService<HubState>();
+        state.Publish([View()], []);
+        state.LastPollAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var c = f.CreateClient();
+        await Adopt(f, c);
+        var ctl = (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("controller");
+        Assert.Equal("session_ctl1", ctl.GetProperty("sessionId").GetString());
+    }
+
+    [Fact]
+    public async Task Adopt_RequestsAnImmediatePoll()
+    {
+        using var f = new FyrdFactory();
+        var state = f.Services.GetRequiredService<HubState>();
+        Assert.False(state.PollRequested.IsCompleted);
+        await Adopt(f, f.CreateClient());
+        Assert.True(state.PollRequested.IsCompleted);
+    }
+
+    [Fact]
+    public async Task Adopt_FyrdPeasant_400()
+    {
+        using var f = new FyrdFactory();
+        f.Cloud.SetSession(Core.Tests.FakeCloudSessions.Session("session_p1", tags: ["fyrd-hub", "fyrd-role-builder"]));
+        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = "session_p1" });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Equal("That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.",
+            (await ReadJson(r)).GetProperty("detail").GetString());
+        Assert.Empty(f.Cloud.Sent);
     }
 
     [Fact]

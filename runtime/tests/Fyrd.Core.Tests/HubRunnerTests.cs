@@ -303,6 +303,29 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_AdoptDuringPass_NoMemoryPostToOldController()
+    {
+        await Adopt("session_old", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
+        _cloud.SetSession(new CloudSession("session_new", "controller", "idle", "connected", null, [], FakeCloudSessions.Empty));
+        string? adoptedHash = null;
+        _cloud.BeforeNextListEvents = async () =>
+        {
+            await _controller.AdoptAsync("session_new", default);
+            adoptedHash = _controller.PostedMemoryHash;
+            _memory.Add(HubMemory.Shared, "Edited after the adoption.", "owner", _time.GetUtcNow());
+        };
+
+        await Make().PollOnceAsync(default);
+
+        // Only the new Controller's adoption prompt was sent; the pass neither posted to the old one nor took its hash.
+        var sent = Assert.Single(_cloud.Sent);
+        Assert.Equal("session_new", sent.SessionId);
+        Assert.Equal(adoptedHash, _controller.PostedMemoryHash);
+    }
+
+    [Fact]
     public async Task Poll_ControllerArchived_NoMemoryPost()
     {
         await Adopt("session_ctl", "controller");

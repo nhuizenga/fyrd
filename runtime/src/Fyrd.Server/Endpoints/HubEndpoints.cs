@@ -23,8 +23,13 @@ internal static class HubEndpoints
 
         group.MapGet("/state", (HubState state, ControllerManager controller) => ApiErrors.Run(() =>
         {
-            // Only a Controller the last poll listed as live: a stored id that was archived elsewhere is a dead link.
-            var id = controller.CurrentId is { } stored && state.Sessions.Any(s => s.Id == stored) ? stored : null;
+            // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
+            // after the last poll, which no poll has had the chance to list yet.
+            var stored = controller.CurrentId;
+            var id = stored is not null
+                     && (state.Sessions.Any(s => s.Id == stored)
+                         || (controller.AdoptedAt is { } adoptedAt && (state.LastPollAt is not { } polled || polled < adoptedAt)))
+                ? stored : null;
             return Results.Ok(new
             {
                 sessions = state.Sessions,
@@ -42,8 +47,13 @@ internal static class HubEndpoints
                 ? Results.Ok(info)
                 : Results.Problem(NoController, statusCode: StatusCodes.Status404NotFound)));
 
-        group.MapPost("/controller/adopt", (AdoptBody? body, ControllerManager controller, CancellationToken ct) =>
-            Cloud(async () => Results.Ok(await controller.AdoptAsync(body?.SessionId ?? "", ct))));
+        group.MapPost("/controller/adopt", (AdoptBody? body, ControllerManager controller, HubState state, CancellationToken ct) =>
+            Cloud(async () =>
+            {
+                var info = await controller.AdoptAsync(body?.SessionId ?? "", ct);
+                state.RequestPoll();
+                return Results.Ok(info);
+            }));
 
         group.MapPost("/controller/retire", (ControllerManager controller, CancellationToken ct) =>
             Cloud(async () =>

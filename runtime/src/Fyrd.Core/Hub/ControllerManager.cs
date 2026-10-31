@@ -21,6 +21,7 @@ public sealed partial class ControllerManager
     public const string PromptPreamble =
         "You are the Fyrd Controller. Follow the instructions below for the rest of this session; they replace any earlier instructions.";
     private const string Unavailable = "That session isn't available. Create a new one on claude.ai and paste its id.";
+    private const string Peasant = "That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.";
 
     private sealed record State(string? SessionId, string? PostedMemoryHash);
 
@@ -28,13 +29,17 @@ public sealed partial class ControllerManager
     private readonly HubPersonas _personas;
     private readonly HubMemory _memory;
     private readonly ConfigStore _config;
+    private readonly TimeProvider _time;
     private readonly string _file;
     private readonly SemaphoreSlim _gate = new(1);
     private readonly object _stateLock = new();
     private State _state;
+    private DateTimeOffset? _adoptedAt;
 
-    public ControllerManager(ICloudSessions cloud, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths)
+    public ControllerManager(
+        ICloudSessions cloud, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         _cloud = cloud;
         _personas = personas;
         _memory = memory;
@@ -44,6 +49,10 @@ public sealed partial class ControllerManager
     }
 
     public string? CurrentId { get { lock (_stateLock) return _state.SessionId; } }
+
+    /// <summary>When this process last adopted a Controller (in memory only). Until a poll that ran later has listed it,
+    /// the console still reports the stored id.</summary>
+    public DateTimeOffset? AdoptedAt { get { lock (_stateLock) return _adoptedAt; } }
 
     public string? PostedMemoryHash
     {
@@ -73,21 +82,28 @@ public sealed partial class ControllerManager
         await _gate.WaitAsync(ct);
         try
         {
-            if (!await IsLiveAsync(id, ct)) throw new HubConfigException(Unavailable);
+            var session = await LiveAsync(id, ct) ?? throw new HubConfigException(Unavailable);
+            // Peasants carry Fyrd tags and were created through the API, so they lack connectors; owner-made sessions have none.
+            if (session.Tags.Any(t => t == "fyrd-hub" || t.StartsWith("fyrd-role-", StringComparison.Ordinal)))
+                throw new HubConfigException(Peasant);
 
             // Built before any side effect, so a missing Controller persona leaves the current Controller alone.
             var personas = _personas.List();
             var hash = MemoryHash(_memory, personas);
             var prompt = PromptPreamble + "\n\n" + HubPrompt.Controller(personas, _memory, _config.Load());
 
-            if (CurrentId is { } previous && previous != id && await IsLiveAsync(previous, ct))
+            if (CurrentId is { } previous && previous != id && await LiveAsync(previous, ct) is not null)
             {
                 try { await _cloud.ArchiveAsync(previous, ct); }
                 catch (CloudSessionApiException e) when (e.Status == 404) { }
             }
 
             await _cloud.SendMessageAsync(id, prompt, ct);
-            lock (_stateLock) SaveState(new State(id, hash));
+            lock (_stateLock)
+            {
+                SaveState(new State(id, hash));
+                _adoptedAt = _time.GetUtcNow();
+            }
             return Info(id);
         }
         finally { _gate.Release(); }
@@ -101,7 +117,7 @@ public sealed partial class ControllerManager
         try
         {
             if (CurrentId is not { } stored) return null;
-            if (await IsLiveAsync(stored, ct)) return Info(stored);
+            if (await LiveAsync(stored, ct) is not null) return Info(stored);
             lock (_stateLock) SaveState(new State(null, null));
             return null;
         }
@@ -122,15 +138,15 @@ public sealed partial class ControllerManager
         finally { _gate.Release(); }
     }
 
-    /// <summary>False when the session is archived or gone (404); other errors propagate.</summary>
-    private async Task<bool> IsLiveAsync(string id, CancellationToken ct)
+    /// <summary>The session, or null when it is archived or gone (404); other errors propagate.</summary>
+    private async Task<CloudSession?> LiveAsync(string id, CancellationToken ct)
     {
         try
         {
             var s = await _cloud.GetAsync(id, ct);
-            return s.SessionStatus != "archived";
+            return s.SessionStatus == "archived" ? null : s;
         }
-        catch (CloudSessionApiException e) when (e.Status == 404) { return false; }
+        catch (CloudSessionApiException e) when (e.Status == 404) { return null; }
     }
 
     [GeneratedRegex("^session_[A-Za-z0-9]+$", RegexOptions.CultureInvariant)]

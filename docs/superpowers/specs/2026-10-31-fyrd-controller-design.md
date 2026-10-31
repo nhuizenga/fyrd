@@ -82,18 +82,16 @@ Slash commands such as `/clear` can't be triggered through any API (spike, 5 run
 
 ### The Controller itself
 
-> **Adopted, not created (2026-10-31).** This replaces the create and "Recreate" path below.
-> - **Why:** sessions Fyrd creates through the API get no claude.ai connectors (its OAuth client's `mcp_connector_ids` are dropped), so a Fyrd-made Controller has no `claude-code-remote` tools and can't create sessions. A session made by hand on claude.ai has every connector. See the hub spike, "Connectors".
-> - **How:** the owner creates a no-repo session on claude.ai and pastes its id into the console's "Adopt Controller" panel. Fyrd checks the session is live, archives any previous Controller, stores the id and sends the Controller prompt (`controller.md`, `<hub-settings>`, peasant personas, memory) as the first user message, not as `append_system_prompt`. The adopted session has no Fyrd tags, so the poll fetches it by its stored id. "Replace Controller" archives it and clears the id; the owner then adopts a fresh session.
-> - **To confirm in the smoke run:** that peasants the Controller creates with `create_session` inherit its connectors.
+> **Adopted, not created (2026-10-31).** Sessions Fyrd creates through the API get no claude.ai connectors (its OAuth client's `mcp_connector_ids` are dropped), so a Fyrd-made Controller would have no `claude-code-remote` tools and couldn't create sessions. A session made by hand on claude.ai has every connector (hub spike, "Connectors"). So the owner creates the Controller and Fyrd adopts it. **To confirm in the smoke run:** that peasants the Controller creates with `create_session` inherit its connectors.
 
-- **Console owns it.** A console "Controller" button finds the live session tagged `fyrd-controller`. If none exists it creates one, then opens it on claude.ai. "Recreate" archives and recreates it, for example after persona or skill changes.
-- **Its `append_system_prompt`** is built by the service. It holds:
-  - `controller.md`
+- **Owner creates, console adopts.** The owner creates a no-repo session on claude.ai and pastes its id into the console's "Adopt Controller" panel. Fyrd rejects an id that is not live or that carries Fyrd tags (`fyrd-hub`, `fyrd-role-*`, i.e. a peasant). It archives any previous Controller and stores the id. "Open Controller" opens the stored session while it is live. "Replace Controller" archives it and clears the id, for example after persona or skill changes; the owner then adopts a fresh session.
+- **Its instructions arrive as the first message**, not as `append_system_prompt`. On adoption the service sends a user message that starts with "You are the Fyrd Controller." and holds:
+  - `controller.md` and `<hub-settings>`
   - every peasant persona's text, so the Controller can pass each one to `create_session`
   - shared memory and every role's memory, each in its own delimited block
+- **No Fyrd tags.** Fyrd can't tag a session it didn't create, so the poll fetches the Controller by its stored id and treats it as a hub session (role `controller`).
 - **Memory updates:** when a memory file changes, the service posts the changed memory to the Controller as a user message. The Controller uses the latest version for every peasant it creates after that.
-- **Only one:** the console is the only creator. The persona also tells the Controller to refuse to create another Controller.
+- **Only one:** Fyrd stores one Controller id, and adopting another archives the previous one. The persona also tells the Controller to refuse to create another Controller.
 
 ### Session cap
 

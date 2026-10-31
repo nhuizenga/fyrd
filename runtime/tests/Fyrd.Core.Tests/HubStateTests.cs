@@ -110,4 +110,16 @@ public sealed class HubStateTests
         s.PublishRecent(new Dictionary<string, IReadOnlyList<Fyrd.Core.CloudSessions.SessionEvent>> { ["s1"] = [e] });
         Assert.Single(s.RecentEvents("s1"));
     }
+
+    [Fact]
+    public void RequestPoll_CompletesUntilReset()
+    {
+        var s = new HubState();
+        Assert.False(s.PollRequested.IsCompleted);
+        s.RequestPoll();
+        s.RequestPoll();
+        Assert.True(s.PollRequested.IsCompleted);
+        s.ResetPollRequest();
+        Assert.False(s.PollRequested.IsCompleted);
+    }
 }

@@ -206,7 +206,8 @@ public sealed partial class HubRunner(
         var text = HubPrompt.MemoryUpdate(memory, personas.List());
         // Hashed over the exact text sent, so a concurrent memory edit cannot be marked as posted.
         var hash = ControllerManager.Hash(text);
-        if (hash == controller.PostedMemoryHash) return;
+        // An adoption during this pass replaced the Controller (and set its own hash): post nothing to the old one.
+        if (controller.CurrentId != controllerId || hash == controller.PostedMemoryHash) return;
         await cloud.SendMessageAsync(controllerId, text, ct);
         controller.PostedMemoryHash = hash;
     }

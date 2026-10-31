@@ -87,6 +87,42 @@ public sealed class ControllerManagerTests : IDisposable
         Assert.Null(Make().CurrentId);
     }
 
+    [Theory]
+    [InlineData("fyrd-hub")]
+    [InlineData("fyrd-role-builder")]
+    public async Task Adopt_FyrdPeasant_ThrowsBeforeAnySideEffect(string tag)
+    {
+        await Adopted("session_old");
+        _cloud.SetSession(FakeCloudSessions.Session("session_peasant", tags: [tag]));
+
+        var ex = await Assert.ThrowsAsync<HubConfigException>(() => Make().AdoptAsync("session_peasant", default));
+
+        Assert.Equal("That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.", ex.Message);
+        Assert.Empty(_cloud.Archived);
+        Assert.Single(_cloud.Sent);
+        Assert.Equal("session_old", Make().CurrentId);
+    }
+
+    [Fact]
+    public async Task Adopt_RepoSessionWithOtherTags_Accepted()
+    {
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl, tags: ["my-tag"]));
+        await Make().AdoptAsync(Ctl, default);
+        Assert.Equal(Ctl, Make().CurrentId);
+    }
+
+    [Fact]
+    public async Task Adopt_SetsAdoptedAt()
+    {
+        var at = DateTimeOffset.Parse("2026-10-31T12:00:00Z");
+        var config = new ConfigStore(_home.Paths);
+        var m = new ControllerManager(_cloud, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), config, _home.Paths, new FixedTime(at));
+        Assert.Null(m.AdoptedAt);
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        await m.AdoptAsync(Ctl, default);
+        Assert.Equal(at, m.AdoptedAt);
+    }
+
     [Fact]
     public async Task Adopt_TrimsWhitespace()
     {
