@@ -519,4 +519,114 @@ public class SpecRunnerTests
         await r.Runner.PollOnceAsync(default);
         Assert.StartsWith($"Ignored malformed fyrd block in {id}: fyrd-done: missing branch", r.State.LastError);
     }
+
+    private static string Draft(string json) => F + "fyrd-spec-draft\n" + json + "\n" + F;
+
+    private static string ResearchSpec(Rig r)
+    {
+        var id = r.Specs.Create("Research me", "owner/repo", "x").Id;
+        r.Specs.SetResearchLead(id, "rl1");
+        r.Cloud.SetSession(FakeCloudSessions.Session("rl1", "running"));
+        return id;
+    }
+
+    [Fact]
+    public async Task Poll_SpecDraft_SavesProposalAndReturnsToDraft()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Draft("{\"markdown\":\"# S\",\"summary\":\"sum\",\"openQuestions\":[\"a?\"]}"));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Null(run.Error);
+        Assert.True(run.HasProposal);
+        var p = r.Specs.GetProposal(id)!;
+        Assert.Equal("# S", p.Markdown);
+        Assert.Equal("sum", p.Summary);
+        Assert.Equal("rl1", p.SessionId);
+        Assert.Equal("e1", run.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_SpecDraftWithoutMarkdown_SetsError()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"summary\":\"s\"}"));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("Research returned no spec", run.Error);
+        Assert.Null(r.Specs.GetProposal(id));
+    }
+
+    [Fact]
+    public async Task Poll_ResearchFailed_ReturnsToDraftWithReason()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", F + "fyrd-failed\n{\"reason\":\"no repo access\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("no repo access", run.Error);
+    }
+
+    [Fact]
+    public async Task Poll_ResearcherPeers_StageResearch()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("c1", "running", ["fyrd-role-researcher", "fyrd-unit-codebase"]),
+            FakeCloudSessions.Session("a1", "idle", ["fyrd-role-researcher", "fyrd-unit-approach"]),
+            FakeCloudSessions.Session("k1", "running", ["fyrd-role-researcher", "fyrd-unit-risks"]));
+        r.Inbox.Add(id, "risks", "Q?", [], null, null, null, true, id + ":q");
+        await r.Runner.PollOnceAsync(default);
+        var units = r.Specs.ListUnits(id).ToDictionary(u => u.Id);
+        Assert.Equal(3, units.Count);
+        Assert.All(units.Values, u => Assert.Equal(UnitStage.Research, u.Stage));
+        Assert.Equal(UnitState.Running, units["codebase"].State);
+        Assert.Equal(UnitState.Idle, units["approach"].State);
+        Assert.Equal(UnitState.WaitingOnOwner, units["risks"].State);
+    }
+
+    [Fact]
+    public async Task Poll_ResearchUnitsDoneWhenLeavingResearching()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("c1", "running", ["fyrd-role-researcher", "fyrd-unit-codebase"]));
+        await r.Runner.PollOnceAsync(default);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"markdown\":\"# S\"}"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.All(r.Specs.ListUnits(id), u => Assert.Equal(UnitStage.Done, u.Stage));
+    }
+
+    [Fact]
+    public async Task Poll_ResearchLeadDone_Ignored()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", F + "fyrd-done\n{\"branch\":\"b\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(SpecStatus.Researching, r.Specs.Get(id)!.Status);
+        Assert.Contains("fyrd-done", r.State.LastError);
+    }
+
+    [Fact]
+    public async Task Poll_BuildLeadSpecDraft_Ignored()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Draft("{\"markdown\":\"# S\"}"));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Building, run.Status);
+        Assert.False(run.HasProposal);
+        Assert.Contains("fyrd-spec-draft", r.State.LastError);
+    }
 }

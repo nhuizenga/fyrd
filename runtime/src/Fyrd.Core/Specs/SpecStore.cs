@@ -195,7 +195,7 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
 
     public IReadOnlyList<SpecRun> ListActive() =>
         List().Select(e => e.Run).OfType<SpecRun>()
-            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Building or SpecStatus.FinalReview)
+            .Where(r => r.Status is SpecStatus.Queued or SpecStatus.Researching or SpecStatus.Building or SpecStatus.FinalReview)
             .ToList();
 
     /// <summary>Queued or researching runs that never got a session and have not been touched for <paramref name="olderThan"/>.</summary>
