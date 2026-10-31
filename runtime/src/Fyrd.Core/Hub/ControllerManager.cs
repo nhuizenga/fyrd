@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Fyrd.Core.CloudSessions;
 using Fyrd.Core.Config;
@@ -12,7 +14,7 @@ public sealed class ControllerManager
     private const string ControllerTag = "fyrd-controller";
     private const string FirstMessage = "You are online. Wait for the owner's first request.";
 
-    private sealed record State(string? SessionId, long PostedMemoryVersion);
+    private sealed record State(string? SessionId, string? PostedMemoryHash);
 
     private readonly ICloudSessions _cloud;
     private readonly HubPersonas _personas;
@@ -35,11 +37,15 @@ public sealed class ControllerManager
 
     public string? CurrentId { get { lock (_stateLock) return _state.SessionId; } }
 
-    public long PostedMemoryVersion
+    public string? PostedMemoryHash
     {
-        get { lock (_stateLock) return _state.PostedMemoryVersion; }
-        set { lock (_stateLock) SaveState(_state with { PostedMemoryVersion = value }); }
+        get { lock (_stateLock) return _state.PostedMemoryHash; }
+        set { lock (_stateLock) SaveState(_state with { PostedMemoryHash = value }); }
     }
+
+    /// <summary>Lowercase hex SHA-256 of the memory-update text for the current memory; the poll pass compares it to <see cref="PostedMemoryHash"/>.</summary>
+    public static string MemoryHash(HubMemory memory, IReadOnlyList<HubPersona> personas) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(HubPrompt.MemoryUpdate(memory, personas)))).ToLowerInvariant();
 
     public async Task<ControllerInfo> FindOrCreateAsync(CancellationToken ct)
     {
@@ -62,8 +68,12 @@ public sealed class ControllerManager
                 .ToList();
             if (live.Count > 0)
             {
-                foreach (var extra in live.Skip(1)) await _cloud.ArchiveAsync(extra.Id, ct);
-                lock (_stateLock) SaveState(_state with { SessionId = live[0].Id });
+                foreach (var extra in live.Skip(1))
+                {
+                    try { await _cloud.ArchiveAsync(extra.Id, ct); }
+                    catch (CloudSessionApiException e) when (e.Status == 404) { }
+                }
+                lock (_stateLock) SaveState(new State(live[0].Id, null));
                 return Info(live[0].Id);
             }
             return await CreateAsync(ct);
@@ -80,6 +90,7 @@ public sealed class ControllerManager
             {
                 try { await _cloud.ArchiveAsync(current, ct); }
                 catch (CloudSessionApiException e) when (e.Status == 404) { }
+                lock (_stateLock) SaveState(new State(null, null));
             }
             return await CreateAsync(ct);
         }
@@ -93,7 +104,7 @@ public sealed class ControllerManager
         var personas = _personas.List();
         var controller = personas.FirstOrDefault(p => p.Id == "controller")
             ?? throw new InvalidOperationException("The Controller persona is missing.");
-        var version = _memory.Version;
+        var hash = MemoryHash(_memory, personas);
         var created = await _cloud.CreateAsync(new CreateSessionRequest(
             "controller",
             ["fyrd-hub", "fyrd-role-controller", ControllerTag],
@@ -103,7 +114,7 @@ public sealed class ControllerManager
             HubPrompt.Controller(personas, _memory, config),
             null,
             "auto"), ct);
-        lock (_stateLock) SaveState(new State(created.Id, version));
+        lock (_stateLock) SaveState(new State(created.Id, hash));
         return Info(created.Id);
     }
 
@@ -122,10 +133,10 @@ public sealed class ControllerManager
         try
         {
             if (File.Exists(_file))
-                return JsonSerializer.Deserialize<State>(File.ReadAllText(_file), Json.Options) ?? new State(null, 0);
+                return JsonSerializer.Deserialize<State>(File.ReadAllText(_file), Json.Options) ?? new State(null, null);
         }
-        catch (Exception e) when (e is JsonException or IOException) { }
-        return new State(null, 0);
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) { }
+        return new State(null, null);
     }
 
     private void SaveState(State s)

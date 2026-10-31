@@ -112,15 +112,56 @@ public sealed class ControllerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task PostedMemoryVersion_PersistsAndSetOnCreate()
+    public async Task PostedMemoryHash_SetOnCreate_PersistsAcrossInstances()
     {
         var mem = new HubMemory(_home.Paths);
         mem.Add("shared", "x", "t", DateTimeOffset.UtcNow);
         var m = Make(memory: mem);
         await m.FindOrCreateAsync(default);
-        Assert.True(mem.Version > 0);
-        Assert.Equal(mem.Version, m.PostedMemoryVersion);
-        m.PostedMemoryVersion = 99;
-        Assert.Equal(99, Make().PostedMemoryVersion);
+        var expected = ControllerManager.MemoryHash(mem, new HubPersonas(_home.Paths, _seeds).List());
+        Assert.Equal(expected, m.PostedMemoryHash);
+        Assert.Matches("^[0-9a-f]{64}$", expected);
+        Assert.Equal(expected, Make().PostedMemoryHash);
+    }
+
+    [Fact]
+    public async Task FindOrCreate_Adopts_ResetsHashToNull()
+    {
+        var m = Make();
+        await m.FindOrCreateAsync(default);
+        Assert.NotNull(m.PostedMemoryHash);
+        _cloud.SetSession(FakeCloudSessions.Session("created-1", "archived"));
+        _cloud.SetByTag("fyrd-controller", FakeCloudSessions.Session("adopted", "idle", createdAt: DateTimeOffset.UtcNow));
+        var info = await Make().FindOrCreateAsync(default);
+        Assert.Equal("adopted", info.SessionId);
+        Assert.Null(Make().PostedMemoryHash);
+    }
+
+    [Fact]
+    public async Task Recreate_CreateFails_ClearsCurrentId_ThenOneCreate()
+    {
+        var m = Make();
+        await m.FindOrCreateAsync(default);
+        _cloud.SkipCalls(1);
+        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom"));
+        await Assert.ThrowsAsync<CloudSessionApiException>(() => m.RecreateAsync(default));
+        Assert.Null(m.CurrentId);
+        Assert.Null(Make().CurrentId);
+        _cloud.SetByTag("fyrd-controller", FakeCloudSessions.Session("created-1", "archived"));
+        await Make().FindOrCreateAsync(default);
+        Assert.Equal(2, _cloud.Created.Count);
+    }
+
+    [Fact]
+    public async Task FindOrCreate_ExtraArchive404_Ignored()
+    {
+        var t = DateTimeOffset.UtcNow;
+        _cloud.SetByTag("fyrd-controller",
+            FakeCloudSessions.Session("old", "idle", createdAt: t.AddHours(-2)),
+            FakeCloudSessions.Session("new", "idle", createdAt: t));
+        _cloud.SkipCalls(1);
+        _cloud.ThrowOnNextCall(new CloudSessionApiException(404, "gone"));
+        var info = await Make().FindOrCreateAsync(default);
+        Assert.Equal("new", info.SessionId);
     }
 }
