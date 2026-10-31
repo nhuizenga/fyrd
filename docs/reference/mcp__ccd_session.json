@@ -1,0 +1,37 @@
+// Schema of ccd_session MCP
+{
+  "mcp__ccd_session__dismiss_task": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "reason": {
+        "type": "string",
+        "description": "Optional short note on why the suggestion is no longer needed, e.g. \"fixed in this session\" or \"superseded by task_ab12cd34\". It doesn't change the outcome."
+      },
+      "task_id": {
+        "type": "string",
+        "description": "The task_id from the spawn_task result that queued the suggestion (of the form task_1a2b3c4d)."
+      }
+    },
+    "required": ["task_id"]
+  },
+  "mcp__ccd_session__spawn_task": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "The opening message of the new session: the goal, the files involved by repository-relative path, the context it needs from this conversation, and what done looks like. The user can read it in full before starting; markdown is fine. Keep it to what the task needs (hard limit 32000 characters) — the new session can read the code itself."
+      },
+      "title": {
+        "type": "string",
+        "description": "The card's heading and the new session's title: a short imperative phrase starting with a verb, under 60 characters, that makes sense on its own — e.g. \"Fix stale README badge\", \"Remove dead config option\"."
+      },
+      "tldr": {
+        "type": "string",
+        "description": "One or two plain sentences on what the task would do and why it is worth doing. Shown on the card under the title; it is what the user reads when deciding whether to start it, so no file paths or code."
+      }
+    },
+    "required": ["title", "prompt", "tldr"]
+  }
+}
