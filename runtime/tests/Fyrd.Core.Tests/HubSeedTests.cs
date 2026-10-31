@@ -86,6 +86,15 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Controller_InstructionsArriveAsAMessage_NotTheSystemPrompt()
+    {
+        var d = Get("controller").Definition;
+        Assert.DoesNotContain("system prompt", d, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("this prompt", d, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("as a message", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Controller_HasNoLiteralMemoryClosingTags()
     {
         var d = Get("controller").Definition;

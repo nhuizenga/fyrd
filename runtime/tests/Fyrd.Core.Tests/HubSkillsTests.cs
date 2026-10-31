@@ -69,11 +69,15 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void Readme_UploadAllFour_NoFallback_PointsToRecreate()
+    public void Readme_UploadAllFour_NoFallback_PointsToReplaceAndAdopt()
     {
         var text = File.ReadAllText(Path.Combine(SkillsDir(), "README.md"));
         Assert.Contains("Upload all four skills together", text, StringComparison.Ordinal);
-        Assert.Contains("Recreate Controller", text, StringComparison.Ordinal);
+        Assert.Contains("Replace Controller", text, StringComparison.Ordinal);
+        Assert.Contains("Adopt Controller", text, StringComparison.Ordinal);
+        Assert.Contains("https://claude.ai/code", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Recreate Controller", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("API-created sessions such as the Controller", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Fallback", text, StringComparison.Ordinal);
         Assert.DoesNotContain("follow-up is filed", text, StringComparison.Ordinal);
     }
