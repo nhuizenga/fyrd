@@ -65,6 +65,11 @@ public sealed class FakeCloudSessions : ICloudSessions
             Created.Add(request);
             var s = Session("created-" + Created.Count, "running", [.. request.Tags]);
             _sessions[s.Id] = s;
+            foreach (var tag in request.Tags)
+            {
+                if (!_byTag.TryGetValue(tag, out var list)) _byTag[tag] = list = [];
+                list.Add(s);
+            }
             return Task.FromResult(s);
         }
     }
