@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@servicetitan/anvil2": "^3.17.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/anvil2/colors_and_type.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+*:focus-visible{outline:2px solid #0265dc;outline-offset:2px}
+a{color:var(--a2-foreground-color-primary)}
+a:hover{text-decoration:underline}
+.btn{font:600 14px/1 var(--a2-font-family-base);height:36px;padding:0 16px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;box-sizing:border-box}
+.btn:hover{text-decoration:none}
+.btn-primary{background:var(--a2-background-color-primary);color:#fff;border:1px solid transparent}
+.btn-primary:hover{background:var(--a2-background-color-primary-hover)}
+.btn-default{background:var(--a2-background-color-default);color:var(--a2-foreground-color-default);border:1px solid var(--a2-border-color-default)}
+.btn-default:hover{background:var(--a2-background-color-default-hover)}
+.btn-danger{background:var(--a2-background-color-default);color:var(--a2-foreground-color-danger);border:1px solid var(--a2-border-color-danger)}
+.btn-danger:hover{background:var(--a2-background-color-danger-faint)}
+.btn-ghost{background:transparent;color:var(--a2-foreground-color-default);border:1px solid transparent}
+.btn-ghost:hover{background:var(--a2-background-color-secondary)}
+.btn[disabled]{background:var(--a2-background-color-stronger);color:var(--a2-foreground-color-subdued);border-color:transparent;cursor:not-allowed}
+.tab:hover{color:var(--a2-foreground-color-default)}
+</style>
+</helmet>
+<div class="anvil2 theme-core mode-light" style="min-height: 900px; display: flex; flex-direction: column; background: var(--a2-color-blue-grey-10); color: var(--a2-foreground-color-default); font-family: var(--a2-font-family-base)">
+
+  <header style="height: 56px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: 24px; padding: 0 20px; background: var(--a2-background-color-default); border-bottom: 1px solid var(--a2-border-color-subdued)">
+    <a href="Main.dc.html" style="display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--a2-foreground-color-default)">
+      <img src="/_blob/28e99be389069585332925695b9fc877" alt="" width="28" height="28" style="display: block; width: 28px; height: 28px; border-radius: 6px">
+      <span style="font: 700 20px/1 var(--a2-font-family-display)">fyrd</span>
+    </a>
+    <nav aria-label="Primary" style="display: flex; align-self: stretch; gap: 4px">
+      <a class="tab" href="Main.dc.html" aria-current="page" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-default); text-decoration: none; border-bottom: 2px solid var(--a2-border-color-primary); margin-bottom: -1px">
+        <span>Inbox</span>
+        <sc-if value="{{ hasPending }}" hint-placeholder-val="{{ true }}">
+          <span style="min-width: 20px; height: 20px; box-sizing: border-box; padding: 0 6px; border-radius: 10px; background: #0265dc; color: #ffffff; font: 700 12px/20px var(--a2-font-family-base); text-align: center">{{ pendingCount }}</span>
+        </sc-if>
+      </a>
+      <a class="tab" href="Sessions.dc.html" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px">Sessions</a>
+      <a class="tab" href="Settings.dc.html" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px">Settings</a>
+    </nav>
+    <div style="flex-grow: 1"></div>
+        <span role="img" aria-label="Signed in as Neil" style="width: 32px; height: 32px; border-radius: 50%; background: var(--a2-color-blue-grey-100); color: var(--a2-color-blue-grey-700); font: 700 12px/32px var(--a2-font-family-base); text-align: center">NH</span>
+  </header>
+
+  <main style="flex-grow: 1; padding: 32px 24px 48px">
+    <div style="max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px">
+
+      <div>
+        <h1 style="margin: 0; font: 700 24px/1.25 var(--a2-font-family-display)">Inbox</h1>
+        <p aria-live="polite" style="margin: 4px 0 0; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ countLabel }}</p>
+      </div>
+
+      <sc-if value="{{ allDone }}" hint-placeholder-val="{{ false }}">
+        <div style="padding: 48px 24px; text-align: center; background: var(--a2-background-color-default); border: 1px solid var(--a2-border-color-subdued); border-radius: 12px">
+          <h2 style="margin: 0; font: 700 18px/1.5 var(--a2-font-family-base)">You're all caught up</h2>
+          <p style="margin: 4px 0 16px; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">No sessions are waiting on you. New requests show up here.</p>
+          <a class="btn btn-default" href="Sessions.dc.html">View all sessions</a>
+        </div>
+      </sc-if>
+
+      <sc-for list="{{ items }}" as="item" hint-placeholder-count="4">
+        <div style="{{ item.wrapStyle }}">
+        <article style="background: var(--a2-background-color-default); border: 1px solid var(--a2-border-color-subdued); border-radius: 12px; overflow: hidden">
+          <div style="padding: 16px 20px">
+
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+              <sc-if value="{{ item.open }}" hint-placeholder-val="{{ true }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Waiting for you" style="color: var(--a2-color-yellow-700)"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              </sc-if>
+              <sc-if value="{{ item.answered }}" hint-placeholder-val="{{ false }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Answered" style="color: var(--a2-color-green-600)"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>
+              </sc-if>
+              <a href="Sessions.dc.html" style="font: 600 14px/1.5 var(--a2-font-family-base); text-decoration: none">{{ item.session }}</a>
+              <span style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ item.repo }} · {{ item.age }}</span>
+            </div>
+
+            <button class="btn btn-ghost" type="button" onClick="{{ item.toggle }}" aria-expanded="{{ item.expanded }}" style="height: 28px; margin-top: 8px; padding: 0 8px 0 4px; gap: 4px; font-size: 13px; color: var(--a2-foreground-color-primary)">
+              <sc-if value="{{ item.collapsed }}" hint-placeholder-val="{{ true }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+              </sc-if>
+              <sc-if value="{{ item.expanded }}" hint-placeholder-val="{{ false }}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </sc-if>
+              <span>{{ item.toggleLabel }}</span>
+            </button>
+
+            <div style="margin-top: 4px; padding: 8px 12px; border-radius: 6px; background: var(--a2-background-color-secondary)">
+              <div role="log" aria-label="Conversation history" style="{{ item.histStyle }}">
+                <div style="display: flex; flex-direction: column; gap: 6px; font: 400 14px/21px var(--a2-font-family-base)">
+                  <sc-for list="{{ item.history }}" as="h" hint-placeholder-count="3">
+                    <p style="{{ h.pStyle }}"><span style="font-weight: 700">{{ h.who }}</span> {{ h.text }}</p>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <h2 style="margin: 12px 0 0; font: 700 16px/1.5 var(--a2-font-family-base)">{{ item.question }}</h2>
+          </div>
+
+          <div style="padding: 16px 20px; border-top: 1px solid var(--a2-border-color-subdued); background: var(--a2-background-color-strong)">
+
+            <sc-if value="{{ item.answered }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 6px; background: var(--a2-background-color-success-faint); border: 1px solid var(--a2-border-color-success)">
+                <span style="flex-grow: 1; font: 400 14px/1.5 var(--a2-font-family-base)">{{ item.answerLine }}</span>
+                              </div>
+            </sc-if>
+
+            <sc-if value="{{ item.showChoice }}" hint-placeholder-val="{{ true }}">
+              <div style="display: flex; flex-wrap: wrap; gap: 8px">
+                <sc-for list="{{ item.options }}" as="o" hint-placeholder-count="3">
+                  <span>
+                    <sc-if value="{{ o.isPrimary }}" hint-placeholder-val="{{ true }}">
+                      <button class="btn btn-primary" type="button" onClick="{{ o.pick }}">{{ o.label }}</button>
+                    </sc-if>
+                    <sc-if value="{{ o.isDefault }}" hint-placeholder-val="{{ false }}">
+                      <button class="btn btn-default" type="button" onClick="{{ o.pick }}">{{ o.label }}</button>
+                    </sc-if>
+                    <sc-if value="{{ o.isDanger }}" hint-placeholder-val="{{ false }}">
+                      <button class="btn btn-danger" type="button" onClick="{{ o.pick }}">{{ o.label }}</button>
+                    </sc-if>
+                  </span>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ item.showText }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; flex-direction: column; gap: 8px">
+                <label for="{{ item.fieldId }}" style="font: 600 13px/1.5 var(--a2-font-family-base)">Your reply</label>
+                <textarea id="{{ item.fieldId }}" value="{{ item.draft }}" onChange="{{ item.onDraft }}" placeholder="Tell the agent how to proceed" style="width: 100%; box-sizing: border-box; min-height: 72px; padding: 8px 12px; border: 1px solid var(--a2-border-color-default); border-radius: 6px; background: var(--a2-background-color-default); color: var(--a2-foreground-color-default); font: 400 14px/1.5 var(--a2-font-family-base); resize: vertical"></textarea>
+                <div style="display: flex; justify-content: flex-end">
+                  <sc-if value="{{ item.hasDraft }}" hint-placeholder-val="{{ false }}">
+                    <button class="btn btn-primary" type="button" onClick="{{ item.send }}">Send reply</button>
+                  </sc-if>
+                  <sc-if value="{{ item.noDraft }}" hint-placeholder-val="{{ true }}">
+                    <button class="btn btn-primary" type="button" disabled="{{ true }}">Send reply</button>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+          </div>
+        </article>
+        </div>
+      </sc-for>
+
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+const ITEMS = [
+  {
+    id: 'i1', kind: 'choice',
+    session: 'embedded-analytics-engineer-ts-filters', repo: 'workspace-reporting', age: '6 min ago',
+    question: 'How should I pass row-level filters to the embedded Liveboard?',
+    history: [
+      { who: 'You', text: 'The embedded Liveboard shows every tenant. Make it respect the tenant of the signed-in user.' },
+      { who: 'Claude', text: 'I traced how the embed is initialized. It loads the Liveboard without any tenant scoping, so every signed-in user sees the full dataset. I checked the host page, the embed config, and the claims the auth service issues.' },
+      { who: 'Claude', text: 'There are two workable options. Runtime filters are a one-file change in the host page, but a user can alter them in the browser. Token-scoped row-level security needs a new claim from the auth service and a staging rollout, but the filter cannot be bypassed.' }
+    ],
+    options: [
+      { label: 'Use token-scoped RLS', tone: 'primary' },
+      { label: 'Use runtime filters', tone: 'default' },
+      { label: 'Draft both for review', tone: 'default' }
+    ]
+  },
+  {
+    id: 'i2', kind: 'choice',
+    session: 'data-platform-engineer-1', repo: 'data-platform', age: '12 min ago',
+    question: 'Approve rewriting the orders_cdc table on the staging catalog?',
+    history: [
+      { who: 'You', text: 'Migrate the CDC consumer to write Iceberg v2 tables. Keep the Kafka offset semantics the same.' },
+      { who: 'Claude', text: 'I opened a draft PR with the writer change and the catalog config, and started the integration tests against the staging catalog.' },
+      { who: 'You', text: 'Good. Make sure the compaction job does not pick up the new tables until I have reviewed.' },
+      { who: 'Claude', text: 'The v2 writer needs the existing orders_cdc table rewritten with new table properties. The rewrite takes about 40 minutes on staging and can be rolled back from the previous snapshot. Production is not touched, and the integration tests cannot finish until the rewrite completes.' }
+    ],
+    options: [
+      { label: 'Approve rewrite', tone: 'primary' },
+      { label: 'Show the plan first', tone: 'default' },
+      { label: 'Deny', tone: 'danger' }
+    ]
+  },
+  {
+    id: 'i3', kind: 'text',
+    session: 'data-platform-engineer-backfill-retry', repo: 'data-platform', age: '3 hr ago',
+    question: 'Partition 2026-10-14 failed the schema check. How should I handle partitions with schema drift?',
+    history: [
+      { who: 'You', text: 'Add exponential backoff to the backfill worker and run it against last week of partitions.' },
+      { who: 'Claude', text: 'Backoff is in place and the draft PR is open. I started the backfill on staging.' },
+      { who: 'Claude', text: 'The backfill stopped after 3 retries on partition 2026-10-14, where two columns were added mid-day. Skipping drifted partitions would leave a gap in the history. Merging schemas keeps every row but widens the target table. Nothing has been retried or changed since the failure.' }
+    ],
+    options: []
+  },
+  {
+    id: 'i4', kind: 'choice',
+    session: 'test-reliability-engineer-1', repo: 'workspace-reporting', age: '1 hr ago',
+    question: 'Allow me to edit the CI retry configuration?',
+    history: [
+      { who: 'You', text: 'The report export test fails about 1 in 12 CI runs. Find out why and fix it.' },
+      { who: 'Claude', text: 'The failure comes from a slow render worker start on the CI runner. The test checks for the file before the worker has finished writing it.' },
+      { who: 'Claude', text: 'Fixing the wait condition in the test is the better repair, and raising the CI retry count would add a safety net. The retry count lives in shared CI settings, so I need your permission before I touch them.' }
+    ],
+    options: [
+      { label: 'Allow once', tone: 'primary' },
+      { label: 'Allow for this session', tone: 'default' },
+      { label: 'Deny', tone: 'danger' }
+    ]
+  }
+];
+
+const COLLAPSED_STYLE = 'height:63px;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 18px);mask-image:linear-gradient(to bottom,transparent 0,#000 18px)';
+const EXPANDED_STYLE = 'max-height:320px;overflow-y:auto;display:flex;flex-direction:column-reverse';
+
+class Component extends DCLogic {
+  state = { expanded: {}, answers: {}, drafts: {}, phase: {}, heights: {}, removed: {} };
+
+  // Records the response, pins the card to its current height, then shrinks it
+  // to nothing so the next card slides up; finally drops it from the list.
+  answer(id, value, e) {
+    if (this.state.answers[id] !== undefined) return;
+    let h = 260;
+    try {
+      const art = e && e.currentTarget && e.currentTarget.closest('article');
+      if (art) h = art.offsetHeight;
+    } catch (err) {}
+    const answers = Object.assign({}, this.state.answers);
+    answers[id] = value;
+    const heights = Object.assign({}, this.state.heights);
+    heights[id] = h;
+    const phase = Object.assign({}, this.state.phase);
+    phase[id] = 1;
+    this.setState({ answers: answers, heights: heights, phase: phase });
+    setTimeout(() => {
+      const p = Object.assign({}, this.state.phase);
+      p[id] = 2;
+      this.setState({ phase: p });
+    }, 30);
+    setTimeout(() => {
+      const r = Object.assign({}, this.state.removed);
+      r[id] = true;
+      this.setState({ removed: r });
+    }, 400);
+  }
+
+  renderVals() {
+    const st = this.state;
+    const items = ITEMS.filter((it) => !st.removed[it.id]).map((it) => {
+      const answered = st.answers[it.id] !== undefined;
+      const draft = st.drafts[it.id] || '';
+      const answer = st.answers[it.id] || '';
+      const isChoice = it.kind === 'choice';
+      const expanded = !!st.expanded[it.id];
+      const phase = st.phase[it.id] || 0;
+      const wrapStyle = phase === 0 ? '' : (phase === 1
+        ? 'height:' + st.heights[it.id] + 'px;overflow:hidden;pointer-events:none'
+        : 'height:0;opacity:0;overflow:hidden;pointer-events:none;margin-bottom:-16px;transition:height 300ms ease,opacity 200ms ease,margin-bottom 300ms ease');
+      const earlier = it.history.length - 1;
+      return {
+        id: it.id,
+        fieldId: 'reply-' + it.id,
+        wrapStyle: wrapStyle,
+        session: it.session,
+        repo: it.repo,
+        age: it.age,
+        question: it.question,
+        history: it.history.map((h) => ({
+          who: h.who,
+          text: h.text,
+          pStyle: h.who === 'You'
+            ? 'margin:0;align-self:flex-end;max-width:72%;text-align:left'
+            : 'margin:0;align-self:flex-start;max-width:72%;text-align:left'
+        })),
+        histStyle: expanded ? EXPANDED_STYLE : COLLAPSED_STYLE,
+        toggleLabel: expanded ? 'Show less' : 'Show earlier messages (' + earlier + ')',
+        expanded: expanded,
+        collapsed: !expanded,
+        answered: answered,
+        open: !answered,
+        showChoice: !answered && isChoice,
+        showText: !answered && !isChoice,
+        answerLine: isChoice ? 'Response sent: ' + answer : 'Reply sent: ' + answer,
+        draft: draft,
+        hasDraft: draft.trim().length > 0,
+        noDraft: draft.trim().length === 0,
+        toggle: () => {
+          const next = Object.assign({}, this.state.expanded);
+          next[it.id] = !next[it.id];
+          this.setState({ expanded: next });
+        },
+        options: it.options.map((o) => ({
+          label: o.label,
+          isPrimary: o.tone === 'primary',
+          isDefault: o.tone === 'default',
+          isDanger: o.tone === 'danger',
+          pick: (e) => this.answer(it.id, o.label, e)
+        })),
+        onDraft: (e) => {
+          const next = Object.assign({}, this.state.drafts);
+          next[it.id] = e.target.value;
+          this.setState({ drafts: next });
+        },
+        send: (e) => {
+          const text = (this.state.drafts[it.id] || '').trim();
+          if (!text) return;
+          this.answer(it.id, text, e);
+        }
+      };
+    });
+    const pending = items.filter((i) => !i.answered).length;
+    return {
+      items: items,
+      pendingCount: pending,
+      hasPending: pending > 0,
+      allDone: items.length === 0,
+      countLabel: pending === 0 ? 'Nothing is waiting on you.' : (pending === 1 ? '1 session is waiting on you' : pending + ' sessions are waiting on you')
+    };
+  }
+}
+</script>
+</body>
+</html>
