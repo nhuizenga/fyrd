@@ -13,6 +13,7 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
 
     private const string ControllerId = "controller";
+    private const string SeededMarker = ".seeded";
     private readonly object _gate = new();
     private bool _seeded;
 
@@ -66,6 +67,7 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
             else
             {
                 var id = string.IsNullOrEmpty(p.Id) ? Slug(p.Name) : Validate(p.Id);
+                if (id == HubMemory.Shared) throw new ArgumentException($"'{HubMemory.Shared}' is a reserved persona id.", nameof(p));
                 if (File.Exists(FileFor(id))) throw new InvalidOperationException($"A persona with id '{id}' already exists.");
                 saved = new HubPersona(id, p.Name.Trim(), p.Model, p.Definition ?? "", p.Locked);
             }
@@ -112,10 +114,18 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         _seeded = true;
         Directory.CreateDirectory(paths.HubPersonasDir);
         if (!Directory.Exists(seedDir)) return;
+        var marker = Path.Combine(paths.HubPersonasDir, SeededMarker);
+        var seededIds = File.Exists(marker)
+            ? File.ReadAllLines(marker).Select(l => l.Trim()).Where(l => l.Length > 0).ToHashSet()
+            : new HashSet<string>();
+        var markerChanged = false;
         foreach (var f in Directory.EnumerateFiles(seedDir, "*.md"))
         {
             var id = Path.GetFileNameWithoutExtension(f);
-            if (!IdRegex().IsMatch(id) || File.Exists(FileFor(id))) continue;
+            if (!IdRegex().IsMatch(id) || id == HubMemory.Shared || seededIds.Contains(id)) continue;
+            seededIds.Add(id);
+            markerChanged = true;
+            if (File.Exists(FileFor(id))) continue;
             var m = FrontMatterRegex().Match(File.ReadAllText(f, Encoding.UTF8));
             if (!m.Success) continue;
             string name = id, model = "claude-sonnet-5-5";
@@ -134,5 +144,6 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
             var seeded = new HubPersona(id, name, model, m.Groups["body"].Value.Trim(), locked);
             AtomicFile.Write(FileFor(id), JsonSerializer.Serialize(seeded, Json.Options));
         }
+        if (markerChanged) AtomicFile.Write(marker, string.Join("\n", seededIds.Order(StringComparer.Ordinal)) + "\n");
     }
 }

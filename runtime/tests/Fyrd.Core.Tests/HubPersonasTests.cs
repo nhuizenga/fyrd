@@ -76,4 +76,22 @@ public sealed class HubPersonasTests : IDisposable
         Assert.True(saved.Locked);
         Assert.Equal("Boss", store.Get("controller")!.Name);
     }
+
+    [Fact]
+    public void Delete_Seeded_StaysDeletedAfterRestart()
+    {
+        var store = Make();
+        store.List();
+        store.Delete("builder");
+        var again = Make();
+        Assert.Null(again.Get("builder"));
+        Assert.DoesNotContain(again.List(), p => p.Id == "builder");
+        Assert.Contains(again.List(), p => p.Id == "controller");
+    }
+
+    [Theory]
+    [InlineData("", "Shared")]
+    [InlineData("shared", "Whatever")]
+    public void Save_ReservedSharedId_Throws(string id, string name) =>
+        Assert.Throws<ArgumentException>(() => Make().Save(new HubPersona(id, name, "claude-haiku-5-5", "d", false)));
 }
