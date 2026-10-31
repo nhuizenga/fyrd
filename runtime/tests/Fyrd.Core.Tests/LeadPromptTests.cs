@@ -7,7 +7,7 @@ namespace Fyrd.Core.Tests;
 public class LeadPromptTests
 {
     private static readonly Personas P = new("LEAD {{SPEC_ID}} {{REPO}} {{SPEC}} {{MEMORY}} {{SQUAD_CAP}} {{PEER_MODEL}} {{ENVIRONMENT_ID}} {{IMPLEMENTER_PERSONA}} {{REVIEWER_PERSONA}} {{VALIDATOR_PERSONA}}",
-        "IMPL", "REV", "VAL");
+        "IMPL", "REV", "VAL", "RLEAD {{SPEC_ID}}", "RSR");
 
     private static readonly SpecRun Run = new("20261030-x", "T", "servicetitan/titan-lens-ossie",
         SpecStatus.Queued, DateTimeOffset.UnixEpoch);
@@ -107,6 +107,38 @@ public class LeadPromptTests
         File.WriteAllText(Path.Combine(home.Paths.Root, "lead.md"), "x");
         var e = Assert.Throws<FileNotFoundException>(() => Personas.Load(home.Paths.Root));
         Assert.Contains("implementer.md", e.Message);
+    }
+
+    [Fact]
+    public void BuildResearch_ContainsThreeAnglesSafetyAndSpecDraftProtocol()
+    {
+        var text = LeadPrompt.BuildResearch(Run, "SPECBODY", "MEM", "OWNERPREF", Cfg,
+            Personas.Load(Path.Combine(Repo(), "personas"))).ReplaceLineEndings("\n");
+        Assert.DoesNotContain("{{", text);
+        foreach (var s in new[] { "get_session", "`codebase`", "`approach`", "`risks`", "fyrd-spec-draft", "fyrd-failed",
+                     "fyrd-question", "fyrd-role-researcher", "fyrd-spec-20261030-x", "fyrd-unit-<angle>",
+                     "https://github.com/servicetitan/titan-lens-ossie", "env_abc", "claude-sonnet-5-5", "auto",
+                     "<spec>\nSPECBODY\n</spec>", "<remembered-decisions>", "<owner-preferences>\nOWNERPREF\n</owner-preferences>",
+                     "Never push", "Never open a pull request", "Never create a branch", "archive_session",
+                     "lead session id", "never quote or paste a peer's", "user message", "openQuestions",
+                     "Do not set `outcome_branch`", "You are a researcher" })
+            Assert.Contains(s, text);
+    }
+
+    [Fact]
+    public void ResearcherPersona_ForbidsFyrdBlocksAndPush()
+    {
+        var text = File.ReadAllText(Path.Combine(Repo(), "personas", "researcher.md"));
+        Assert.Contains("Never emit any `fyrd-", text);
+        Assert.Contains("lead session id", text);
+        Assert.Contains("Never push", text);
+    }
+
+    [Fact]
+    public void ShippedPersonas_LoadResearchFiles()
+    {
+        var p = Personas.Load(Path.Combine(Repo(), "personas"));
+        Assert.All(new[] { p.ResearchLead, p.Researcher }, s => Assert.False(string.IsNullOrWhiteSpace(s)));
     }
 
     [Fact]

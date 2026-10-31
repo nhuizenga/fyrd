@@ -4,7 +4,8 @@ using Fyrd.Core.Specs;
 
 namespace Fyrd.Core.Orchestration;
 
-public sealed record Personas(string Lead, string Implementer, string Reviewer, string Validator)
+public sealed record Personas(
+    string Lead, string Implementer, string Reviewer, string Validator, string ResearchLead, string Researcher)
 {
     public static Personas Load(string dir)
     {
@@ -16,7 +17,8 @@ public sealed record Personas(string Lead, string Implementer, string Reviewer, 
         }
 
         return new Personas(Read(dir, "lead.md"), Read(dir, "implementer.md"),
-            Read(dir, "reviewer.md"), Read(dir, "validator.md"));
+            Read(dir, "reviewer.md"), Read(dir, "validator.md"),
+            Read(dir, "research-lead.md"), Read(dir, "researcher.md"));
     }
 }
 
@@ -42,6 +44,25 @@ public static partial class LeadPrompt
         };
         // Single pass so injected text (spec, memory, personas) is never re-expanded.
         return Placeholder().Replace(personas.Lead, m => values.TryGetValue(m.Groups[1].Value, out var v) ? v : m.Value);
+    }
+
+    public static string BuildResearch(SpecRun run, string specMarkdown, string memory, string ownerProxy,
+        FyrdConfig config, Personas personas)
+    {
+        var environmentId = config.EnvironmentId
+            ?? throw new InvalidOperationException("EnvironmentId must be configured before launching a research lead.");
+        var values = new Dictionary<string, string>
+        {
+            ["SPEC_ID"] = run.Id,
+            ["REPO"] = run.Repo,
+            ["SPEC"] = specMarkdown,
+            ["MEMORY"] = string.IsNullOrWhiteSpace(memory) ? "(none yet)" : memory,
+            ["OWNER_PROXY"] = string.IsNullOrWhiteSpace(ownerProxy) ? "(none yet)" : ownerProxy,
+            ["PEER_MODEL"] = config.PeerModel,
+            ["ENVIRONMENT_ID"] = environmentId,
+            ["RESEARCHER_PERSONA"] = personas.Researcher,
+        };
+        return Placeholder().Replace(personas.ResearchLead, m => values.TryGetValue(m.Groups[1].Value, out var v) ? v : m.Value);
     }
 
     [GeneratedRegex(@"\{\{([A-Z_]+)\}\}")]

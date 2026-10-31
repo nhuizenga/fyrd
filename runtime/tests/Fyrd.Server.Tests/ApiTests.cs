@@ -553,4 +553,106 @@ public class ApiTests
         foreach (var url in new[] { "/api/memory/repo?repo=../..", "/api/memory/repo?repo=nope", "/api/memory/repo" })
             Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync(url, new { text = "x" })).StatusCode);
     }
+
+    [Fact]
+    public async Task Research_LaunchesAndMovesToResearching()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        var r = await c.PostAsync($"/api/specs/{id}/research", null);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.Equal("Researching", (await ReadJson(r)).GetProperty("status").GetString());
+        Assert.Contains("fyrd-role-research-lead", Assert.Single(f.Cloud.Created).Tags);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/specs/{id}/research", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Research_WithoutEnvironment_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/specs/{id}/research", null)).StatusCode);
+        Assert.Empty(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Research_WithProposal_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Services.GetRequiredService<SpecStore>().SaveProposal(id, "# n", "s", [], "x");
+        var r = await c.PostAsync($"/api/specs/{id}/research", null);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.Cloud.Created);
+    }
+
+    [Fact]
+    public async Task Attack_WithProposal_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        f.Services.GetRequiredService<SpecStore>().SaveProposal(id, "# n", "s", [], "x");
+        var r = await c.PostAsync($"/api/specs/{id}/attack", null);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("Review the research proposal first", await r.Content.ReadAsStringAsync());
+        Assert.Empty(f.Cloud.Created);
+        Assert.Equal(SpecStatus.Draft, f.Services.GetRequiredService<SpecStore>().Get(id)!.Status);
+    }
+
+    [Fact]
+    public async Task Proposal_GetAcceptDiscard()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/api/specs/{id}/proposal")).StatusCode);
+        var store = f.Services.GetRequiredService<SpecStore>();
+        store.SaveProposal(id, "# new", "sum", ["q?"], "x");
+        var got = await ReadJson(await c.GetAsync($"/api/specs/{id}/proposal"));
+        Assert.Equal("# new", got.GetProperty("markdown").GetString());
+        var acc = await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { markdown = "# edited" });
+        Assert.Equal(HttpStatusCode.OK, acc.StatusCode);
+        Assert.Equal("# edited", store.ReadMarkdown(id));
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { })).StatusCode);
+
+        store.SaveProposal(id, "# again", "sum", [], "x");
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/proposal/discard", null)).StatusCode);
+        Assert.Null(store.GetProposal(id));
+    }
+
+    [Fact]
+    public async Task AcceptProposal_WhileResearching_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/research", null)).StatusCode);
+        var store = f.Services.GetRequiredService<SpecStore>();
+        store.SaveProposal(id, "# new", "sum", [], "x");
+        var r = await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.NotEqual("# new", store.ReadMarkdown(id));
+    }
+
+    [Fact]
+    public async Task PutMarkdown_DraftOnly()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await SetEnv(c);
+        var id = await SeedSpec(c);
+        Assert.Equal(HttpStatusCode.OK, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = "# v2" })).StatusCode);
+        Assert.Equal("# v2", f.Services.GetRequiredService<SpecStore>().ReadMarkdown(id));
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = " " })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/attack", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = "# v3" })).StatusCode);
+    }
 }

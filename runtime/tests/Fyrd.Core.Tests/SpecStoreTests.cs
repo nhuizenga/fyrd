@@ -261,4 +261,97 @@ public class SpecStoreTests
         Task.WaitAll(tasks);
         Assert.Empty(errors);
     }
+
+    [Fact]
+    public void SaveAndGetProposal()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "# old").Id;
+        Assert.Null(s.GetProposal(id));
+        s.SaveProposal(id, "# new", "sum", ["q1?"], "sess1");
+        var p = s.GetProposal(id)!;
+        Assert.Equal("# new", p.Markdown);
+        Assert.Equal("sum", p.Summary);
+        Assert.Equal(["q1?"], p.OpenQuestions);
+        Assert.Equal("sess1", p.SessionId);
+        Assert.True(s.Get(id)!.HasProposal);
+        Assert.True(File.Exists(Path.Combine(h.Paths.SpecDir(id), "proposal.md")));
+        Assert.True(File.Exists(Path.Combine(h.Paths.SpecDir(id), "proposal.json")));
+        Assert.Equal("# old", s.ReadMarkdown(id));
+    }
+
+    [Fact]
+    public void AcceptProposal_VersionsOldSpec()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "# old").Id;
+        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        var run = s.AcceptProposal(id, null);
+        Assert.False(run.HasProposal);
+        Assert.Equal("# new", s.ReadMarkdown(id));
+        Assert.Equal("# old", File.ReadAllText(Path.Combine(h.Paths.SpecDir(id), "spec.v1.md")));
+        Assert.Null(s.GetProposal(id));
+        Assert.False(File.Exists(Path.Combine(h.Paths.SpecDir(id), "proposal.md")));
+
+        s.SaveProposal(id, "# newer", "sum", [], "sess1");
+        s.AcceptProposal(id, null);
+        Assert.Equal("# new", File.ReadAllText(Path.Combine(h.Paths.SpecDir(id), "spec.v2.md")));
+    }
+
+    [Fact]
+    public void AcceptProposal_WithEdit_UsesEdit()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "# old").Id;
+        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        s.AcceptProposal(id, "# edited");
+        Assert.Equal("# edited", s.ReadMarkdown(id));
+    }
+
+    [Fact]
+    public void AcceptProposal_NotAllowed_Throws()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "# old").Id;
+        Assert.Throws<InvalidOperationException>(() => s.AcceptProposal(id, null)); // no proposal
+        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        s.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching);
+        Assert.Throws<InvalidOperationException>(() => s.AcceptProposal(id, null));
+        Assert.Equal("# old", s.ReadMarkdown(id));
+    }
+
+    [Fact]
+    public void Discard_ClearsFlag()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "# old").Id;
+        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        var run = s.DiscardProposal(id);
+        Assert.False(run.HasProposal);
+        Assert.Null(s.GetProposal(id));
+        Assert.Equal("# old", s.ReadMarkdown(id));
+    }
+
+    [Fact]
+    public void SetResearchLead_SetsSessionStatusAndClearsCursor()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        s.SetCursor(id, "e9");
+        var run = s.SetResearchLead(id, "sess");
+        Assert.Equal("sess", run.SessionId);
+        Assert.Equal(SpecStatus.Researching, run.Status);
+        Assert.Null(run.LastEventId);
+    }
+
+    [Fact]
+    public void UpdateMarkdown_DraftOnly()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        s.UpdateMarkdown(id, "y");
+        Assert.Equal("y", s.ReadMarkdown(id));
+        s.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued);
+        Assert.Throws<InvalidOperationException>(() => s.UpdateMarkdown(id, "z"));
+    }
 }

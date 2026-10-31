@@ -77,11 +77,17 @@ public sealed class SpecRunner(
             ct.ThrowIfCancellationRequested();
             try
             {
+                var researching = run.Status == SpecStatus.Researching;
+                var role = researching ? "fyrd-role-research-lead" : "fyrd-role-lead";
                 var found = (await cloud.ListByTagAsync("fyrd-spec-" + run.Id, ct))
-                    .Where(s => s.SessionStatus != "archived" && s.Tags.Contains("fyrd-role-lead"))
+                    .Where(s => s.SessionStatus != "archived" && s.Tags.Contains(role))
                     .OrderByDescending(CreatedAt)
                     .FirstOrDefault();
-                if (found is not null) specs.SetLead(run.Id, found.Id);
+                if (found is not null)
+                {
+                    if (researching) specs.SetResearchLead(run.Id, found.Id);
+                    else specs.SetLead(run.Id, found.Id);
+                }
                 else specs.Finish(run.Id, SpecStatus.Draft, null, "Launch interrupted; try again");
             }
             catch (Exception e) when (e is not OperationCanceledException)

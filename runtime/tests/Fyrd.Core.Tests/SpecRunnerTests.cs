@@ -280,6 +280,21 @@ public class SpecRunnerTests
     }
 
     [Fact]
+    public async Task Reconcile_AdoptsExistingResearchLead()
+    {
+        using var r = new Rig();
+        var id = StaleSpec(r, SpecStatus.Researching);
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("rl", "running", ["fyrd-spec-" + id, "fyrd-role-research-lead"], T),
+            FakeCloudSessions.Session("lead", "running", ["fyrd-spec-" + id, "fyrd-role-lead"], T.AddHours(2)),
+            FakeCloudSessions.Session("old", "archived", ["fyrd-spec-" + id, "fyrd-role-research-lead"], T.AddHours(1)));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal("rl", run.SessionId);
+        Assert.Equal(SpecStatus.Researching, run.Status);
+    }
+
+    [Fact]
     public async Task Reconcile_NoSession_RevertsToDraftWithError()
     {
         using var r = new Rig();

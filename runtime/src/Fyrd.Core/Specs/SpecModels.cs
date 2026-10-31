@@ -17,9 +17,13 @@ public sealed record SpecRun(
     string? LastEventId = null,
     string? Branch = null,
     string? Error = null,
-    DateTimeOffset? UpdatedAt = null);
+    DateTimeOffset? UpdatedAt = null,
+    bool HasProposal = false);
 
 public sealed record Unit(string Id, string SpecId, string Title, UnitStage Stage, UnitState State);
 
 /// <summary>Run is null and Error is set when the spec's run.json is unreadable.</summary>
 public sealed record SpecListEntry(SpecRun? Run, string Id, string? Error);
+
+/// <summary>A research lead's revised spec waiting for the owner to accept or discard.</summary>
+public sealed record Proposal(string Markdown, string Summary, IReadOnlyList<string> OpenQuestions, string SessionId);
