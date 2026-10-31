@@ -71,6 +71,29 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void EveryPeasantMentions_ArtifactTool()
+    {
+        foreach (var p in Load().Where(p => p.Id != "controller"))
+            Assert.True(p.Definition.Contains("Artifact tool's `read` action", StringComparison.Ordinal), $"{p.Id} lacks the Artifact tool");
+    }
+
+    [Fact]
+    public void Controller_CarriesTeardownCapAndLeadRules()
+    {
+        var d = Get("controller").Definition;
+        foreach (var s in new[] { "Never archive yourself", "`Start fewer now`", "`Tear down idle sessions`", "`Cancel`", "The Lead role isn't defined yet", "delete_trigger" })
+            Assert.Contains(s, d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Controller_HasNoLiteralMemoryClosingTags()
+    {
+        var d = Get("controller").Definition;
+        Assert.DoesNotContain("</shared-memory", d, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("</role-memory", d, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void NoPlaceholdersLeft()
     {
         foreach (var f in Directory.EnumerateFiles(SeedDir(), "*.md"))

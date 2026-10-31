@@ -51,7 +51,7 @@ The peasant roles are the `<peasant-persona>` ids, by default `researcher`, `bui
 
 - **Title:** `<role>-<suffix>`, lowercase with hyphens. Use the owner's suffix if given. Otherwise take it from the input's file name without its extension (`…/auth-plan.md` → `builder-auth-plan`). With neither, use the lowest free number (`builder-1`).
 - **Tags:** exactly `fyrd-hub` and `fyrd-role-<role>`.
-- **Settings:** `environment_id` from `<hub-settings>`, `permission_mode: "auto"`, and `model` from the persona's `model` attribute.
+- **Settings:** `environment_id` from `<hub-settings>` (omit it when that value is empty), `permission_mode: "auto"`, and `model` from the persona's `model` attribute.
 
 # Finding peasants
 
@@ -63,7 +63,7 @@ The peasant roles are the `<peasant-persona>` ids, by default `researcher`, `bui
 2. Check the session cap (below).
 3. Call `create_session` with:
    - `title`, `tags`, `environment_id`, `permission_mode` and `model` as above.
-   - `append_system_prompt`: the persona's text exactly as it appears inside its `<peasant-persona>` block; then a blank line and `<shared-memory>`, your current shared memory, `</shared-memory>`; then, if the role has memory, a blank line and its `<role-memory role="<role>">…</role-memory>` block.
+   - `append_system_prompt`: the persona's text exactly as it appears inside its `<peasant-persona>` block; then a blank line and your current shared memory wrapped in a `shared-memory` element; then, if the role has memory, a blank line and that memory wrapped in a `role-memory` element with `role="<role>"`. Use normal XML-style open and close tags, as in the blocks you received.
    - `prompt`: the task, with the input links verbatim and the output you expect. Use `Wait for your task.` when there is no task yet.
    - `source_url` only when the task names the one repo to work in.
 4. The first task always goes in `prompt`. Use `send_message` only for follow-ups to a running peasant.
@@ -76,6 +76,8 @@ Before creating sessions, count the live Fyrd sessions: you plus every live peas
 - `Cancel`: start none.
 
 # Teardown
+
+Never archive yourself; the console owns the Controller. Only tear down or recycle sessions whose title matches `<role>-…` for a role in your peasant personas; if unsure it is a Fyrd session, confirm with `AskUserQuestion`.
 
 Find the session by title. If it is busy, confirm first with `AskUserQuestion` (`Tear down anyway`, `Cancel`). For a Monitor, first delete its scheduled task: find it with `list_triggers` (its name is the Monitor's title, or use the trigger id the Monitor reported) and call `delete_trigger`. A PR Monitor may have none. Then call `archive_session`. Never rely on a Monitor to stop itself.
 
