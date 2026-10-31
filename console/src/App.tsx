@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "./api";
 import BoardTab from "./board/BoardTab";
+import MemoryTab from "./memory/MemoryTab";
 import InboxTab from "./inbox/InboxTab";
 import type { Board, FyrdConfig, InboxCard } from "./types";
 
 const POLL_MS = 3000;
 
 export default function App() {
-  const [tab, setTab] = useState<"inbox" | "board">("inbox");
+  const [tab, setTab] = useState<"inbox" | "board" | "memory">("inbox");
   const [cards, setCards] = useState<InboxCard[]>([]);
+  const [undelivered, setUndelivered] = useState<InboxCard[]>([]);
   const [board, setBoard] = useState<Board | null>(null);
   const [relayError, setRelayError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -18,12 +20,15 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     // Each endpoint degrades on its own: a failure keeps that tab's last data instead of freezing the rest.
-    const [inbox, bd, cfg] = await Promise.allSettled([api.getInbox(), api.getBoard(), api.getConfig()]);
+    const [inbox, bd, cfg, und] = await Promise.allSettled([
+      api.getInbox(), api.getBoard(), api.getConfig(), api.getUndelivered(),
+    ]);
+    if (und.status === "fulfilled") setUndelivered(und.value ?? []);
     if (inbox.status === "fulfilled") setCards(inbox.value);
     if (cfg.status === "fulfilled") setConfig(cfg.value);
     if (bd.status === "fulfilled") setBoard(bd.value);
-    const failures = [inbox, bd, cfg].filter((r): r is PromiseRejectedResult => r.status === "rejected");
-    if (failures.length === 3) {
+    const failures = [inbox, bd, cfg, und].filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failures.length === 4) {
       const reason = failures[0].reason;
       setError(reason instanceof Error ? reason.message : String(reason));
     } else {
@@ -65,6 +70,9 @@ export default function App() {
         <button role="tab" aria-selected={tab === "board"} onClick={() => setTab("board")}>
           {boardLabel}
         </button>
+        <button role="tab" aria-selected={tab === "memory"} onClick={() => setTab("memory")}>
+          Memory
+        </button>
       </div>
       {error && <p className="error" role="alert">Can't reach the Fyrd server: {error}</p>}
       {board?.signedOut && (
@@ -88,10 +96,12 @@ export default function App() {
         </div>
       )}
       {tab === "inbox" ? (
-        <InboxTab cards={cards} specs={specs.map((s) => s.entry)} onAnswered={(r) => {
+        <InboxTab cards={cards} undelivered={undelivered} specs={specs.map((s) => s.entry)} onAnswered={(r) => {
           onRelayError(r);
           void refresh();
         }} />
+      ) : tab === "memory" ? (
+        <MemoryTab />
       ) : (
         <BoardTab specs={specs} config={config} onChange={refresh} onRelayError={onRelayError} />
       )}

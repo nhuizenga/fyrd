@@ -233,4 +233,18 @@ public class InboxStoreTests
         var again = Assert.Single(s.ListRelaysToRetry());
         Assert.Equal(("pending", 0), (again.Answer!.RelayStatus, again.Answer.RelayAttempts));
     }
+
+    [Fact]
+    public void ListUndelivered_OnlyFailedRelays()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var failed = AnsweredKeyed(s, spec);
+        s.SetRelay(failed.Id, "failed", "boom");
+        AnsweredKeyed(s, spec); // pending
+        AddCard(s, spec); // open
+        Assert.Equal(failed.Id, Assert.Single(s.ListUndelivered()).Id);
+        s.SetRelay(failed.Id, "sent", null);
+        Assert.Empty(s.ListUndelivered());
+    }
 }

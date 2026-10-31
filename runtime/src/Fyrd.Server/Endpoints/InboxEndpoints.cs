@@ -13,6 +13,8 @@ internal static class InboxEndpoints
 
         group.MapGet("/", (InboxStore inbox) => Results.Ok(inbox.ListOpen()));
 
+        group.MapGet("/undelivered", (InboxStore inbox) => Results.Ok(inbox.ListUndelivered()));
+
         group.MapPost("/{id}/answer", (string id, AnswerRequest? body, InboxStore inbox, LeadRelay relay, CancellationToken ct) => ApiErrors.RunAsync(async () =>
         {
             var card = inbox.Answer(id, body?.Text ?? "", body?.Remember ?? true, body?.Scope ?? MemoryScope.Repo);

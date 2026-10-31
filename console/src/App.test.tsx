@@ -13,6 +13,7 @@ beforeEach(() => {
   vi.mocked(api.getInbox).mockResolvedValue([]);
   vi.mocked(api.getBoard).mockResolvedValue(board());
   vi.mocked(api.getConfig).mockResolvedValue(config());
+  vi.mocked(api.getUndelivered).mockResolvedValue([]);
 });
 
 const board = (o: Partial<Board> = {}): Board => ({
@@ -80,7 +81,20 @@ it("shows the rate-limit chip with status", async () => {
 it("shows the unreachable banner only when every endpoint fails", async () => {
   vi.mocked(api.getInbox).mockRejectedValue(new Error("down"));
   vi.mocked(api.getBoard).mockRejectedValue(new Error("down"));
+  vi.mocked(api.getUndelivered).mockRejectedValue(new Error("down"));
   vi.mocked(api.getConfig).mockRejectedValue(new Error("down"));
   render(<App />);
   expect(await screen.findByRole("alert")).toHaveTextContent("Can't reach the Fyrd server");
+});
+
+it("Memory is the third tab and an undelivered answer shows in the Inbox", async () => {
+  vi.mocked(api.getMemory).mockResolvedValue({ ownerProxy: "", global: "", repos: [] });
+  vi.mocked(api.getUndelivered).mockResolvedValue([card({
+    id: "f1", question: "Which DB?",
+    answer: { text: "Postgres", remember: true, scope: "Repo", answeredAt: "x", relayStatus: "failed" },
+  })]);
+  render(<App />);
+  expect(await screen.findByText("Answers not delivered")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("tab", { name: "Memory" }));
+  expect(await screen.findByRole("textbox", { name: "Owner preferences" })).toBeInTheDocument();
 });

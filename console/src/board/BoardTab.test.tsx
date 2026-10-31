@@ -112,3 +112,51 @@ it("renders untrusted titles as text, not HTML", () => {
   expect(screen.getByText("<img src=x onerror=alert(1)>")).toBeInTheDocument();
   expect(document.querySelector("img")).toBeNull();
 });
+
+describe("research", () => {
+  it("Research on a Draft calls the API; Attack is enabled without a proposal", async () => {
+    vi.mocked(api.research).mockResolvedValue(entry().run!);
+    const onChange = vi.fn();
+    renderBoard([{ entry: entry({ status: "Draft" }) }], onChange);
+    expect(screen.getByRole("button", { name: "Attack" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Research" }));
+    await waitFor(() => expect(api.research).toHaveBeenCalledWith("s1"));
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("Attack is disabled with a hint when a proposal is waiting; Review proposal opens the review", async () => {
+    vi.mocked(api.getSpec).mockResolvedValue({ run: entry().run!, markdown: "# Cur", units: [] });
+    vi.mocked(api.getProposal).mockResolvedValue({ markdown: "# Prop", summary: "Sum", openQuestions: [], sessionId: null });
+    renderBoard([{ entry: entry({ status: "Draft", hasProposal: true }) }]);
+    expect(screen.getByRole("button", { name: "Attack" })).toBeDisabled();
+    expect(screen.getByText("Review the research proposal first")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Review proposal" }));
+    expect(await screen.findByText("# Prop")).toBeInTheDocument();
+  });
+
+  it("shows research errors inline", async () => {
+    vi.mocked(api.research).mockRejectedValue(new Error("Set the cloud environment in Settings"));
+    renderBoard([{ entry: entry({ status: "Draft" }) }]);
+    await userEvent.click(screen.getByRole("button", { name: "Research" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Set the cloud environment in Settings");
+  });
+
+  it("Researching units show the diamond marker", () => {
+    renderBoard([{
+      entry: entry({ status: "Researching" }),
+      units: [1, 2, 3].map((n) => unit({ id: `r${n}`, title: `Angle ${n}`, stage: "Research" })),
+    }]);
+    expect(screen.getAllByText("◆")).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Research" })).not.toBeInTheDocument();
+  });
+
+  it("Edit spec is Draft only and opens the editor", async () => {
+    vi.mocked(api.getSpec).mockResolvedValue({ run: entry().run!, markdown: "# Body", units: [] });
+    const { unmount } = renderBoard([{ entry: entry({ status: "Building" }) }]);
+    expect(screen.queryByRole("button", { name: "Edit spec" })).not.toBeInTheDocument();
+    unmount();
+    renderBoard([{ entry: entry({ status: "Draft" }) }]);
+    await userEvent.click(screen.getByRole("button", { name: "Edit spec" }));
+    expect(await screen.findByRole("textbox", { name: "Spec markdown" })).toHaveValue("# Body");
+  });
+});

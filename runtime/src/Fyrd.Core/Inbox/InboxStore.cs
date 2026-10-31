@@ -107,6 +107,19 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
         }
     }
 
+    /// <summary>Answered cards whose relay to the lead failed.</summary>
+    public IReadOnlyList<InboxCard> ListUndelivered()
+    {
+        lock (_gate)
+        {
+            return Directory.EnumerateFiles(paths.InboxDir, "*.json")
+                .Select(ReadOrSkip).OfType<InboxCard>()
+                .Where(c => c.Answer is { RelayStatus: "failed" })
+                .OrderBy(c => c.CreatedAt)
+                .ToList();
+        }
+    }
+
     private InboxCard MutateAnswered(string cardId, Func<CardAnswer, CardAnswer> change)
     {
         if (!CardIdPattern().IsMatch(cardId)) throw new ArgumentException($"Invalid card id '{cardId}'.", nameof(cardId));
