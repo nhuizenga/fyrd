@@ -2,7 +2,7 @@ namespace Fyrd.Core.Specs;
 
 public enum SpecStatus { Draft, Queued, Researching, Building, FinalReview, ReadyForHandoff, PrOpened, Failed }
 
-public enum UnitStage { Implement, Review, Validate, Done }
+public enum UnitStage { Implement, Review, Validate, Done, Research }
 
 public enum UnitState { Running, Idle, WaitingOnOwner, Blocked, Done }
 

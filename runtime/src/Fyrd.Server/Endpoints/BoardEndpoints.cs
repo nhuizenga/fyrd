@@ -40,7 +40,7 @@ internal static class BoardEndpoints
                         lead = new LeadView(sid2, Url(sid2), null, null, null);
                     }
                     var specTag = "fyrd-spec-" + entry.Id;
-                    foreach (var p in sessions.Where(p => p.Tags.Contains(specTag) && p.Id != entry.Run.SessionId))
+                    foreach (var p in sessions.Where(p => p.Tags.Contains(specTag) && p.Id != entry.Run.SessionId && p.SessionStatus != "archived"))
                     {
                         var role = TagValue(p, "fyrd-role-");
                         if (role is null || role == "lead") continue;

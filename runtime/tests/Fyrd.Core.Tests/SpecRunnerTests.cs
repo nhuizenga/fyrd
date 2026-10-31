@@ -134,6 +134,42 @@ public class SpecRunnerTests
     }
 
     [Fact]
+    public async Task Poll_ArchivedPeerIgnoredForStage()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Units("[{\"id\":\"a\",\"title\":\"A\"}]"));
+        r.Cloud.SetByTag("fyrd-spec-" + id,
+            FakeCloudSessions.Session("p1", "running", ["fyrd-role-implementer", "fyrd-unit-a"], T),
+            FakeCloudSessions.Session("p2", "archived", ["fyrd-role-reviewer", "fyrd-unit-a"], T.AddMinutes(5)));
+        await r.Runner.PollOnceAsync(default);
+        var u = Assert.Single(r.Specs.ListUnits(id));
+        Assert.Equal(UnitStage.Implement, u.Stage);
+        Assert.DoesNotContain("p2", r.State.Sessions.Keys);
+    }
+
+    [Fact]
+    public async Task Poll_AttentionCardAfterAnsweredQuestion()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        r.Cloud.AddAssistantEvent("lead1", "e1", Question("{\"id\":\"q1\",\"question\":\"Pick?\"}"));
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Waiting for input"));
+        await r.Runner.PollOnceAsync(default);
+        var q = Assert.Single(r.Inbox.ListOpenFor(id));
+        Assert.True(r.State.LastTurnHadQuestion(id));
+
+        var relay = new LeadRelay(r.Specs, r.Cloud, r.State);
+        var answered = r.Inbox.Answer(q.Id, "blue");
+        await relay.RelayAnswerAsync(answered, default);
+        Assert.False(r.State.LastTurnHadQuestion(id));
+
+        r.Cloud.SetSession(FakeCloudSessions.Session("lead1", "idle", needsAction: "Approve Bash: ls"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Contains(r.Inbox.ListOpenFor(id), c => c.Question == "Lead needs attention: Approve Bash: ls");
+    }
+
+    [Fact]
     public async Task Poll_PeerWorking_NoCard_IsRunning()
     {
         using var r = new Rig();

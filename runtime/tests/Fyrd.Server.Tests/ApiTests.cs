@@ -408,6 +408,9 @@ public class ApiTests
         state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_x", "Peer", "idle", "connected", null,
             ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-implementer", "fyrd-unit-u1"], default));
 
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_old", "Old", "archived", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-reviewer", "fyrd-unit-u1"], default));
+
         var board = await ReadJson(await c.GetAsync("/api/board"));
         Assert.Equal("poll failed", board.GetProperty("lastError").GetString());
         Assert.False(board.GetProperty("signedOut").GetBoolean());
@@ -423,6 +426,22 @@ public class ApiTests
         Assert.Equal("https://claude.ai/code/session_x", peer.GetProperty("url").GetString());
         Assert.Equal("implementer", peer.GetProperty("role").GetString());
         Assert.Equal("u1", peer.GetProperty("unitId").GetString());
+    }
+
+    [Fact]
+    public async Task Board_ArchivedPeerNotListed()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var specs = f.Services.GetRequiredService<SpecStore>();
+        var run = specs.Create("Archived board", Repo, "# x");
+        specs.SetLead(run.Id, "session_lead");
+        var state = f.Services.GetRequiredService<Fyrd.Core.Orchestration.RunnerState>();
+        state.Record(new Fyrd.Core.CloudSessions.CloudSession("session_old", "Old", "archived", "connected", null,
+            ["fyrd", $"fyrd-spec-{run.Id}", "fyrd-role-reviewer", "fyrd-unit-u1"], default));
+        var board = await ReadJson(await c.GetAsync("/api/board"));
+        var spec = Assert.Single(board.GetProperty("specs").EnumerateArray());
+        Assert.Equal(0, spec.GetProperty("peers").GetArrayLength());
     }
 
     [Fact]
