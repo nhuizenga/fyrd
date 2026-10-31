@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Text } from "@servicetitan/anvil2";
+import { Alert, Button, SelectFieldSync, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import * as api from "../api";
 import type { HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
 import type { ScreenProps } from "./ScreenProps";
@@ -10,8 +10,9 @@ const MODELS = [
   { id: "claude-haiku-5-5", label: "Haiku 5.5" },
   { id: "claude-fable-5-1", label: "Fable 5.1" },
 ];
+const MODEL_OPTIONS = MODELS.map((m) => ({ id: m.id, label: `${m.label} · ${m.id}` }));
 const APPLY_NOTE = "Changes apply to sessions created from now on.";
-const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 function EnvironmentCard() {
@@ -56,21 +57,24 @@ function EnvironmentCard() {
       <Text subdued>Where sessions run and how this fyrd is identified.</Text>
       {error && <Alert status="danger" title={error} role="alert" />}
       {saved && <Text role="status">{saved}</Text>}
-      <label className="field-label">
-        Cloud environment name
-        <input className="field" value={env} onChange={(e) => setEnv(e.target.value)} />
-      </label>
-      <Text size="small" subdued>The environment new sessions start in. Running sessions keep their current environment.</Text>
+      <TextField
+        label="Cloud environment name"
+        description="The environment new sessions start in. Running sessions keep their current environment."
+        value={env}
+        onChange={(e) => setEnv(e.target.value)}
+      />
       <div>
         <Button appearance="primary" aria-label="Save environment" onClick={() => save({ environmentId: env.trim() || null }, "Environment")}>
           Save
         </Button>
       </div>
-      <label className="field-label">
-        Session cap
-        <input className="field" inputMode="numeric" value={cap} onChange={(e) => setCap(e.target.value)} />
-      </label>
-      {capError && <Text role="alert" style={{ color: "var(--a2-foreground-color-danger)" }}>{capError}</Text>}
+      <TextField
+        label="Session cap"
+        inputMode="numeric"
+        value={cap}
+        error={capError ?? undefined}
+        onChange={(e) => setCap(e.target.value)}
+      />
       <div>
         <Button appearance="primary" aria-label="Save session cap" onClick={saveCap}>Save</Button>
       </div>
@@ -103,6 +107,10 @@ function PersonasCard() {
     const id = editing!.isNew ? slug(d.name) : d.id;
     if (!id || !d.name.trim()) {
       setError("Give the persona a name.");
+      return;
+    }
+    if (editing!.isNew && (id === "shared" || personas.some((p) => p.id === id))) {
+      setError("A persona with this name already exists.");
       return;
     }
     try {
@@ -158,20 +166,22 @@ function PersonasCard() {
             <Text subdued>Select a persona to edit it.</Text>
           ) : (
             <>
-              <label className="field-label">
-                Name
-                <input className="field" value={d.name} disabled={!editing!.isNew} onChange={(e) => patch({ name: e.target.value })} />
-              </label>
-              <label className="field-label">
-                Claude model
-                <select className="field" value={d.model} onChange={(e) => patch({ model: e.target.value })}>
-                  {MODELS.map((m) => <option key={m.id} value={m.id}>{m.label} · {m.id}</option>)}
-                </select>
-              </label>
-              <label className="field-label">
-                Definition
-                <textarea className="field" rows={8} value={d.definition} onChange={(e) => patch({ definition: e.target.value })} />
-              </label>
+              <TextField label="Name" value={d.name} disabled={!editing!.isNew} onChange={(e) => patch({ name: e.target.value })} />
+              <SelectFieldSync
+                label="Claude model"
+                disableSearch
+                disableClearButton
+                options={MODEL_OPTIONS}
+                value={MODEL_OPTIONS.find((m) => m.id === d.model) ?? null}
+                onSelectedOptionChange={(o) => o && patch({ model: String(o.id) })}
+              />
+              <Textarea
+                label="Definition"
+                description="Instructions given to the agent at the start of every session that uses this persona."
+                rows={8}
+                value={d.definition}
+                onChange={(e) => patch({ definition: e.target.value })}
+              />
               <Text size="small" subdued>Instructions given to the agent at the start of every session that uses this persona.</Text>
               <Text size="small" subdued>{APPLY_NOTE}</Text>
               <div style={{ display: "flex", gap: 8 }}>
@@ -211,10 +221,7 @@ function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; on
     <li key={e.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0" }}>
       {editingId === e.id ? (
         <>
-          <label className="field-label">
-            Edit memory entry
-            <textarea className="field" rows={2} value={editText} onChange={(ev) => setEditText(ev.target.value)} />
-          </label>
+          <Textarea label="Edit memory entry" rows={2} value={editText} onChange={(ev) => setEditText(ev.target.value)} />
           <div style={{ display: "flex", gap: 8 }}>
             <Button appearance="primary" onClick={() => attempt(() => api.editMemory(scope.scope, e.id, editText.trim()))}>Save</Button>
             <Button appearance="ghost" onClick={() => setEditingId(null)}>Cancel</Button>
@@ -264,6 +271,7 @@ function MemoryCard() {
   useEffect(() => { void load(); }, [load]);
 
   const scopes = [...memory.scopes].sort((a, b) => Number(b.scope === "shared") - Number(a.scope === "shared"));
+  const scopeOptions = (scopes.length ? scopes : [{ scope: "shared", label: "Shared", entries: [] }]).map((s) => ({ id: s.scope, label: s.label }));
   const total = scopes.reduce((n, s) => n + s.entries.length, 0);
 
   const add = async () => {
@@ -282,18 +290,15 @@ function MemoryCard() {
     <section className="card" aria-labelledby="memory-h">
       <Text variant="headline" el="h3" size="medium" id="memory-h">Agent memory</Text>
       {error && <Alert status="danger" title={error} role="alert" />}
-      <label className="field-label">
-        Memory scope
-        <select className="field" value={scope} onChange={(e) => setScope(e.target.value)}>
-          {(scopes.length ? scopes : [{ scope: "shared", label: "Shared", entries: [] }]).map((s) => (
-            <option key={s.scope} value={s.scope}>{s.label}</option>
-          ))}
-        </select>
-      </label>
-      <label className="field-label">
-        New memory entry
-        <textarea className="field" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
-      </label>
+      <SelectFieldSync
+        label="Memory scope"
+        disableSearch
+        disableClearButton
+        options={scopeOptions}
+        value={scopeOptions.find((o) => o.id === scope) ?? null}
+        onSelectedOptionChange={(o) => o && setScope(String(o.id))}
+      />
+      <Textarea label="New memory entry" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
       <div><Button appearance="primary" onClick={add}>Add entry</Button></div>
       <Text size="small" subdued>{APPLY_NOTE}</Text>
       {total === 0 ? (

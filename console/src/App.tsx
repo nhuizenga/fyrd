@@ -83,7 +83,7 @@ export default function App() {
           {screen === "inbox" ? (
             <InboxScreen state={state} onChanged={refresh} />
           ) : screen === "sessions" ? (
-            <SessionsScreen state={state} onChanged={refresh} />
+            <SessionsScreen state={state} onChanged={refresh} onOpenInbox={() => setScreen("inbox")} />
           ) : (
             <SettingsScreen state={state} onChanged={refresh} />
           )}

@@ -11,3 +11,12 @@ if (!window.matchMedia) {
 if (!globalThis.ResizeObserver) {
   globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
 }
+
+// Anvil2 popovers (select menus) use the Popover API, which jsdom lacks.
+for (const m of ["showPopover", "hidePopover", "togglePopover"] as const) {
+  if (!(m in HTMLElement.prototype)) (HTMLElement.prototype as unknown as Record<string, () => void>)[m] = () => {};
+}
+if (!globalThis.IntersectionObserver) {
+  globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } } as unknown as typeof IntersectionObserver;
+}
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
@@ -62,10 +62,11 @@ it("session cap rejects 0 and saves 20", async () => {
 it("personas list, edit model and definition, save", async () => {
   await renderSettings();
   await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  expect(within(screen.getByLabelText("Claude model")).getAllByRole("option").map((o) => o.textContent)).toEqual([
+  await userEvent.click(screen.getByRole("combobox", { name: "Claude model" }));
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
     "Opus 5.5 · claude-opus-5-5", "Sonnet 5.5 · claude-sonnet-5-5", "Haiku 5.5 · claude-haiku-5-5", "Fable 5.1 · claude-fable-5-1",
   ]);
-  await userEvent.selectOptions(screen.getByLabelText("Claude model"), "claude-haiku-5-5");
+  await userEvent.click(screen.getByRole("option", { name: "Haiku 5.5 · claude-haiku-5-5" }));
   const def = screen.getByLabelText("Definition");
   await userEvent.clear(def);
   await userEvent.type(def, "New def");
@@ -125,4 +126,15 @@ it("memory groups shared first; add, edit, delete entry", async () => {
 it("changes apply note", async () => {
   await renderSettings();
   expect(screen.getAllByText("Changes apply to sessions created from now on.").length).toBeGreaterThan(0);
+});
+
+it("add persona rejects a name that collides with an existing persona or shared", async () => {
+  await renderSettings();
+  for (const name of ["builder", "Shared", "!!!"]) {
+    await userEvent.click(screen.getByRole("button", { name: "Add persona" }));
+    await userEvent.type(screen.getByLabelText("Name"), name);
+    await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
+    expect(await screen.findByText(name === "!!!" ? "Give the persona a name." : "A persona with this name already exists.")).toBeInTheDocument();
+  }
+  expect(api.savePersona).not.toHaveBeenCalled();
 });

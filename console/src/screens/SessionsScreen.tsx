@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, Text } from "@servicetitan/anvil2";
+import { Alert, Badge, Button, SearchField, Text, Textarea } from "@servicetitan/anvil2";
 import * as api from "../api";
 import type { HubMessage, HubSessionView } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
-export default function SessionsScreen({ state, onChanged }: ScreenProps) {
+export default function SessionsScreen({ state, onChanged, onOpenInbox }: ScreenProps) {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<HubMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pausedIds, setPausedIds] = useState<string[]>([]);
 
   const controllerId = state?.controller?.sessionId ?? null;
   const isController = (s: HubSessionView) => s.id === controllerId || s.tags.includes("fyrd-controller");
@@ -31,9 +32,25 @@ export default function SessionsScreen({ state, onChanged }: ScreenProps) {
 
   useEffect(() => {
     setMessages([]);
-    if (selectedId) void loadMessages(selectedId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    api.getMessages(selectedId).then(
+      (m) => { if (!cancelled) setMessages(m ?? []); },
+      (e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); },
+    );
+    return () => { cancelled = true; };
+  }, [selectedId, state?.lastPollAt]);
+
+  // Once the server reports the session as idle/archived, it is authoritative again.
+  useEffect(() => {
+    setPausedIds((ids) => ids.filter((id) => {
+      const st = state?.sessions.find((x) => x.id === id)?.status;
+      return st !== "idle" && st !== "archived";
+    }));
+  }, [state?.sessions]);
 
   const startController = () =>
     run(async () => {
@@ -43,7 +60,8 @@ export default function SessionsScreen({ state, onChanged }: ScreenProps) {
     });
 
   const question = selected ? state?.questions.find((x) => x.sessionId === selected.id) : undefined;
-  const paused = selected?.status === "paused";
+  const canPause = !!selected && !pausedIds.includes(selected.id) && (selected.status === "running" || selected.status === "requires_action");
+  const canResume = !!selected && (pausedIds.includes(selected.id) || selected.status === "idle");
 
   return (
     <>
@@ -60,10 +78,7 @@ export default function SessionsScreen({ state, onChanged }: ScreenProps) {
       </div>
       <div className="split">
         <div className="card">
-          <label className="field-label">
-            Search sessions
-            <input className="field" type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
-          </label>
+          <SearchField aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch("")} />
           {sessions.length === 0 && <Text subdued>No sessions match that search.</Text>}
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {sessions.map((s) => (
@@ -84,19 +99,34 @@ export default function SessionsScreen({ state, onChanged }: ScreenProps) {
               <Text variant="headline" el="h3" size="medium">{selected.title}</Text>
               <Text subdued>{selected.status}</Text>
               <div>
-                {paused ? (
-                  <Button appearance="secondary" onClick={() => run(async () => { await api.resume(selected.id); await onChanged(); })}>
+                {canResume && (
+                  <Button
+                    appearance="secondary"
+                    onClick={() => run(async () => {
+                      await api.resume(selected.id);
+                      setPausedIds((ids) => ids.filter((id) => id !== selected.id));
+                      await onChanged();
+                    })}
+                  >
                     Resume session
                   </Button>
-                ) : (
-                  <Button appearance="secondary" onClick={() => run(async () => { await api.pause(selected.id); await onChanged(); })}>
+                )}
+                {canPause && (
+                  <Button
+                    appearance="secondary"
+                    onClick={() => run(async () => {
+                      await api.pause(selected.id);
+                      setPausedIds((ids) => [...ids, selected.id]);
+                      await onChanged();
+                    })}
+                  >
                     Pause session
                   </Button>
                 )}
               </div>
               {question && (
                 <Alert status="info" title="This session is waiting for your response.">
-                  Respond in inbox
+                  <Button appearance="secondary" onClick={() => onOpenInbox?.()}>Respond in inbox</Button>
                 </Alert>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }} aria-label="Messages" role="log">
@@ -104,10 +134,7 @@ export default function SessionsScreen({ state, onChanged }: ScreenProps) {
                   <div key={i} className={m.role === "user" ? "msg-user" : "msg-agent"}>{m.text}</div>
                 ))}
               </div>
-              <label className="field-label">
-                Message this session
-                <textarea className="field" rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} />
-              </label>
+              <Textarea label="Message this session" rows={2} value={draft} onChange={(e) => setDraft(e.target.value)} />
               <div>
                 <Button
                   appearance="primary"

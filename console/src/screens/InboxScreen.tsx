@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Text } from "@servicetitan/anvil2";
+import { Alert, Button, Checkbox, Text, Textarea } from "@servicetitan/anvil2";
 import * as api from "../api";
 import type { HubQuestion } from "../types";
 import type { ScreenProps } from "./ScreenProps";
@@ -38,14 +38,12 @@ function QuestionBlock({ q, onAnswered, onChanged }: QuestionProps) {
         <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ position: "absolute", left: -9999 }}>Options</legend>
           {q.options.map((o) => (
-            <label key={o} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
-              <input
-                type="checkbox"
-                checked={picked.includes(o)}
-                onChange={(e) => setPicked(e.target.checked ? [...picked, o] : picked.filter((p) => p !== o))}
-              />
-              {o}
-            </label>
+            <Checkbox
+              key={o}
+              label={o}
+              checked={picked.includes(o)}
+              onChange={(e) => setPicked(e.target.checked ? [...picked, o] : picked.filter((p) => p !== o))}
+            />
           ))}
           <Button appearance="primary" disabled={busy || picked.length === 0} onClick={() => send({ text: picked.join(", ") })}>
             Send
@@ -58,10 +56,7 @@ function QuestionBlock({ q, onAnswered, onChanged }: QuestionProps) {
           ))}
         </div>
       )}
-      <label className="field-label">
-        Your reply
-        <textarea className="field" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
-      </label>
+      <Textarea label="Your reply" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
       <div>
         <Button appearance="primary" disabled={busy || text.trim() === ""} onClick={() => send({ text: text.trim() })}>
           Send reply

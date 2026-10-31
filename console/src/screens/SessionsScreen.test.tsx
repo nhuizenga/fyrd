@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
-import { hubState, session } from "../test/fixtures";
+import { hubState, question, session } from "../test/fixtures";
 import type { HubState } from "../types";
 import SessionsScreen from "./SessionsScreen";
 
@@ -26,7 +26,7 @@ const two = () =>
     sessions: [
       session({ id: "a", title: "alpha-1" }),
       session({ id: "c", title: "controller", role: "controller", tags: ["fyrd-hub", "fyrd-controller"] }),
-      session({ id: "b", title: "beta-2", status: "paused" }),
+      session({ id: "b", title: "beta-2", status: "idle" }),
     ],
     controller: { sessionId: "c", url: "https://claude.ai/code/c" },
   });
@@ -68,8 +68,11 @@ it("pause and resume", async () => {
   vi.mocked(api.resume).mockResolvedValue(undefined);
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  expect(screen.queryByRole("button", { name: "Resume session" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Pause session" }));
   expect(api.pause).toHaveBeenCalledWith("a");
+  expect(await screen.findByRole("button", { name: "Resume session" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Pause session" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
   await userEvent.click(screen.getByRole("button", { name: "Resume session" }));
   expect(api.resume).toHaveBeenCalledWith("b");
@@ -91,4 +94,25 @@ it("search filters by name", async () => {
   await userEvent.clear(screen.getByLabelText("Search sessions"));
   await userEvent.type(screen.getByLabelText("Search sessions"), "zzz");
   expect(screen.getByText("No sessions match that search.")).toBeInTheDocument();
+});
+
+it("Respond in inbox navigates to the inbox", async () => {
+  const onOpenInbox = vi.fn();
+  const st = two();
+  st.sessions[0].status = "requires_action";
+  st.questions = [question({ sessionId: "a" })];
+  render(<SessionsScreen state={st} onChanged={vi.fn()} onOpenInbox={onOpenInbox} />);
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Respond in inbox" }));
+  expect(onOpenInbox).toHaveBeenCalled();
+});
+
+it("refreshes messages when the poll timestamp changes", async () => {
+  const st = two();
+  const { rerender } = render(<SessionsScreen state={st} onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await screen.findByText("Working on it");
+  expect(api.getMessages).toHaveBeenCalledTimes(1);
+  rerender(<SessionsScreen state={{ ...st, lastPollAt: "2026-10-31T01:00:00Z" }} onChanged={vi.fn()} />);
+  await vi.waitFor(() => expect(api.getMessages).toHaveBeenCalledTimes(2));
 });
