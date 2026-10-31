@@ -137,7 +137,10 @@ public sealed class SpecRunner(
                     warning ??= $"Ignored fyrd-spec-draft from build lead in {spec.Id}";
                 if (parsed.Units is not null) ApplyUnits(spec.Id, parsed.Units);
             }
-            foreach (var q in parsed.Questions) AddQuestion(spec.Id, q);
+            // Research that ends in this turn leaves no one to answer: skip its questions.
+            var researchOver = researching && (parsed.SpecDraft is not null || parsed.SpecDraftInvalid || parsed.Failed is not null);
+            if (!researchOver)
+                foreach (var q in parsed.Questions) AddQuestion(spec.Id, q);
             if (researching)
             {
                 if (parsed.SpecDraft is { } sd)

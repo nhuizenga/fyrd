@@ -629,4 +629,74 @@ public class SpecRunnerTests
         Assert.False(run.HasProposal);
         Assert.Contains("fyrd-spec-draft", r.State.LastError);
     }
+
+    private sealed class RacingCloud(FakeCloudSessions inner, Action onListEvents) : ICloudSessions
+    {
+        public Task<CloudSession> CreateAsync(CreateSessionRequest r, CancellationToken ct = default) => inner.CreateAsync(r, ct);
+        public Task<CloudSession> GetAsync(string id, CancellationToken ct = default) => inner.GetAsync(id, ct);
+        public Task<EventPage> ListEventsAsync(string id, int limit = 100, string? after = null, string? before = null, CancellationToken ct = default)
+        {
+            onListEvents();
+            return inner.ListEventsAsync(id, limit, after, before, ct);
+        }
+        public Task SendMessageAsync(string id, string text, CancellationToken ct = default) => inner.SendMessageAsync(id, text, ct);
+        public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => inner.ListByTagAsync(tag, ct);
+        public Task InterruptAsync(string id, CancellationToken ct = default) => inner.InterruptAsync(id, ct);
+        public Task ArchiveAsync(string id, CancellationToken ct = default) => inner.ArchiveAsync(id, ct);
+    }
+
+    [Fact]
+    public async Task Poll_SpecDraftWhenSpecNoLongerResearching_WarnsAndSavesNothing()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"markdown\":\"# S\"}"));
+        // The runner snapshotted the spec as Researching; the owner abandons it before the batch is applied.
+        var racing = new RacingCloud(r.Cloud, () => r.Specs.Finish(id, SpecStatus.Draft, null, null));
+        var runner = new SpecRunner(r.Specs, r.Inbox, racing, r.State, r.Time, r.Relay);
+        await runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.False(run.HasProposal);
+        Assert.Null(r.Specs.GetProposal(id));
+        Assert.Contains("Ignored spec draft", r.State.LastError);
+        // Deliberate: the cursor still advances so the consumed draft is not replayed forever.
+        Assert.Equal("e1", run.LastEventId);
+    }
+
+    [Fact]
+    public async Task Poll_DraftAndQuestionInSameTurn_SavesProposalNoCard()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Question("{\"id\":\"q1\",\"question\":\"Stale?\"}") + "\n" + Draft("{\"markdown\":\"# S\"}"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.True(r.Specs.Get(id)!.HasProposal);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_FailedAndQuestionInSameTurn_NoCard()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Question("{\"id\":\"q1\",\"question\":\"Stale?\"}") + "\n" + F + "fyrd-failed\n{\"reason\":\"x\"}\n" + F);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(SpecStatus.Draft, r.Specs.Get(id)!.Status);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
+
+    [Fact]
+    public async Task Poll_InvalidDraftAndQuestionInSameTurn_NoCard()
+    {
+        using var r = new Rig();
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1",
+            Question("{\"id\":\"q1\",\"question\":\"Stale?\"}") + "\n" + Draft("{\"summary\":\"s\"}"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal("Research returned no spec", r.Specs.Get(id)!.Error);
+        Assert.Empty(r.Inbox.ListOpenFor(id));
+    }
 }
