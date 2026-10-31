@@ -6,7 +6,6 @@ export interface FyrdConfig {
   environmentId: string | null;
   leadModel: string;
   peerModel: string;
-  [key: string]: unknown;
 }
 
 /** Mutating responses may carry a relay failure alongside the saved value. */
@@ -69,8 +68,7 @@ export interface MemoryEntry {
   id: string;
   text: string;
   source: string;
-  createdAt?: string;
-  [key: string]: unknown;
+  at: string;
 }
 
 export interface MemoryScopeView {
