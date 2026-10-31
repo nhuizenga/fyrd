@@ -13,18 +13,22 @@ public sealed record DoneDecl(string Branch, string? Summary);
 
 public sealed record FailedDecl(string Reason);
 
+public sealed record SpecDraftDecl(string Markdown, string? Summary, IReadOnlyList<string> OpenQuestions);
+
 public sealed record ParsedBlocks(
     IReadOnlyList<UnitDecl>? Units,
     IReadOnlyList<QuestionDecl> Questions,
     DoneDecl? Done,
     FailedDecl? Failed,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    SpecDraftDecl? SpecDraft = null,
+    bool SpecDraftInvalid = false);
 
 /// <summary>Parses and formats the fenced fyrd-* blocks exchanged with the lead agent.</summary>
 public static partial class Protocol
 {
     [GeneratedRegex(
-        @"^[ \t]*(?<fence>`{3,})(?<name>fyrd-[a-z]+)[ \t]*\r?\n(?<body>.*?)\r?\n[ \t]*\k<fence>[ \t]*\r?$",
+        @"^[ \t]*(?<fence>`{3,})(?<name>fyrd-[a-z]+(?:-[a-z]+)*)[ \t]*\r?\n(?<body>.*?)\r?\n[ \t]*\k<fence>[ \t]*\r?$",
         RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex FenceRegex();
 
@@ -38,11 +42,13 @@ public static partial class Protocol
         List<UnitDecl>? units = null;
         DoneDecl? done = null;
         FailedDecl? failed = null;
+        SpecDraftDecl? draft = null;
+        var draftInvalid = false;
 
         foreach (Match m in FenceRegex().Matches(assistantText ?? ""))
         {
             var name = m.Groups["name"].Value;
-            if (name is not ("fyrd-units" or "fyrd-question" or "fyrd-done" or "fyrd-failed")) continue;
+            if (name is not ("fyrd-units" or "fyrd-question" or "fyrd-done" or "fyrd-failed" or "fyrd-spec-draft")) continue;
             try
             {
                 using var doc = JsonDocument.Parse(m.Groups["body"].Value);
@@ -65,15 +71,21 @@ public static partial class Protocol
                         var f = ParseFailed(root, warnings);
                         if (f is not null) failed = f;
                         break;
+                    case "fyrd-spec-draft":
+                        var sd = ParseSpecDraft(root, warnings);
+                        draft = sd;
+                        draftInvalid = sd is null;
+                        break;
                 }
             }
             catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
             {
+                if (name == "fyrd-spec-draft") { draft = null; draftInvalid = true; }
                 warnings.Add($"{name}: malformed block ignored ({e.Message})");
             }
         }
 
-        return new ParsedBlocks(units, questions, done, failed, warnings);
+        return new ParsedBlocks(units, questions, done, failed, warnings, draft, draftInvalid);
     }
 
     public static string FormatAnswer(string questionId, string answer) =>
@@ -149,6 +161,21 @@ public static partial class Protocol
             return null;
         }
         return new FailedDecl(reason);
+    }
+
+    private static SpecDraftDecl? ParseSpecDraft(JsonElement el, List<string> warnings)
+    {
+        var md = Str(el, "markdown");
+        if (string.IsNullOrWhiteSpace(md))
+        {
+            warnings.Add("fyrd-spec-draft: missing markdown; block ignored");
+            return null;
+        }
+        var open = new List<string>();
+        if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty("openQuestions", out var o) && o.ValueKind == JsonValueKind.Array)
+            foreach (var item in o.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String) open.Add(item.GetString()!);
+        return new SpecDraftDecl(md, Str(el, "summary"), open);
     }
 
     private static string? Str(JsonElement el, string prop) =>
