@@ -45,7 +45,11 @@ public sealed class ControllerManager
 
     /// <summary>Lowercase hex SHA-256 of the memory-update text for the current memory; the poll pass compares it to <see cref="PostedMemoryHash"/>.</summary>
     public static string MemoryHash(HubMemory memory, IReadOnlyList<HubPersona> personas) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(HubPrompt.MemoryUpdate(memory, personas)))).ToLowerInvariant();
+        Hash(HubPrompt.MemoryUpdate(memory, personas));
+
+    /// <summary>Lowercase hex SHA-256 of the UTF-8 text.</summary>
+    public static string Hash(string text) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     public async Task<ControllerInfo> FindOrCreateAsync(CancellationToken ct)
     {

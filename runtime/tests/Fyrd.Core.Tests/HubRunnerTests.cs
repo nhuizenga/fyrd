@@ -89,6 +89,58 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_ArchivedThenRestored_NoRecapture()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("role", "Once only."));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", "archived", role: "builder"));
+        await runner.PollOnceAsync(default);
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        await runner.PollOnceAsync(default);
+
+        Assert.Single(_memory.List("builder"));
+    }
+
+    [Fact]
+    public async Task Poll_EmptyListingThenBack_NoRecapture()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("role", "Once only."));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+
+        _cloud.SetByTag("fyrd-hub");
+        await runner.PollOnceAsync(default);
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        await runner.PollOnceAsync(default);
+
+        Assert.Single(_memory.List("builder"));
+    }
+
+    [Fact]
+    public async Task Poll_CaptureFailsMidBatch_EarlierEntriesNotReadded()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "First."));
+        _cloud.AddAssistantEvent("s1", "e2", Remember("role", "Second."));
+        // A directory where the builder scope file belongs makes that write fail.
+        var blocker = Path.Combine(_home.Paths.HubMemoryDir, "builder.json");
+        Directory.CreateDirectory(blocker);
+        var runner = Make();
+
+        await runner.PollOnceAsync(default);
+        Assert.Contains("s1", _state.LastError);
+        Directory.Delete(blocker);
+        await runner.PollOnceAsync(default);
+
+        Assert.Equal("First.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Equal("Second.", Assert.Single(_memory.List("builder")).Text);
+    }
+
+    [Fact]
     public async Task Poll_ControllerRoleScope_GoesToShared()
     {
         _cloud.SetByTag("fyrd-hub", Hub("ctl", "controller", role: "controller", controller: true));

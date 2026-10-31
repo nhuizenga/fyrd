@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Fyrd.Core.CloudSessions;
@@ -112,7 +110,7 @@ public sealed partial class HubRunner(
             var idx = fetched.FindIndex(e => e.Uuid == cursor);
             fresh = idx >= 0 ? fetched.Skip(idx + 1) : [];
         }
-        Capture(s, fresh);
+        Capture(s, fresh, cursors);
         if (fetched.Count > 0 && fetched[^1].Uuid is { Length: > 0 } last && (!cursors.TryGetValue(s.Id, out var c) || c != last))
         {
             cursors[s.Id] = last;
@@ -145,7 +143,8 @@ public sealed partial class HubRunner(
         return events;
     }
 
-    private void Capture(CloudSession s, IEnumerable<SessionEvent> events)
+    /// <summary>Persists the cursor after each event that added memory, so a later failure never re-adds it.</summary>
+    private void Capture(CloudSession s, IEnumerable<SessionEvent> events, Dictionary<string, string> cursors)
     {
         var role = Role(s);
         var isController = s.Tags.Contains(ControllerTag) || role == ControllerRole;
@@ -153,6 +152,7 @@ public sealed partial class HubRunner(
         foreach (var e in events)
         {
             if (e.Type != "assistant" || string.IsNullOrEmpty(e.Text)) continue;
+            var added = false;
             foreach (var d in RememberBlock.Parse(e.Text))
             {
                 string? scope = d.Scope == "shared" || isController ? HubMemory.Shared
@@ -160,6 +160,12 @@ public sealed partial class HubRunner(
                     : null;
                 if (scope is null) continue;
                 memory.Add(scope, d.Text, source, e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt);
+                added = true;
+            }
+            if (added && e.Uuid.Length > 0)
+            {
+                cursors[s.Id] = e.Uuid;
+                SaveCursors();
             }
         }
     }
@@ -168,21 +174,18 @@ public sealed partial class HubRunner(
     {
         if (controller.CurrentId is not { } controllerId) return;
         var text = HubPrompt.MemoryUpdate(memory, personas.List());
-        // Same hash as ControllerManager.MemoryHash, taken over the exact text sent.
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+        // Hashed over the exact text sent, so a concurrent memory edit cannot be marked as posted.
+        var hash = ControllerManager.Hash(text);
         if (hash == controller.PostedMemoryHash) return;
         await cloud.SendMessageAsync(controllerId, text, ct);
         controller.PostedMemoryHash = hash;
     }
 
+    /// <summary>Drops in-memory windows only. Persisted memory cursors are never pruned: a session that is archived and
+    /// restored, or missing from one listing, must not have its history captured again.</summary>
     private void Prune(HashSet<string> live)
     {
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
-        var cursors = Cursors();
-        var stale = cursors.Keys.Where(id => !live.Contains(id)).ToList();
-        if (stale.Count == 0) return;
-        foreach (var id in stale) cursors.Remove(id);
-        SaveCursors();
     }
 
     private static HubSessionView View(CloudSession s, DateTimeOffset? lastActivity)
