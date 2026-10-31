@@ -16,7 +16,7 @@ internal static class InboxEndpoints
         group.MapPost("/{id}/answer", (string id, AnswerRequest? body, InboxStore inbox, LeadRelay relay, CancellationToken ct) => ApiErrors.RunAsync(async () =>
         {
             var card = inbox.Answer(id, body?.Text ?? "", body?.Remember ?? true, body?.Scope ?? MemoryScope.Repo);
-            return await RelayOnce(inbox, relay, inbox.SetRelay(card.Id, "pending", null), ct);
+            return await RelayOnce(inbox, relay, card, ct);
         }));
 
         group.MapPost("/{id}/relay", (string id, InboxStore inbox, LeadRelay relay, CancellationToken ct) => ApiErrors.RunAsync(async () =>

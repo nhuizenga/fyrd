@@ -38,8 +38,9 @@ public sealed class SpecRunner(
                 lastError = $"{spec.Id}: {e.Message}";
             }
         }
-        lastError ??= await RetryRelaysAsync(ct);
-        lastError ??= await ReconcileLaunchesAsync(ct);
+        var relayErr = await RetryRelaysAsync(ct);
+        var launchErr = await ReconcileLaunchesAsync(ct);
+        lastError ??= relayErr ?? launchErr;
         state.SignedOut = false;
         state.LastError = lastError ?? warning;
         state.LastPollAt = time.GetUtcNow();
@@ -49,9 +50,11 @@ public sealed class SpecRunner(
     private async Task<string?> RetryRelaysAsync(CancellationToken ct)
     {
         string? error = null;
+        var active = specs.ListActive().Where(s => !string.IsNullOrEmpty(s.SessionId)).Select(s => s.Id).ToHashSet();
         foreach (var card in inbox.ListRelaysToRetry())
         {
             ct.ThrowIfCancellationRequested();
+            if (!active.Contains(card.SpecId)) continue;
             try
             {
                 var e = await relay.DeliverAsync(card, ct);

@@ -195,6 +195,18 @@ public class InboxStoreTests
     }
 
     [Fact]
+    public void Answer_KeyedCard_IsPendingImmediately_UnkeyedIsNot()
+    {
+        var (s, home, spec) = Make();
+        using var _ = home;
+        var keyed = AnsweredKeyed(s, spec);
+        Assert.Equal("pending", keyed.Answer!.RelayStatus);
+        Assert.Equal(keyed.Id, Assert.Single(s.ListRelaysToRetry()).Id);
+        var plain = s.Answer(AddCard(s, spec).Id, "x", remember: false);
+        Assert.Null(plain.Answer!.RelayStatus);
+    }
+
+    [Fact]
     public void SetRelay_FailedIncrementsAttempts()
     {
         var (s, home, spec) = Make();

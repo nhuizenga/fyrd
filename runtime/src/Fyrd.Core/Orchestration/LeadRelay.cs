@@ -17,8 +17,11 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState
         lock (_inFlight) if (!_inFlight.Add(card.Id)) return null;
         try
         {
-            await RelayAnswerAsync(card, ct);
-            inbox.SetRelay(card.Id, "sent", null);
+            // The caller's snapshot may be stale: someone else may have delivered it since.
+            try { card = inbox.Get(card.Id); }
+            catch (KeyNotFoundException) { return null; }
+            if (card.Answer?.RelayStatus == "sent") return null;
+            if (await RelayAnswerAsync(card, ct)) inbox.SetRelay(card.Id, "sent", null);
             return null;
         }
         catch (Exception e) when (e is not OperationCanceledException)
@@ -34,21 +37,23 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState
 
     private const string AttentionPrefix = "attention:";
 
-    public async Task RelayAnswerAsync(InboxCard answered, CancellationToken ct)
+    /// <summary>Sends the answer to the spec's lead; false when there was nothing to send to.</summary>
+    public async Task<bool> RelayAnswerAsync(InboxCard answered, CancellationToken ct)
     {
-        if (answered.Answer is null || string.IsNullOrEmpty(answered.SourceKey)) return;
+        if (answered.Answer is null || string.IsNullOrEmpty(answered.SourceKey)) return false;
         var sep = answered.SourceKey.IndexOf(':');
-        if (sep <= 0) return;
+        if (sep <= 0) return false;
         var specId = answered.SourceKey[..sep];
         var rest = answered.SourceKey[(sep + 1)..];
         var sessionId = specs.Get(specId)?.SessionId;
-        if (string.IsNullOrEmpty(sessionId)) return;
+        if (string.IsNullOrEmpty(sessionId)) return false;
 
         var text = rest.StartsWith(AttentionPrefix, StringComparison.Ordinal)
             ? answered.Answer.Text
             : Protocol.FormatAnswer(rest, answered.Answer.Text);
         await cloud.SendMessageAsync(sessionId, text, ct);
         state.ClearQuestionFlag(specId);
+        return true;
     }
 
     public async Task RelayConfigAsync(int squadCap, CancellationToken ct)

@@ -202,6 +202,61 @@ public class SpecRunnerTests
         Assert.Equal("sent", r.Inbox.Get(q.Id).Answer!.RelayStatus);
     }
 
+    [Fact]
+    public async Task Poll_SpecErrors_StillRetriesRelayAndReconciles()
+    {
+        using var r = new Rig();
+        var ok = r.NewSpec("Other spec", "leadok");
+        var q = r.Inbox.Add(ok, null, "Pick?", [], null, null, null, true, ok + ":q1");
+        r.Inbox.Answer(q.Id, "blue");
+        var stale = r.Specs.Create("Stale one", "owner/repo", "x").Id;
+        r.Specs.UpdateStatus(stale, SpecStatus.Queued);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("poll boom")); // the spec poll errors
+        await r.Runner.PollOnceAsync(default);
+        Assert.NotNull(r.State.LastError);
+        Assert.Single(r.Cloud.Sent);
+        Assert.Equal(SpecStatus.Draft, r.Specs.Get(stale)!.Status);
+    }
+
+    [Fact]
+    public async Task Deliver_NoLeadSession_NothingSent_StaysPending()
+    {
+        using var r = new Rig();
+        var id = r.Specs.Create("No lead", "owner/repo", "x").Id;
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var card = r.Inbox.Answer(q.Id, "blue");
+        Assert.Null(await r.Relay.DeliverAsync(card, default));
+        Assert.Empty(r.Cloud.Sent);
+        Assert.Equal("pending", r.Inbox.Get(q.Id).Answer!.RelayStatus);
+    }
+
+    [Fact]
+    public async Task Poll_StaleSnapshot_DoesNotResendDeliveredCard()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        var snapshot = r.Inbox.Answer(q.Id, "blue");
+        r.Inbox.SetRelay(q.Id, "sent", null);
+        Assert.Null(await r.Relay.DeliverAsync(snapshot, default));
+        Assert.Empty(r.Cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_InactiveSpec_PendingCardNotSent()
+    {
+        using var r = new Rig();
+        var id = r.NewSpec();
+        var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
+        r.Inbox.Answer(q.Id, "blue");
+        r.Specs.Finish(id, SpecStatus.ReadyForHandoff, "b", null);
+        await r.Runner.PollOnceAsync(default);
+        Assert.Empty(r.Cloud.Sent);
+        var a = r.Inbox.Get(q.Id).Answer!;
+        Assert.Equal(("pending", 0), (a.RelayStatus, a.RelayAttempts));
+    }
+
     private static string StaleSpec(Rig r, SpecStatus status)
     {
         var id = r.Specs.Create("Add export button", "owner/repo", "x").Id;

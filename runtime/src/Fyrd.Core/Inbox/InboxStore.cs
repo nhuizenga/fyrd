@@ -66,7 +66,8 @@ public sealed partial class InboxStore(FyrdPaths paths, SpecStore specs, Decisio
                     ?? throw new KeyNotFoundException($"Spec '{card.SpecId}' not found.");
                 memory.Record(repo, scope, card.Question, text, now, card.SpecId);
             }
-            var answered = card with { Answer = new CardAnswer(text, remember, scope, now) };
+            var answered = card with { Answer = new CardAnswer(text, remember, scope, now,
+                RelayStatus: string.IsNullOrEmpty(card.SourceKey) ? null : "pending") };
             Write(answered);
             return answered;
         }
