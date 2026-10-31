@@ -19,6 +19,10 @@ public sealed class OwnerProxy(FyrdPaths paths)
         - (List the things the team must never do.)
         """;
 
+    /// <summary>True when the text is still the untouched starter template (line endings and outer whitespace ignored).</summary>
+    public static bool IsTemplate(string text) =>
+        text.ReplaceLineEndings("\n").Trim() == Template.ReplaceLineEndings("\n").Trim();
+
     private readonly object _gate = new();
     private string FilePath => Path.Combine(paths.MemoryDir, "owner-proxy.md");
 

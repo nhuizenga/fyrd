@@ -46,7 +46,7 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState
         var specId = answered.SourceKey[..sep];
         var rest = answered.SourceKey[(sep + 1)..];
         var sessionId = specs.Get(specId)?.SessionId;
-        if (string.IsNullOrEmpty(sessionId)) return false;
+        if (string.IsNullOrEmpty(sessionId) || specs.ListActive().All(r => r.Id != specId)) return false;
 
         var text = rest.StartsWith(AttentionPrefix, StringComparison.Ordinal)
             ? answered.Answer.Text
@@ -60,7 +60,7 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState
     {
         var message = Protocol.FormatConfig(squadCap);
         foreach (var run in specs.ListActive())
-            if (!string.IsNullOrEmpty(run.SessionId))
+            if (run.Status != SpecStatus.Researching && !string.IsNullOrEmpty(run.SessionId))
                 await cloud.SendMessageAsync(run.SessionId, message, ct);
     }
 }

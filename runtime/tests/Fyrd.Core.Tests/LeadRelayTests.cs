@@ -57,6 +57,25 @@ public class LeadRelayTests
     }
 
     [Fact]
+    public async Task RelayAnswer_InactiveSpec_SendsNothing()
+    {
+        using var h = new TempHome(); var (specs, cloud, relay, run) = Setup(h);
+        specs.Finish(run.Id, SpecStatus.ReadyForHandoff, "b", null);
+        Assert.False(await relay.RelayAnswerAsync(Card(run.Id, run.Id + ":q1"), default));
+        Assert.Empty(cloud.Sent);
+    }
+
+    [Fact]
+    public async Task RelayConfig_SkipsResearchLeads()
+    {
+        using var h = new TempHome(); var (specs, cloud, relay, run) = Setup(h);
+        var research = specs.Create("Research it", Repo, "x");
+        specs.SetResearchLead(research.Id, "sess-research");
+        await relay.RelayConfigAsync(6, default);
+        Assert.Equal("sess-" + run.Id, Assert.Single(cloud.Sent).SessionId);
+    }
+
+    [Fact]
     public async Task RelayConfig_OnlyActiveLeads()
     {
         using var h = new TempHome(); var (specs, cloud, relay, run) = Setup(h);

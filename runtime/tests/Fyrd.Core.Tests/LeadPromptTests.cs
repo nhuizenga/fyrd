@@ -92,6 +92,21 @@ public class LeadPromptTests
     }
 
     [Fact]
+    public void Build_TemplateProxyIsNoneYet()
+    {
+        using var h = new TempHome();
+        var template = new OwnerProxy(h.Paths).Read();
+        Assert.True(OwnerProxy.IsTemplate(template));
+        Assert.True(OwnerProxy.IsTemplate(template.ReplaceLineEndings("\r\n") + "\n\n"));
+        Assert.False(OwnerProxy.IsTemplate(template + "- never force push"));
+        var personas = Personas.Load(Path.Combine(Repo(), "personas"));
+        var lead = LeadPrompt.Build(Run, "S", "M", Cfg, personas, template);
+        Assert.Contains("<owner-preferences>\n(none yet)\n</owner-preferences>", lead.ReplaceLineEndings("\n"));
+        var research = LeadPrompt.BuildResearch(Run, "S", "M", template, Cfg, personas);
+        Assert.Contains("<owner-preferences>\n(none yet)\n</owner-preferences>", research.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Build_InjectsSquadCapAndMemory()
     {
         var text = Shipped(memory: "Prefer tabs over spaces.");

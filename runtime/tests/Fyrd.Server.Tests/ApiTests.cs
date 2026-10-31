@@ -555,6 +555,48 @@ public class ApiTests
     }
 
     [Fact]
+    public async Task PutMemory_StaleVersion_Returns409()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var v0 = (await ReadJson(await c.GetAsync("/api/memory"))).GetProperty("globalVersion").GetString();
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/global", new { text = "newer" })).StatusCode);
+        var r = await c.PutAsJsonAsync("/api/memory/global", new { text = "mine", baseVersion = v0 });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("This file changed since you loaded it", await r.Content.ReadAsStringAsync());
+        Assert.Equal("newer", (await ReadJson(await c.GetAsync("/api/memory"))).GetProperty("global").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_MatchingVersion_Saves()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/repo?repo=" + Repo, new { text = "one" })).StatusCode);
+        var got = await ReadJson(await c.GetAsync("/api/memory"));
+        var repo = Assert.Single(got.GetProperty("repos").EnumerateArray());
+        var version = repo.GetProperty("version").GetString();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PutAsJsonAsync("/api/memory/repo?repo=" + Repo, new { text = "two", baseVersion = version })).StatusCode);
+        var ownerVersion = got.GetProperty("ownerProxyVersion").GetString();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PutAsJsonAsync("/api/memory/owner-proxy", new { text = "own", baseVersion = ownerVersion })).StatusCode);
+        var after = await ReadJson(await c.GetAsync("/api/memory"));
+        Assert.Equal("two", Assert.Single(after.GetProperty("repos").EnumerateArray()).GetProperty("text").GetString());
+        Assert.Equal("own", after.GetProperty("ownerProxy").GetString());
+    }
+
+    [Fact]
+    public async Task PutMemory_NoVersion_Overwrites()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await c.PutAsJsonAsync("/api/memory/global", new { text = "a" });
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PutAsJsonAsync("/api/memory/global", new { text = "b" })).StatusCode);
+        Assert.Equal("b", (await ReadJson(await c.GetAsync("/api/memory"))).GetProperty("global").GetString());
+    }
+
+    [Fact]
     public async Task PutMemory_TooLarge_Returns400()
     {
         using var f = new FyrdFactory();

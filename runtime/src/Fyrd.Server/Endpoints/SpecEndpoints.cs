@@ -48,11 +48,11 @@ internal static class SpecEndpoints
                 return Results.Problem("Set the cloud environment in Settings", statusCode: StatusCodes.Status409Conflict);
             if (personas.Value is null)
                 return Results.Problem($"Personas not found at {personas.Dir}", statusCode: StatusCodes.Status409Conflict);
-            if (run.HasProposal)
-                return Results.Problem("Review the research proposal first", statusCode: StatusCodes.Status409Conflict);
             var launcher = sp.GetRequiredService<SpecLauncher>();
-            if (!specs.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued))
-                return Results.Problem($"Spec '{id}' is not Draft.", statusCode: StatusCodes.Status409Conflict);
+            if (specs.TryClaim(id, SpecStatus.Queued) is null)
+                return specs.Get(id)?.HasProposal == true
+                    ? Results.Problem("Review the research proposal first", statusCode: StatusCodes.Status409Conflict)
+                    : Results.Problem($"Spec '{id}' is not Draft.", statusCode: StatusCodes.Status409Conflict);
             return await Launch(() => launcher.LaunchAsync(id, ct), "Timed out creating the lead session", ct);
         }));
 
@@ -65,11 +65,11 @@ internal static class SpecEndpoints
                 return Results.Problem("Set the cloud environment in Settings", statusCode: StatusCodes.Status409Conflict);
             if (personas.Value is null)
                 return Results.Problem($"Personas not found at {personas.Dir}", statusCode: StatusCodes.Status409Conflict);
-            if (run.HasProposal)
-                return Results.Problem("Review the research proposal first", statusCode: StatusCodes.Status409Conflict);
             var launcher = sp.GetRequiredService<SpecLauncher>();
-            if (!specs.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching))
-                return Results.Problem($"Spec '{id}' is not Draft.", statusCode: StatusCodes.Status409Conflict);
+            if (specs.TryClaim(id, SpecStatus.Researching) is null)
+                return specs.Get(id)?.HasProposal == true
+                    ? Results.Problem("Review the research proposal first", statusCode: StatusCodes.Status409Conflict)
+                    : Results.Problem($"Spec '{id}' is not Draft.", statusCode: StatusCodes.Status409Conflict);
             return await Launch(() => launcher.LaunchResearchAsync(id, ct), "Timed out creating the research session", ct);
         }));
 

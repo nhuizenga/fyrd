@@ -178,6 +178,29 @@ public class SpecStoreTests
     }
 
     [Fact]
+    public void TryClaim_WithProposal_Fails()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        Propose(s, id, "# new", "sum", [], "sess1");
+        Assert.Null(s.TryClaim(id, SpecStatus.Queued));
+        Assert.Equal(SpecStatus.Draft, s.Get(id)!.Status);
+    }
+
+    [Fact]
+    public void TryClaim_ClearsOldSessionAndError()
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "x").Id;
+        s.SetResearchLead(id, "rl1"); s.SetCursor(id, "e9");
+        s.Finish(id, SpecStatus.Draft, null, "old error");
+        var run = s.TryClaim(id, SpecStatus.Queued)!;
+        Assert.Equal(SpecStatus.Queued, run.Status);
+        Assert.Null(run.SessionId); Assert.Null(run.LastEventId); Assert.Null(run.Error);
+        Assert.Null(s.TryClaim(id, SpecStatus.Queued)); // no longer Draft
+    }
+
+    [Fact]
     public void TryTransition_Concurrent_OnlyOneWins()
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");

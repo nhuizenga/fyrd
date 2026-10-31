@@ -16,6 +16,9 @@ public sealed class SpecRunner(
 
     private const string AttentionPrefix = "Lead needs attention: ";
 
+    private static string? JoinErrors(string? a, string? b) =>
+        a is null ? b : b is null ? a : $"{a}; {b}";
+
     public async Task PollOnceAsync(CancellationToken ct)
     {
         string? lastError = null;
@@ -41,7 +44,7 @@ public sealed class SpecRunner(
         }
         var relayErr = await RetryRelaysAsync(ct);
         var launchErr = await ReconcileLaunchesAsync(ct);
-        lastError ??= relayErr ?? launchErr;
+        lastError ??= JoinErrors(relayErr, launchErr);
         state.SignedOut = false;
         state.LastError = lastError ?? warning;
         state.LastPollAt = time.GetUtcNow();

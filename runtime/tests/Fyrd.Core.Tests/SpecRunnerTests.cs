@@ -220,6 +220,26 @@ public class SpecRunnerTests
     }
 
     [Fact]
+    public async Task Poll_RelayAndLaunchErrors_AreJoined()
+    {
+        using var r = new Rig();
+        var ok = r.NewSpec("Other spec", "leadok");
+        var q = r.Inbox.Add(ok, null, "Pick?", [], null, null, null, true, ok + ":q1");
+        r.Inbox.Answer(q.Id, "blue");
+        r.Specs.UpdateStatus(r.Specs.Create("Stale one", "owner/repo", "x").Id, SpecStatus.Queued);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        r.Cloud.SkipCalls(SkippedPollCalls); // the healthy spec poll
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("relay boom"));
+        r.Cloud.ThrowOnNextCall(new HttpRequestException("launch boom"));
+        await r.Runner.PollOnceAsync(default);
+        var error = r.State.LastError!;
+        Assert.Contains("relay boom", error);
+        Assert.Contains("launch boom", error);
+    }
+
+    private const int SkippedPollCalls = 3;
+
+    [Fact]
     public async Task Deliver_NoLeadSession_NothingSent_StaysPending()
     {
         using var r = new Rig();
@@ -528,6 +548,43 @@ public class SpecRunnerTests
         r.Specs.SetResearchLead(id, "rl1");
         r.Cloud.SetSession(FakeCloudSessions.Session("rl1", "running"));
         return id;
+    }
+
+    private static async Task<string> ResearchToDraftAsync(Rig r)
+    {
+        var id = ResearchSpec(r);
+        r.Cloud.AddAssistantEvent("rl1", "e1", Draft("{\"markdown\":\"# S\",\"summary\":\"sum\",\"openQuestions\":[]}"));
+        await r.Runner.PollOnceAsync(default);
+        r.Specs.DiscardProposal(id);
+        return id;
+    }
+
+    [Fact]
+    public async Task Attack_AfterResearch_ClearsOldSession()
+    {
+        using var r = new Rig();
+        var id = await ResearchToDraftAsync(r);
+        var run = r.Specs.TryClaim(id, SpecStatus.Queued)!;
+        Assert.Null(run.SessionId);
+        Assert.Null(run.LastEventId);
+        var calls = r.Cloud.EventAfterIds.Count;
+        r.Cloud.SetSession(FakeCloudSessions.Session("rl1", "idle", needsAction: "waiting"));
+        await r.Runner.PollOnceAsync(default);
+        Assert.Equal(calls, r.Cloud.EventAfterIds.Count);
+        Assert.Empty(r.Inbox.ListOpen());
+    }
+
+    [Fact]
+    public async Task Reconcile_AfterResearch_RevertsToDraft()
+    {
+        using var r = new Rig();
+        var id = await ResearchToDraftAsync(r);
+        r.Specs.TryClaim(id, SpecStatus.Researching);
+        r.Time.Advance(TimeSpan.FromMinutes(3));
+        await r.Runner.PollOnceAsync(default);
+        var run = r.Specs.Get(id)!;
+        Assert.Equal(SpecStatus.Draft, run.Status);
+        Assert.Equal("Launch interrupted; try again", run.Error);
     }
 
     [Fact]

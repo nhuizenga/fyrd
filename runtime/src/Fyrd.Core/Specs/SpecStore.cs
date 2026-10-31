@@ -90,6 +90,22 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
         }
     }
 
+    /// <summary>
+    /// Claims a Draft for a new launch: requires Draft with no pending proposal, and clears the previous run's
+    /// session, cursor and error in the same write. Null when the spec is not claimable.
+    /// </summary>
+    public SpecRun? TryClaim(string id, SpecStatus to)
+    {
+        lock (_gate)
+        {
+            var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != SpecStatus.Draft || run.HasProposal) return null;
+            var claimed = run with { Status = to, SessionId = null, LastEventId = null, Error = null };
+            WriteRun(claimed, id);
+            return claimed;
+        }
+    }
+
     public SpecRun SetLead(string id, string sessionId) =>
         Mutate(id, r => r with { SessionId = sessionId, Status = SpecStatus.Building, LastEventId = null });
 

@@ -9,7 +9,7 @@ public sealed class FakeCloudSessions : ICloudSessions
     private readonly Dictionary<string, List<SessionEvent>> _events = new();
     private readonly Dictionary<string, CloudSession> _sessions = new();
     private readonly Dictionary<string, List<CloudSession>> _byTag = new();
-    private Exception? _next;
+    private readonly Queue<Exception?> _next = new();
     private readonly object _createGate = new();
 
     /// <summary>Events returned per call; a smaller value forces multi-page listing.</summary>
@@ -21,8 +21,11 @@ public sealed class FakeCloudSessions : ICloudSessions
     public List<string> Interrupted { get; } = [];
     public List<string> Archived { get; } = [];
 
-    /// <summary>The next call to any method throws this once, then the fake behaves normally again.</summary>
-    public void ThrowOnNextCall(Exception e) => _next = e;
+    /// <summary>The next call to any method throws this once (calls queue in order), then the fake behaves normally again.</summary>
+    public void ThrowOnNextCall(Exception e) => _next.Enqueue(e);
+
+    /// <summary>The next <paramref name="n"/> calls succeed; use before <see cref="ThrowOnNextCall"/> to fail a later call.</summary>
+    public void SkipCalls(int n) { for (var i = 0; i < n; i++) _next.Enqueue(null); }
 
     public void AddEvent(string sessionId, SessionEvent e)
     {
@@ -50,10 +53,8 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     private void MaybeThrow()
     {
-        if (_next is null) return;
-        var e = _next;
-        _next = null;
-        throw e;
+        if (_next.Count == 0) return;
+        if (_next.Dequeue() is { } e) throw e;
     }
 
     public Task<CloudSession> CreateAsync(CreateSessionRequest request, CancellationToken ct = default)
