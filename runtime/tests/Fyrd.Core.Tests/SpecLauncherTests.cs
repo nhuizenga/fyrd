@@ -19,7 +19,8 @@ public class SpecLauncherTests : IDisposable
         _config = new ConfigStore(_home.Paths);
         _config.Save(new FyrdConfig(SquadCap: 3, EnvironmentId: "env_abc"));
         var personas = new Personas("LEAD {{SPEC_ID}} {{ENVIRONMENT_ID}}", "I", "R", "V");
-        _launcher = new SpecLauncher(_specs, _config, new DecisionMemory(_home.Paths), _cloud, personas);
+        _launcher = new SpecLauncher(_specs, _config, new DecisionMemory(_home.Paths), _cloud, personas,
+            new OwnerProxy(_home.Paths));
     }
 
     public void Dispose() => _home.Dispose();

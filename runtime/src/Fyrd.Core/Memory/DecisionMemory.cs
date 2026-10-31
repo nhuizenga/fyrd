@@ -27,6 +27,33 @@ public sealed partial class DecisionMemory(FyrdPaths paths)
         return global + repoText;
     }
 
+    public string ReadFile(MemoryScope scope, string? repo) => ReadIfExists(FileForScope(scope, repo));
+
+    public void WriteFile(MemoryScope scope, string? repo, string text)
+    {
+        var file = FileForScope(scope, repo);
+        lock (_gate) AtomicFile.Write(file, text);
+    }
+
+    /// <summary>Repos that have a memory file, as owner/repo.</summary>
+    public IReadOnlyList<string> ListRepos()
+    {
+        var repos = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(paths.MemoryDir, "*__*.md"))
+        {
+            var name = Path.GetFileNameWithoutExtension(file);
+            var i = name.IndexOf("__", StringComparison.Ordinal);
+            var repo = name[..i] + "/" + name[(i + 2)..];
+            if (RepoPattern().IsMatch(repo)) repos.Add(repo);
+        }
+        repos.Sort(StringComparer.Ordinal);
+        return repos;
+    }
+
+    private string FileForScope(MemoryScope scope, string? repo) =>
+        scope == MemoryScope.Global ? Path.Combine(paths.MemoryDir, GlobalFile)
+        : FileFor(repo ?? throw new ArgumentException("A repo is required for repo scope.", nameof(repo)), scope);
+
     private string FileFor(string repo, MemoryScope scope)
     {
         if (scope == MemoryScope.Global) return Path.Combine(paths.MemoryDir, GlobalFile);

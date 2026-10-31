@@ -35,4 +35,30 @@ public class DecisionMemoryTests
         Assert.Throws<ArgumentException>(() =>
             new DecisionMemory(home.Paths).Record(repo, MemoryScope.Repo, "q", "a", T, "s1"));
     }
+
+    [Fact]
+    public void WriteFile_RoundTripsCrlfAndUnicode()
+    {
+        using var home = new TempHome();
+        var m = new DecisionMemory(home.Paths);
+        const string text = "a\r\nb \u00e9\u4e2d\U0001F600\r\n";
+        m.WriteFile(MemoryScope.Global, null, text);
+        m.WriteFile(MemoryScope.Repo, "o/r", text + "x");
+        Assert.Equal(text, m.ReadFile(MemoryScope.Global, null));
+        Assert.Equal(text + "x", m.ReadFile(MemoryScope.Repo, "o/r"));
+        Assert.Throws<ArgumentException>(() => m.WriteFile(MemoryScope.Repo, null, "x"));
+        Assert.Throws<ArgumentException>(() => m.WriteFile(MemoryScope.Repo, "../..", "x"));
+    }
+
+    [Fact]
+    public void ListRepos_FromFiles()
+    {
+        using var home = new TempHome();
+        var m = new DecisionMemory(home.Paths);
+        m.WriteFile(MemoryScope.Global, null, "g");
+        new OwnerProxy(home.Paths).Read();
+        m.WriteFile(MemoryScope.Repo, "b/two", "x");
+        m.WriteFile(MemoryScope.Repo, "a/one", "x");
+        Assert.Equal(new[] { "a/one", "b/two" }, m.ListRepos());
+    }
 }
