@@ -20,6 +20,7 @@ public sealed class FakeCloudSessions : ICloudSessions
     public List<string?> EventAfterIds { get; } = [];
     public List<string> Interrupted { get; } = [];
     public List<string> Archived { get; } = [];
+    public List<(string SessionId, Fyrd.Core.Hub.HubQuestion Question, IReadOnlyDictionary<string, string> Answers)> Answered { get; } = [];
 
     /// <summary>The next call to any method throws this once (calls queue in order), then the fake behaves normally again.</summary>
     public void ThrowOnNextCall(Exception e) => _next.Enqueue(e);
@@ -124,6 +125,14 @@ public sealed class FakeCloudSessions : ICloudSessions
     {
         MaybeThrow();
         Archived.Add(sessionId);
+        return Task.CompletedTask;
+    }
+
+    public Task AnswerQuestionAsync(
+        string sessionId, Fyrd.Core.Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default)
+    {
+        MaybeThrow();
+        Answered.Add((sessionId, question, answers));
         return Task.CompletedTask;
     }
 }

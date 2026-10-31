@@ -153,6 +153,39 @@ public sealed partial class CloudSessionClient : ICloudSessions
         using var _ = await SendAsync(HttpMethod.Post, $"/v1/code/sessions/{sessionId}/archive", new JsonObject(), ct);
     }
 
+    public async Task AnswerQuestionAsync(
+        string sessionId, Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default)
+    {
+        ValidateSessionId(sessionId);
+        var updatedInput = question.Input.ValueKind == JsonValueKind.Object
+            ? JsonNode.Parse(question.Input.GetRawText())!.AsObject()
+            : new JsonObject();
+        var answerNode = new JsonObject();
+        foreach (var (q, a) in answers) answerNode[q] = a;
+        updatedInput["answers"] = answerNode;
+
+        var controlResponse = new JsonObject
+        {
+            ["type"] = "control_response",
+            ["response"] = new JsonObject
+            {
+                ["subtype"] = "success",
+                ["request_id"] = question.RequestId,
+                ["response"] = new JsonObject
+                {
+                    ["behavior"] = "allow",
+                    ["toolUseID"] = question.ToolUseId,
+                    ["tool_name"] = "AskUserQuestion",
+                    ["updatedInput"] = updatedInput,
+                },
+            },
+        };
+        var body = new JsonObject { ["events"] = new JsonArray(new JsonObject { ["payload"] = controlResponse }) };
+        // The /v1/code route takes the cse_ form of the id; the suffix is the same.
+        var cseId = "cse_" + sessionId["session_".Length..];
+        using var _ = await SendAsync(HttpMethod.Post, $"/v1/code/sessions/{cseId}/events", body, ct);
+    }
+
     private static void ValidateSessionId(string sessionId)
     {
         if (sessionId is null || !SessionIdPattern().IsMatch(sessionId))

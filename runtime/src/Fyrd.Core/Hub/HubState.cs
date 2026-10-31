@@ -35,7 +35,16 @@ public sealed class HubState
 
     public void Publish(IReadOnlyList<HubSessionView> sessions, IReadOnlyList<HubQuestion> questions)
     {
-        _sessions = sessions.ToArray();
-        _questions = questions.ToArray();
+        lock (_gate)
+        {
+            _sessions = sessions.ToArray();
+            _questions = questions.ToArray();
+        }
+    }
+
+    /// <summary>Drops one question (it was just answered) so readers stop showing it before the next poll.</summary>
+    public void RemoveQuestion(string id)
+    {
+        lock (_gate) _questions = _questions.Where(q => q.Id != id).ToArray();
     }
 }

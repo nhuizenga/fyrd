@@ -13,4 +13,11 @@ public interface ICloudSessions
     Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default);
     Task InterruptAsync(string sessionId, CancellationToken ct = default);
     Task ArchiveAsync(string sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Answers a pending <c>AskUserQuestion</c> by posting a <c>control_response</c> to its <c>can_use_tool</c> request.
+    /// <paramref name="answers"/> maps question text to the chosen option label (or free text).
+    /// </summary>
+    Task AnswerQuestionAsync(
+        string sessionId, Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default);
 }

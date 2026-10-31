@@ -268,6 +268,49 @@ public sealed class CloudSessionClientTests : IDisposable
     }
 
     [Fact]
+    public async Task AnswerQuestion_PostsSpikeShape()
+    {
+        var input = JsonDocument.Parse(
+            """{"questions":[{"question":"Pick a fruit","header":"Fruit","multiSelect":false,"options":[{"label":"Apple"},{"label":"Banana"}]}]}""")
+            .RootElement.Clone();
+        var q = new Fyrd.Core.Hub.HubQuestion("q1", "session_01abc", "builder-x", "Pick a fruit", ["Apple", "Banana"], false,
+            DateTimeOffset.UnixEpoch, "toolu_9", "req_7", input);
+        var h = new FakeHandler(HttpStatusCode.OK, "{}");
+        await Client(h).AnswerQuestionAsync("session_01abc", q, new Dictionary<string, string> { ["Pick a fruit"] = "Banana" });
+
+        var r = Assert.Single(h.Requests);
+        Assert.Equal(HttpMethod.Post, r.Request.Method);
+        Assert.Equal("https://api.anthropic.com/v1/code/sessions/cse_01abc/events", r.Request.RequestUri!.ToString());
+        Assert.Equal("Bearer tok", r.Request.Headers.Authorization!.ToString());
+
+        var ev = Assert.Single(JsonDocument.Parse(r.Body!).RootElement.GetProperty("events").EnumerateArray());
+        var payload = ev.GetProperty("payload");
+        Assert.Equal("control_response", payload.GetProperty("type").GetString());
+        var resp = payload.GetProperty("response");
+        Assert.Equal("success", resp.GetProperty("subtype").GetString());
+        Assert.Equal("req_7", resp.GetProperty("request_id").GetString());
+        var inner = resp.GetProperty("response");
+        Assert.Equal("allow", inner.GetProperty("behavior").GetString());
+        Assert.Equal("toolu_9", inner.GetProperty("toolUseID").GetString());
+        Assert.Equal("AskUserQuestion", inner.GetProperty("tool_name").GetString());
+        var updated = inner.GetProperty("updatedInput");
+        Assert.Equal("Pick a fruit", updated.GetProperty("questions")[0].GetProperty("question").GetString());
+        Assert.Equal(2, updated.GetProperty("questions")[0].GetProperty("options").GetArrayLength());
+        Assert.Equal("Banana", updated.GetProperty("answers").GetProperty("Pick a fruit").GetString());
+    }
+
+    [Fact]
+    public async Task AnswerQuestion_RejectsBadSessionId()
+    {
+        var q = new Fyrd.Core.Hub.HubQuestion("q1", "x", "t", "Q", [], false, DateTimeOffset.UnixEpoch, "t", "r",
+            JsonDocument.Parse("{}").RootElement.Clone());
+        var h = new FakeHandler();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            Client(h).AnswerQuestionAsync("cse_../x", q, new Dictionary<string, string>()));
+        Assert.Empty(h.Requests);
+    }
+
+    [Fact]
     public void Client_ImplementsICloudSessions() =>
         Assert.IsAssignableFrom<ICloudSessions>(Client(new FakeHandler()));
 }

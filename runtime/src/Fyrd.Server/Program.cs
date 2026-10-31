@@ -78,6 +78,7 @@ app.MapInbox();
 app.MapConfig();
 app.MapBoard();
 app.MapMemory();
+app.MapHub();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 
