@@ -121,8 +121,9 @@ public class LeadPromptTests
                      "<spec>\nSPECBODY\n</spec>", "<remembered-decisions>", "<owner-preferences>\nOWNERPREF\n</owner-preferences>",
                      "Never push", "Never open a pull request", "Never create a branch", "archive_session",
                      "lead session id", "never quote or paste a peer's", "user message", "openQuestions",
-                     "Do not set `outcome_branch`", "You are a researcher" })
+                     "Do not set `outcome_branch`", "You are a researcher", "prior art", "test strategy" })
             Assert.Contains(s, text);
+        Assert.DoesNotContain("fyrd-config", text);
     }
 
     [Fact]
@@ -131,7 +132,7 @@ public class LeadPromptTests
         var text = File.ReadAllText(Path.Combine(Repo(), "personas", "researcher.md"));
         Assert.Contains("Never emit any `fyrd-", text);
         Assert.Contains("lead session id", text);
-        Assert.Contains("Never push", text);
+        Assert.Contains("Never commit, push, create branches, or open pull requests; leave the working tree as you found it.", text);
     }
 
     [Fact]

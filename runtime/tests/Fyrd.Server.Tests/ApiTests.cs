@@ -585,7 +585,7 @@ public class ApiTests
         var c = f.CreateClient();
         await SetEnv(c);
         var id = await SeedSpec(c);
-        f.Services.GetRequiredService<SpecStore>().SaveProposal(id, "# n", "s", [], "x");
+        Propose(f.Services.GetRequiredService<SpecStore>(), id, "# n");
         var r = await c.PostAsync($"/api/specs/{id}/research", null);
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Empty(f.Cloud.Created);
@@ -598,7 +598,7 @@ public class ApiTests
         var c = f.CreateClient();
         await SetEnv(c);
         var id = await SeedSpec(c);
-        f.Services.GetRequiredService<SpecStore>().SaveProposal(id, "# n", "s", [], "x");
+        Propose(f.Services.GetRequiredService<SpecStore>(), id, "# n");
         var r = await c.PostAsync($"/api/specs/{id}/attack", null);
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("Review the research proposal first", await r.Content.ReadAsStringAsync());
@@ -614,7 +614,7 @@ public class ApiTests
         var id = await SeedSpec(c);
         Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync($"/api/specs/{id}/proposal")).StatusCode);
         var store = f.Services.GetRequiredService<SpecStore>();
-        store.SaveProposal(id, "# new", "sum", ["q?"], "x");
+        Propose(store, id, "# new");
         var got = await ReadJson(await c.GetAsync($"/api/specs/{id}/proposal"));
         Assert.Equal("# new", got.GetProperty("markdown").GetString());
         var acc = await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { markdown = "# edited" });
@@ -622,7 +622,7 @@ public class ApiTests
         Assert.Equal("# edited", store.ReadMarkdown(id));
         Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsJsonAsync($"/api/specs/{id}/proposal/accept", new { })).StatusCode);
 
-        store.SaveProposal(id, "# again", "sum", [], "x");
+        Propose(store, id, "# again");
         Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/proposal/discard", null)).StatusCode);
         Assert.Null(store.GetProposal(id));
     }
@@ -654,5 +654,12 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = " " })).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/specs/{id}/attack", null)).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await c.PutAsJsonAsync($"/api/specs/{id}/markdown", new { markdown = "# v3" })).StatusCode);
+    }
+
+    private static void Propose(SpecStore store, string id, string markdown)
+    {
+        Assert.True(store.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching));
+        store.SaveProposal(id, markdown, "sum", [], "x");
+        store.Finish(id, SpecStatus.Draft, null, null);
     }
 }

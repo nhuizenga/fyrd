@@ -268,7 +268,7 @@ public class SpecStoreTests
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var id = s.Create("T", Repo, "# old").Id;
         Assert.Null(s.GetProposal(id));
-        s.SaveProposal(id, "# new", "sum", ["q1?"], "sess1");
+        Propose(s, id, "# new", "sum", ["q1?"], "sess1");
         var p = s.GetProposal(id)!;
         Assert.Equal("# new", p.Markdown);
         Assert.Equal("sum", p.Summary);
@@ -285,7 +285,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var id = s.Create("T", Repo, "# old").Id;
-        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        Propose(s, id, "# new", "sum", [], "sess1");
         var run = s.AcceptProposal(id, null);
         Assert.False(run.HasProposal);
         Assert.Equal("# new", s.ReadMarkdown(id));
@@ -293,7 +293,7 @@ public class SpecStoreTests
         Assert.Null(s.GetProposal(id));
         Assert.False(File.Exists(Path.Combine(h.Paths.SpecDir(id), "proposal.md")));
 
-        s.SaveProposal(id, "# newer", "sum", [], "sess1");
+        Propose(s, id, "# newer", "sum", [], "sess1");
         s.AcceptProposal(id, null);
         Assert.Equal("# new", File.ReadAllText(Path.Combine(h.Paths.SpecDir(id), "spec.v2.md")));
     }
@@ -303,7 +303,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var id = s.Create("T", Repo, "# old").Id;
-        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        Propose(s, id, "# new", "sum", [], "sess1");
         s.AcceptProposal(id, "# edited");
         Assert.Equal("# edited", s.ReadMarkdown(id));
     }
@@ -314,7 +314,7 @@ public class SpecStoreTests
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var id = s.Create("T", Repo, "# old").Id;
         Assert.Throws<InvalidOperationException>(() => s.AcceptProposal(id, null)); // no proposal
-        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        Propose(s, id, "# new", "sum", [], "sess1");
         s.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching);
         Assert.Throws<InvalidOperationException>(() => s.AcceptProposal(id, null));
         Assert.Equal("# old", s.ReadMarkdown(id));
@@ -325,7 +325,7 @@ public class SpecStoreTests
     {
         using var h = new TempHome(); var s = Store(h, "2026-10-29");
         var id = s.Create("T", Repo, "# old").Id;
-        s.SaveProposal(id, "# new", "sum", [], "sess1");
+        Propose(s, id, "# new", "sum", [], "sess1");
         var run = s.DiscardProposal(id);
         Assert.False(run.HasProposal);
         Assert.Null(s.GetProposal(id));
@@ -353,5 +353,27 @@ public class SpecStoreTests
         Assert.Equal("y", s.ReadMarkdown(id));
         s.TryTransition(id, SpecStatus.Draft, SpecStatus.Queued);
         Assert.Throws<InvalidOperationException>(() => s.UpdateMarkdown(id, "z"));
+    }
+
+    /// <summary>Mimics the runner: the spec is Researching while the proposal is saved, then goes back to Draft.</summary>
+    private static void Propose(SpecStore s, string id, string md, string summary, IReadOnlyList<string> qs, string session)
+    {
+        Assert.True(s.TryTransition(id, SpecStatus.Draft, SpecStatus.Researching));
+        s.SaveProposal(id, md, summary, qs, session);
+        s.Finish(id, SpecStatus.Draft, null, null);
+    }
+
+    [Theory]
+    [InlineData(SpecStatus.Draft)]
+    [InlineData(SpecStatus.Queued)]
+    [InlineData(SpecStatus.Building)]
+    public void SaveProposal_RequiresResearching(SpecStatus status)
+    {
+        using var h = new TempHome(); var s = Store(h, "2026-10-29");
+        var id = s.Create("T", Repo, "# old").Id;
+        s.UpdateStatus(id, status);
+        Assert.Throws<InvalidOperationException>(() => s.SaveProposal(id, "# new", "sum", [], "sess1"));
+        Assert.False(s.Get(id)!.HasProposal);
+        Assert.Null(s.GetProposal(id));
     }
 }

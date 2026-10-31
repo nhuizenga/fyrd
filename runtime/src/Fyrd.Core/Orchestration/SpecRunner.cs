@@ -12,6 +12,7 @@ public sealed class SpecRunner(
     SpecStore specs, InboxStore inbox, ICloudSessions cloud, RunnerState state, TimeProvider time, LeadRelay relay)
 {
     private static readonly TimeSpan StaleLaunch = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(30);
 
     private const string AttentionPrefix = "Lead needs attention: ";
 
@@ -79,8 +80,10 @@ public sealed class SpecRunner(
             {
                 var researching = run.Status == SpecStatus.Researching;
                 var role = researching ? "fyrd-role-research-lead" : "fyrd-role-lead";
+                // Only sessions created by this launch attempt: finished leads from an earlier run are not archived.
+                var claimed = (run.UpdatedAt ?? run.CreatedAt) - ClockSkew;
                 var found = (await cloud.ListByTagAsync("fyrd-spec-" + run.Id, ct))
-                    .Where(s => s.SessionStatus != "archived" && s.Tags.Contains(role))
+                    .Where(s => s.SessionStatus != "archived" && s.Tags.Contains(role) && CreatedAt(s) >= claimed)
                     .OrderByDescending(CreatedAt)
                     .FirstOrDefault();
                 if (found is not null)

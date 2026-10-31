@@ -104,6 +104,8 @@ public sealed partial class SpecStore(FyrdPaths paths, TimeProvider time)
         lock (_gate)
         {
             var run = Get(id) ?? throw new KeyNotFoundException($"Spec '{id}' not found.");
+            if (run.Status != SpecStatus.Researching)
+                throw new InvalidOperationException("A proposal can only be saved while the spec is Researching.");
             AtomicFile.Write(Path.Combine(dir, ProposalMarkdownFile), markdown);
             AtomicFile.Write(Path.Combine(dir, ProposalMetaFile),
                 JsonSerializer.Serialize(new ProposalMeta(summary, openQuestions, sessionId), Json.Options));
