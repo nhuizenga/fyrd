@@ -4,7 +4,7 @@ using Fyrd.Core.Specs;
 namespace Fyrd.Core.Orchestration;
 
 /// <summary>Relays the owner's inbox answers and squad-cap changes to the lead session as user messages.</summary>
-public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState? state = null)
+public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState state)
 {
     private const string AttentionPrefix = "attention:";
 
@@ -22,7 +22,7 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState
             ? answered.Answer.Text
             : Protocol.FormatAnswer(rest, answered.Answer.Text);
         await cloud.SendMessageAsync(sessionId, text, ct);
-        state?.ClearQuestionFlag(specId);
+        state.ClearQuestionFlag(specId);
     }
 
     public async Task RelayConfigAsync(int squadCap, CancellationToken ct)

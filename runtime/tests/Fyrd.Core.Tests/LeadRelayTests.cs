@@ -13,7 +13,7 @@ public class LeadRelayTests
         var run = specs.Create("Add export", Repo, "x");
         if (lead) { specs.SetLead(run.Id, "sess-" + run.Id); specs.UpdateStatus(run.Id, SpecStatus.Building); }
         var cloud = new FakeCloudSessions();
-        return (specs, cloud, new LeadRelay(specs, cloud), run);
+        return (specs, cloud, new LeadRelay(specs, cloud, new RunnerState()), run);
     }
 
     private static InboxCard Card(string specId, string? key) =>
