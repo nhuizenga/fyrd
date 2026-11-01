@@ -207,6 +207,20 @@ it("renaming a persona to another persona's name is rejected", async () => {
   expect(api.savePersona).not.toHaveBeenCalled();
 });
 
+it("a persona with a newer default shows a chip and can be reset to default", async () => {
+  vi.mocked(api.getPersonas).mockResolvedValue([
+    personas[0],
+    { ...personas[1], definition: "Mine", updateAvailable: true },
+  ]);
+  vi.mocked(api.resetPersona).mockResolvedValue({ ...personas[1], definition: "Build better things." });
+  await renderSettings();
+  expect(screen.getByText("Update available")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+  expect(api.resetPersona).toHaveBeenCalledWith("builder");
+  expect(await screen.findByDisplayValue("Build better things.")).toBeInTheDocument();
+});
+
 it("spend limits load, validate and save both limits", async () => {
   vi.mocked(api.getConfig).mockResolvedValue(config({ sessionDailyLimitUsd: 40, fyrdDailyLimitUsd: 400 }));
   await renderSettings("Spend limits");

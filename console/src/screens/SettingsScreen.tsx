@@ -250,6 +250,18 @@ function PersonasCard(_: CardProps) {
     }
   };
 
+  const reset = async () => {
+    if (!d) return;
+    setError(null);
+    try {
+      const fresh = await api.resetPersona(d.id);
+      setEditing({ isNew: false, draft: { ...fresh } });
+      await load();
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+
   const remove = async () => {
     if (!d) return;
     setError(null);
@@ -285,6 +297,7 @@ function PersonasCard(_: CardProps) {
                 onClick={() => setEditing({ isNew: false, draft: { ...p } })}
               >
                 {p.name}
+                {p.updateAvailable && <Chip label="Update available" size="small" />}
               </button>
             </li>
           ))}
@@ -316,6 +329,12 @@ function PersonasCard(_: CardProps) {
                 value={d.definition}
                 onChange={(e) => patch({ definition: e.target.value })}
               />
+              {!editing!.isNew && d.updateAvailable && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <Text size="small">A newer default is available for this persona.</Text>
+                  <Button appearance="secondary" onClick={reset}>Reset to default</Button>
+                </div>
+              )}
               <Text size="small" subdued>{APPLY_NOTE}</Text>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button appearance="primary" onClick={save}>Save persona</Button>

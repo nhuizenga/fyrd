@@ -53,6 +53,7 @@ export const answerQuestion = (id: string, body: AnswerBody) =>
 
 export const getPersonas = () => call<HubPersona[]>("GET", "/api/hub/personas");
 export const savePersona = (p: HubPersona) => call<HubPersona>("PUT", `/api/hub/personas/${enc(p.id)}`, p);
+export const resetPersona = (id: string) => call<HubPersona>("POST", `/api/hub/personas/${enc(id)}/reset`);
 export const deletePersona = (id: string) => call<void>("DELETE", `/api/hub/personas/${enc(id)}`);
 
 export const getHubMemory = () => call<HubMemory>("GET", "/api/hub/memory");

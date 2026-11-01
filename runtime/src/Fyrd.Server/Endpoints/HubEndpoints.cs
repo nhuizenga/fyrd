@@ -229,6 +229,12 @@ internal static class HubEndpoints
         group.MapPut("/personas", (HubPersona? body, HubPersonas personas) => SavePersona(null, body, personas));
         group.MapPut("/personas/{id}", (string id, HubPersona? body, HubPersonas personas) => SavePersona(id, body, personas));
 
+        group.MapPost("/personas/{id}/reset", (string id, HubPersonas personas) => ApiErrors.Run(() =>
+        {
+            try { return Results.Ok(personas.Reset(id)); }
+            catch (KeyNotFoundException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status404NotFound); }
+        }));
+
         group.MapDelete("/personas/{id}", (string id, HubPersonas personas) => ApiErrors.Run(() =>
         {
             try
