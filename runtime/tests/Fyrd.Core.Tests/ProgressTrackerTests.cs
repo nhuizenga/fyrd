@@ -45,6 +45,15 @@ public class ProgressTrackerTests
     }
 
     [Fact]
+    public void ToolProgressHeartbeat_ShowsTheToolAndElapsedTime()
+    {
+        var t = new ProgressTracker();
+        t.Apply(Eph(ToolStart));
+        var item = t.Apply(Eph("""{"type":"tool_progress","tool_name":"Bash","elapsed_time_seconds":30,"heartbeat":true,"tool_use_id":"toolu_1-heartbeat-0"}"""))!;
+        Assert.Equal("Running Bash · 30s", item.Status);
+    }
+
+    [Fact]
     public void Thinking_ShowsAThinkingStatus()
     {
         Assert.Equal("Thinking…", new ProgressTracker().Apply(Eph(ThinkingStart))!.Status);

@@ -37,6 +37,13 @@ public sealed class ProgressTracker
                 }
                 break;
 
+            case "tool_progress":
+                // A long-running tool's heartbeat: keeps the status current instead of a stale "Using Bash".
+                if (Str(raw, "tool_name") is not { } tool) return null;
+                var secs = raw.TryGetProperty("elapsed_time_seconds", out var el) && el.TryGetDouble(out var n) ? (int)n : 0;
+                _block = secs > 0 ? $"Running {tool} · {secs}s" : $"Running {tool}";
+                break;
+
             case "stream_event":
                 if (!raw.TryGetProperty("event", out var ev) || ev.ValueKind != JsonValueKind.Object) return null;
                 switch (Str(ev, "type"))

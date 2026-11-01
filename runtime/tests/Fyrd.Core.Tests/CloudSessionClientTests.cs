@@ -412,6 +412,7 @@ public sealed class CloudSessionClientTests : IDisposable
             Frame("""{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Read"}}}"""),
             Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"""),
             Frame("""{"type":"system","subtype":"post_turn_summary","status_detail":"done"}"""),
+            Frame("""{"type":"tool_progress","tool_name":"Bash","elapsed_time_seconds":30,"heartbeat":true}"""),
             // Noise, all dropped:
             Frame("""{"type":"system","subtype":"status","status":"requesting"}"""),
             Frame("""{"type":"system","subtype":"thinking_tokens","estimated_tokens":5}"""),
@@ -422,7 +423,7 @@ public sealed class CloudSessionClientTests : IDisposable
             Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_sub","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"from a subagent"}}}"""));
         var events = await Drain(Client(new FakeHandler(HttpStatusCode.OK, sse)).StreamEventsAsync("session_01abc", null));
 
-        Assert.Equal(5, events.Count);
+        Assert.Equal(6, events.Count);
         Assert.All(events, e => { Assert.True(e.Ephemeral); Assert.Equal(0, e.Sequence); });
         Assert.Equal(DateTimeOffset.Parse("2026-11-01T10:00:02Z"), events[0].Event.CreatedAt);
         Assert.Equal("Running grep", events[0].Event.Raw.GetProperty("detail").GetString());

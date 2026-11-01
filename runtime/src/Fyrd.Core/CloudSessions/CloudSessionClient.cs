@@ -310,7 +310,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     /// <summary>
     /// An <c>ephemeral_event</c> frame as a progress event, or null for noise and bad JSON. Kept: <c>system</c> <c>task_summary</c>
-    /// and <c>post_turn_summary</c>, and the main agent's <c>stream_event</c>s that start a message or block or carry text.
+    /// and <c>post_turn_summary</c>, <c>tool_progress</c> heartbeats, and the main agent's <c>stream_event</c>s that start a message or block or carry text.
     /// Dropped: <c>status</c>, <c>thinking_tokens</c>, hooks, tool-input and signature deltas, and subagent output.
     /// </summary>
     private static StreamedEvent? ParseEphemeralFrame(string data)
@@ -324,6 +324,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
                 return null;
             var keep = Str(payload, "type") switch
             {
+                "tool_progress" => Str(payload, "tool_name") is not null,
                 "system" => Str(payload, "subtype") is "task_summary" or "post_turn_summary",
                 "stream_event" => !(payload.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String)
                     && payload.TryGetProperty("event", out var ev) && ev.ValueKind == JsonValueKind.Object
