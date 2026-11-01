@@ -500,4 +500,137 @@ public class HubApiTests
         Assert.Equal(7, (await ReadJson(await c.GetAsync("/api/config"))).GetProperty("sessionCap").GetInt32());
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/config", new { sessionCap = 101 })).StatusCode);
     }
+
+    // ---- spend limits ----
+
+    private static HubCostView Cost(decimal spent, decimal limit = 50, string? blocked = null, bool exempt = false) =>
+        new(spent, limit, (double)(spent / limit), false, blocked, !exempt && spent >= limit * 0.9m, exempt);
+
+    private static void SeedCost(FyrdFactory f, HubCostView cost, string id = SessionId) =>
+        f.Services.GetRequiredService<HubState>().Publish([View(id) with { Cost = cost }], [],
+            budget: new HubBudgetView("2026-11-01", "UTC", cost.CostToday, 500, false));
+
+    [Fact]
+    public async Task State_CarriesBudgetAndSessionCost()
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(12.34m));
+        var body = await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"));
+        var budget = body.GetProperty("budget");
+        Assert.Equal("2026-11-01", budget.GetProperty("date").GetString());
+        Assert.Equal("UTC", budget.GetProperty("timeZone").GetString());
+        Assert.Equal(12.34m, budget.GetProperty("fyrdCostToday").GetDecimal());
+        Assert.Equal(500m, budget.GetProperty("fyrdLimitUsd").GetDecimal());
+        Assert.False(budget.GetProperty("fyrdBlocked").GetBoolean());
+        var cost = body.GetProperty("sessions")[0].GetProperty("cost");
+        Assert.Equal(12.34m, cost.GetProperty("costToday").GetDecimal());
+        Assert.Equal(50m, cost.GetProperty("limitUsd").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, cost.GetProperty("blocked").ValueKind);
+        Assert.False(cost.GetProperty("canExtend").GetBoolean());
+        Assert.False(cost.GetProperty("exempt").GetBoolean());
+        Assert.False(cost.GetProperty("estimated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task State_Empty_BudgetNull()
+    {
+        using var f = new FyrdFactory();
+        var body = await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"));
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("budget").ValueKind);
+    }
+
+    [Theory]
+    [InlineData("session", "This session reached its daily spend limit.")]
+    [InlineData("fyrd", "Fyrd reached its daily spend limit.")]
+    public async Task MessageAndResume_Blocked_409(string blocked, string detail)
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(60, blocked: blocked));
+        var c = f.CreateClient();
+        var m = await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "hi" });
+        Assert.Equal(HttpStatusCode.Conflict, m.StatusCode);
+        Assert.Equal(detail, (await ReadJson(m)).GetProperty("detail").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/hub/sessions/{SessionId}/resume", null)).StatusCode);
+        Assert.Empty(f.Cloud.Sent);
+        // Pause stays available so the owner can still stop a running session.
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/pause", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task MessageAndResume_Controller_UnblockedUnderFyrdBlock()
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(80, exempt: true), "session_ctl1"); // the guard never blocks the Controller
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PostAsJsonAsync("/api/hub/sessions/session_ctl1/message", new { text = "hi" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync("/api/hub/sessions/session_ctl1/resume", null)).StatusCode);
+    }
+
+    [Theory] [InlineData(5)] [InlineData(50)] [InlineData(0)]
+    public async Task Budget_BadAmount_400(int amount)
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(46));
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/budget", new { amountUsd = amount });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Budget_MissingBody_400()
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(46));
+        var r = await f.CreateClient().PostAsync($"/api/hub/sessions/{SessionId}/budget",
+            new StringContent("", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Budget_UnknownSession_404()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_nope/budget", new { amountUsd = 25 });
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Budget_BelowNinetyPercent_409()
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(44));
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/budget", new { amountUsd = 25 });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Equal(0m, f.Services.GetRequiredService<CostLedger>().ExtraUsd(SessionId));
+    }
+
+    [Fact]
+    public async Task Budget_Controller_409()
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(60, exempt: true), "session_ctl1");
+        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_ctl1/budget", new { amountUsd = 25 });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+    }
+
+    [Theory] [InlineData(25, 75)] [InlineData(100, 150)]
+    public async Task Budget_AtNinetyPercent_RaisesLimit_AndRequestsPoll(int amount, int newLimit)
+    {
+        using var f = new FyrdFactory();
+        // The endpoint raises the ledger; the cost it reports comes from the ledger's own figure for the session.
+        var ledger = f.Services.GetRequiredService<CostLedger>();
+        ledger.Record(SessionId, "builder-abc", 45);
+        SeedCost(f, Cost(45));
+        var state = f.Services.GetRequiredService<HubState>();
+        Assert.False(state.PollRequested.IsCompleted);
+
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/budget", new { amountUsd = amount });
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var body = await ReadJson(r);
+        Assert.Equal(newLimit, body.GetProperty("limitUsd").GetDecimal());
+        Assert.Equal(45m, body.GetProperty("costToday").GetDecimal());
+        Assert.True(state.PollRequested.IsCompleted);
+        Assert.Equal(amount, ledger.ExtraUsd(SessionId));
+    }
 }

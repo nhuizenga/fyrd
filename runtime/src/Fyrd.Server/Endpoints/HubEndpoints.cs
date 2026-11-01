@@ -14,6 +14,8 @@ internal static class HubEndpoints
     private const string ResumeText = "Continue where you left off.";
     private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
     private const string NotPending = "This question is no longer waiting for an answer.";
+    private const string SessionBlocked = "This session reached its daily spend limit.";
+    private const string FyrdBlocked = "Fyrd reached its daily spend limit.";
     private const string SignedOut = "Signed out of Claude — run `claude auth login`";
     private static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ReopenDelay = TimeSpan.FromSeconds(1);
@@ -21,6 +23,7 @@ internal static class HubEndpoints
 
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
+    private sealed record BudgetBody(decimal? AmountUsd);
     private sealed record AnswerBody(string? Choice, string? Text);
 
     public static IEndpointRouteBuilder MapHub(this IEndpointRouteBuilder app)
@@ -43,6 +46,7 @@ internal static class HubEndpoints
                 signedOut = state.SignedOut,
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
+                budget = state.Budget,
                 controller = id is null ? null : new { sessionId = id, url = "https://claude.ai/code/" + id },
             });
         }));
@@ -85,6 +89,7 @@ internal static class HubEndpoints
         group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
             InHub(id, state, () =>
             {
+                if (BlockedError(id, state) is { } blocked) return Task.FromResult(blocked);
                 if (TextError(body?.Text) is { } error) return Task.FromResult(error);
                 return Cloud(async () =>
                 {
@@ -101,11 +106,30 @@ internal static class HubEndpoints
             })));
 
         group.MapPost("/sessions/{id}/resume", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
-            InHub(id, state, () => Cloud(async () =>
+            InHub(id, state, () => BlockedError(id, state) is { } blocked
+                ? Task.FromResult(blocked)
+                : Cloud(async () =>
+                {
+                    await cloud.SendMessageAsync(id, ResumeText, ct);
+                    return Results.NoContent();
+                })));
+
+        // Raises one session's limit for today. Only +$25 and +$100, and only once the session has used 90% of its limit.
+        group.MapPost("/sessions/{id}/budget", (string id, BudgetBody? body, HubState state, CostLedger ledger, CostGuard guard) =>
+            InHub(id, state, () => Task.FromResult(ApiErrors.Run(() =>
             {
-                await cloud.SendMessageAsync(id, ResumeText, ct);
-                return Results.NoContent();
-            })));
+                if (body?.AmountUsd is not { } amount || !CostGuard.ExtendAmounts.Contains(amount))
+                    return Bad("amountUsd must be 25 or 100.");
+                var cost = state.Sessions.First(s => s.Id == id).Cost;
+                if (cost is null) return Results.Problem("This session has no cost data yet.", statusCode: StatusCodes.Status409Conflict);
+                if (cost.Exempt) return Results.Problem("The Controller has no spend limit to raise.", statusCode: StatusCodes.Status409Conflict);
+                if (!cost.CanExtend)
+                    return Results.Problem("A limit can be raised once 90% of it is used.", statusCode: StatusCodes.Status409Conflict);
+                ledger.AddExtra(id, amount);
+                state.RequestPoll();
+                var (views, _) = guard.Build(state.Sessions.Select(s => s.Id).ToList());
+                return Results.Ok(views[id]);
+            }))));
 
         group.MapPost("/questions/{id}/answer", (string id, AnswerBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
         {
@@ -307,6 +331,15 @@ internal static class HubEndpoints
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")
         : text.Length > MaxText ? Bad($"Text is longer than {MaxText} characters.")
         : null;
+
+    /// <summary>409 when the last poll blocked this session (its own limit, or the fyrd's); the Controller is never blocked.</summary>
+    private static IResult? BlockedError(string id, HubState state) =>
+        state.Sessions.FirstOrDefault(s => s.Id == id)?.Cost?.Blocked switch
+        {
+            "session" => Results.Problem(SessionBlocked, statusCode: StatusCodes.Status409Conflict),
+            "fyrd" => Results.Problem(FyrdBlocked, statusCode: StatusCodes.Status409Conflict),
+            _ => null,
+        };
 
     private static IResult Bad(string detail) => Results.Problem(detail, statusCode: StatusCodes.Status400BadRequest);
 

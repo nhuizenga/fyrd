@@ -38,6 +38,8 @@ builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPa
 builder.Services.AddSingleton<HubMemory>();
 builder.Services.AddSingleton<ControllerManager>();
 builder.Services.AddSingleton<HubState>();
+builder.Services.AddSingleton<CostLedger>();
+builder.Services.AddSingleton<CostGuard>();
 builder.Services.AddSingleton<HubRunner>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
     builder.Services.AddHostedService<HubRunnerService>();
