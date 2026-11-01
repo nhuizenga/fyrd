@@ -1,4 +1,5 @@
 using Fyrd.Core.CloudSessions;
+using Fyrd.Core.Hub;
 using Fyrd.Core.Tests;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
 
     public FakeCloudSessions Cloud { get; } = new();
 
+    public FakeGitHub GitHub { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("Fyrd:Home", Home.Paths.Root);
@@ -26,6 +29,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
         {
             s.RemoveAll<ICloudSessions>();
             s.AddSingleton<ICloudSessions>(Cloud);
+            s.RemoveAll<IGitHub>();
+            s.AddSingleton<IGitHub>(GitHub);
         });
     }
 

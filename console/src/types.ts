@@ -25,6 +25,19 @@ export interface HubSessionView {
   pullRequests: string[];
 }
 
+/** One of a session's pull requests with live GitHub status (`GET /api/hub/sessions/{id}/pull-requests`). */
+export interface PullRequestStatus {
+  url: string;
+  number: number;
+  title: string;
+  state: "open" | "merged" | "closed" | "unknown";
+  draft: boolean;
+  checks: "none" | "pending" | "passing" | "failing";
+  /** Why GitHub could not be read, when `state` is `unknown`. */
+  error?: string | null;
+  canMerge: boolean;
+}
+
 export interface HubQuestion {
   id: string;
   sessionId: string;

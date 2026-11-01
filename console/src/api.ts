@@ -1,5 +1,5 @@
 import type {
-  AnswerBody, ControllerInfo, FyrdConfig, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, WithRelay,
+  AnswerBody, ControllerInfo, FyrdConfig, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, PullRequestStatus, WithRelay,
 } from "./types";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -37,6 +37,12 @@ export const sendMessage = (sessionId: string, text: string) =>
 export const pause = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pause`);
 /** Archives a session (the trash button); it leaves the list on the next poll. */
 export const archiveSession = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/archive`);
+export const pullRequests = (sessionId: string) =>
+  call<PullRequestStatus[]>("GET", `/api/hub/sessions/${enc(sessionId)}/pull-requests`);
+export const markPrReady = (sessionId: string, url: string) =>
+  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/ready`, { url });
+export const mergePr = (sessionId: string, url: string) =>
+  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/merge`, { url });
 export const resume = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/resume`);
 /** 202 with `{ waitingFor }` while sibling questions of the same request are unanswered; 204 (undefined) once sent. */
 export const answerQuestion = (id: string, body: AnswerBody) =>
