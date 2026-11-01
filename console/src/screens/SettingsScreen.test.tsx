@@ -213,13 +213,14 @@ it("spend limits load, validate and save both limits", async () => {
   const s = await screen.findByLabelText("Per-session daily limit (USD)");
   await vi.waitFor(() => expect(s).toHaveValue("40"));
   expect(screen.getByLabelText("Fyrd-wide daily limit (USD)")).toHaveValue("400");
+  expect(screen.getAllByText("Whole dollars, 1 to 10000.")).toHaveLength(2);
   await userEvent.clear(s);
   await userEvent.type(s, "0");
   await userEvent.click(screen.getByRole("button", { name: "Save session limit" }));
   expect(api.updateConfig).not.toHaveBeenCalled();
   expect(screen.getByText("Enter a whole number from 1 to 10000.")).toBeInTheDocument();
   await userEvent.clear(s);
-  await userEvent.type(s, "75");
+  await userEvent.type(s, " 75 ");
   await userEvent.click(screen.getByRole("button", { name: "Save session limit" }));
   expect(api.updateConfig).toHaveBeenCalledWith({ sessionDailyLimitUsd: 75 });
   expect(await screen.findByText("Session limit saved.")).toBeInTheDocument();

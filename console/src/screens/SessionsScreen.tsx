@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Button, Chip, Link, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
+import { Alert, Button, Chip, Link, ProgressBar, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
@@ -19,17 +19,15 @@ const pct = (ratio: number) => Math.round(ratio * 100);
 /** The session's spend today, a bar against its daily limit, and the +$ raises. */
 function CostBlock({ cost }: { cost: HubCostView | null | undefined }) {
   if (!cost) return <Text>—</Text>;
-  const width = Math.min(100, cost.ratio * 100);
   return (
     <>
       <Text>{usd(cost.costToday)}{cost.estimated ? " (estimated)" : ""}</Text>
-      <div style={{ height: 8, borderRadius: 4, background: "#e3e8ef", overflow: "hidden" }}>
-        <div
-          role="img"
-          aria-label={`${pct(cost.ratio)} percent of today's ${usd(cost.limitUsd)} limit used`}
-          style={{ width: `${width}%`, height: "100%", background: "#0265dc" }}
-        />
-      </div>
+      <ProgressBar
+        aria-label={`${pct(cost.ratio)} percent of today's ${usd(cost.limitUsd)} limit used`}
+        value={Math.min(100, cost.ratio * 100)}
+        max={100}
+        error={cost.blocked !== null}
+      />
       <Text size="small" subdued>
         {cost.exempt ? "Controller · limit not enforced" : `${pct(cost.ratio)}% of ${usd(cost.limitUsd)} limit today`}
       </Text>
@@ -48,6 +46,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [raising, setRaising] = useState(false);
+  // A raise's response, shown until the poll catches up (the server only requests a poll, so the next state can be stale).
+  const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
   const [adoptId, setAdoptId] = useState("");
   const transcript = useTranscript(selectedId);
   const logRef = useRef<HTMLDivElement>(null);
@@ -153,7 +154,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     });
 
-  const blocked = selected?.cost?.blocked ?? null;
+  const cost = selected && raised?.id === selected.id && selected.cost?.limitUsd === raised.from ? raised.view : selected?.cost;
+  const blocked = cost?.blocked ?? null;
   const send = () => {
     if (!selected || sending || blocked || draft.trim() === "") return;
     const text = draft.trim();
@@ -177,11 +179,19 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const canResume = !!selected && (pausedIds.includes(selected.id) || selected.status === "idle");
 
   const budget = state?.budget ?? null;
-  const addBudget = (amount: 25 | 100) =>
-    run(async () => {
-      await api.addBudget(selected!.id, amount);
-      await onChanged();
+  const addBudget = (id: string, from: number, amount: 25 | 100) => {
+    if (raising) return;
+    setRaising(true);
+    void run(async () => {
+      try {
+        const view = await api.addBudget(id, amount);
+        if (view) setRaised({ id, from, view });
+        await onChanged();
+      } finally {
+        setRaising(false);
+      }
     });
+  };
 
   const row = (s: HubSessionView, actions?: ReactNode) => (
     <li key={s.id} className="session-item">
@@ -281,7 +291,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 )}
               </div>
               {blocked && (
-                <Alert status="warning" title={blocked === "session" ? "Add budget to continue" : "Sending is paused until midnight except for the Controller"} role="alert" />
+                <div id="budget-block">
+                  <Alert status="warning" title={blocked === "session" ? "Add budget to continue" : "Sending is paused until midnight except for the Controller"} role="status" />
+                </div>
               )}
               {transcript.fault && <Alert status="warning" title={transcript.fault} role="alert" />}
               <div className="thread-log" ref={logRef} onScroll={onLogScroll} role="log" aria-label="Messages">
@@ -307,7 +319,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               <div className="composer">
                 <Textarea
                   label="Message this session"
-                  hint="Enter to send, Shift+Enter for a new line"
+                  hint={blocked ? (blocked === "session" ? "Add budget to continue" : "Sending is paused until midnight except for the Controller") : "Enter to send, Shift+Enter for a new line"}
                   rows={2}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
@@ -318,7 +330,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     }
                   }}
                 />
-                <Button appearance="primary" disabled={sending || !!blocked || draft.trim() === ""} onClick={send}>Send</Button>
+                <Button appearance="primary" disabled={sending || !!blocked || draft.trim() === ""} aria-describedby={blocked ? "budget-block" : undefined} onClick={send}>Send</Button>
               </div>
             </>
           )}
@@ -335,11 +347,22 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               </dl>
               <AddRepo key={selected.id} sessionId={selected.id} />
               <Text variant="headline" el="h4" size="small">Estimated cost</Text>
-              <CostBlock cost={selected.cost} />
+              <CostBlock cost={cost} />
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} role="group" aria-label="Add budget">
-                <Button appearance="secondary" size="small" disabled={!selected.cost?.canExtend} onClick={() => addBudget(25)}>+$25</Button>
-                <Button appearance="secondary" size="small" disabled={!selected.cost?.canExtend} onClick={() => addBudget(100)}>+$100</Button>
+                {([25, 100] as const).map((n) => (
+                  <Button
+                    key={n}
+                    appearance="secondary"
+                    size="small"
+                    aria-label={`+$${n} to today's limit`}
+                    disabled={!cost?.canExtend || raising}
+                    onClick={() => addBudget(selected.id, cost!.limitUsd, n)}
+                  >
+                    +${n}
+                  </Button>
+                ))}
               </div>
+              {cost && !cost.exempt && !cost.canExtend && <Text size="small" subdued>Raises unlock at 90% of today's limit.</Text>}
               <Text variant="headline" el="h4" size="small">Tags</Text>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {selected.tags.length === 0 ? <Text subdued size="small">None</Text> : selected.tags.map((t) => <Chip key={t} label={t} size="small" />)}

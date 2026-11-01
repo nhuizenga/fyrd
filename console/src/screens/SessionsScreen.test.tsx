@@ -241,9 +241,9 @@ const open = (name: RegExp) => userEvent.click(screen.getByRole("button", { name
 it("no cost data shows a dash and disabled raises", async () => {
   renderScreen(two());
   await open(/alpha-1/);
-  expect(screen.queryByRole("button", { name: "+$5" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "+$25" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "+$100" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: /\+\$5 / })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /\+\$25/ })).toBeDisabled();
+  expect(screen.getByRole("button", { name: /\+\$100/ })).toBeDisabled();
   expect(screen.getByText("Estimated cost").nextElementSibling).toHaveTextContent("—");
 });
 
@@ -251,30 +251,49 @@ it("cost block shows amount, bar width and label from the ratio", async () => {
   renderScreen(withCost({ estimated: true }));
   await open(/alpha-1/);
   expect(screen.getByText("$31.00 (estimated)")).toBeInTheDocument();
-  const bar = screen.getByRole("img", { name: "62 percent of today's $50.00 limit used" });
-  expect(bar).toHaveStyle({ width: "62%", background: "#0265dc" });
+  const bar = screen.getByRole("progressbar", { name: "62 percent of today's $50.00 limit used" });
+  expect(bar).toHaveValue(62);
   expect(screen.getByText("62% of $50.00 limit today")).toBeInTheDocument();
 });
 
 it("bar width is capped at 100%", async () => {
   renderScreen(withCost({ costToday: 80, ratio: 1.6 }));
   await open(/alpha-1/);
-  expect(screen.getByRole("img", { name: /160 percent/ })).toHaveStyle({ width: "100%" });
+  expect(screen.getByRole("progressbar", { name: /160 percent/ })).toHaveValue(100);
 });
 
 it("only +$25 and +$100 render, enabled when canExtend, and post the amount", async () => {
-  vi.mocked(api.addBudget).mockResolvedValue(cost());
+  vi.mocked(api.addBudget).mockResolvedValue(cost({ canExtend: true }));
   const { rerender } = render(<Routed state={withCost({ ratio: 0.89 })} onChanged={vi.fn()} />);
   await open(/alpha-1/);
-  expect(screen.getByRole("button", { name: "+$25" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "+$25 to today's limit" })).toBeDisabled();
+  expect(screen.getByText("Raises unlock at 90% of today's limit.")).toBeInTheDocument();
   const onChanged = vi.fn();
   rerender(<Routed state={withCost({ ratio: 0.9, canExtend: true })} onChanged={onChanged} />);
-  expect(screen.queryByRole("button", { name: "+$5" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "+$100" }));
+  expect(screen.queryByText(/Raises unlock/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /\+\$5 / })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "+$100 to today's limit" }));
   expect(api.addBudget).toHaveBeenCalledWith("a", 100);
-  await userEvent.click(screen.getByRole("button", { name: "+$25" }));
+  await userEvent.click(await screen.findByRole("button", { name: "+$25 to today's limit" }));
   expect(api.addBudget).toHaveBeenCalledWith("a", 25);
   expect(onChanged).toHaveBeenCalled();
+});
+
+it("raise buttons are disabled while a raise is in flight, and the returned view shows until the poll catches up", async () => {
+  let finish!: (v: ReturnType<typeof cost>) => void;
+  vi.mocked(api.addBudget).mockReturnValue(new Promise((r) => { finish = r; }));
+  const stale = withCost({ ratio: 0.95, canExtend: true, costToday: 47.5 });
+  render(<Routed state={stale} onChanged={vi.fn()} />);
+  await open(/alpha-1/);
+  await userEvent.click(screen.getByRole("button", { name: "+$25 to today's limit" }));
+  expect(screen.getByRole("button", { name: "+$25 to today's limit" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "+$100 to today's limit" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: "+$100 to today's limit" }));
+  expect(api.addBudget).toHaveBeenCalledTimes(1);
+  finish(cost({ costToday: 47.5, limitUsd: 75, ratio: 0.63, canExtend: false }));
+  // The poll still holds the old view, but the returned one wins until the server limit changes.
+  expect(await screen.findByText("63% of $75.00 limit today")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "+$25 to today's limit" })).toBeDisabled();
 });
 
 it("session block disables Send and Resume with an Alert", async () => {
@@ -282,7 +301,9 @@ it("session block disables Send and Resume with an Alert", async () => {
   st.sessions[0] = { ...st.sessions[0], status: "idle" };
   renderScreen(st);
   await open(/alpha-1/);
-  expect(screen.getByRole("alert")).toHaveTextContent("Add budget to continue");
+  expect(screen.getByRole("status")).toHaveTextContent("Add budget to continue");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send" })).toHaveAttribute("aria-describedby", "budget-block");
   expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   await userEvent.type(screen.getByLabelText("Message this session"), "hi");
   expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
@@ -295,7 +316,7 @@ it("fyrd block shows the paused Alert; the Controller stays sendable", async () 
   st.budget = { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 500, fyrdLimitUsd: 500, fyrdBlocked: true };
   renderScreen(st);
   await open(/alpha-1/);
-  expect(screen.getByRole("alert")).toHaveTextContent("Sending is paused until midnight except for the Controller");
+  expect(screen.getByRole("status")).toHaveTextContent("Sending is paused until midnight except for the Controller");
   await userEvent.click(screen.getAllByRole("button", { name: /controller/ }).find((b) => b.className.includes("row-btn"))!);
   expect(screen.queryByText(/Sending is paused/)).not.toBeInTheDocument();
   await userEvent.type(screen.getByLabelText("Message this session"), "hi");

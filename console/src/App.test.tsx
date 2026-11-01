@@ -59,3 +59,13 @@ it("does not touch config when the time zone already matches", async () => {
   await vi.waitFor(() => expect(api.getConfig).toHaveBeenCalled());
   expect(api.updateConfig).not.toHaveBeenCalled();
 });
+
+it("warns and keeps running when the time zone sync fails", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockReturnValue({ timeZone: "America/Denver" } as never);
+  vi.mocked(api.getConfig).mockResolvedValue(config({ timeZone: "UTC" }));
+  vi.mocked(api.updateConfig).mockRejectedValue(new Error("nope"));
+  render(<App />);
+  await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+  expect(await screen.findByRole("button", { name: "Sessions" })).toBeInTheDocument();
+});

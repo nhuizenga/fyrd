@@ -133,6 +133,18 @@ test.describe("Sessions", () => {
     await expect(pane.locator("dd").nth(3)).toHaveText("5 minutes ago");
   });
 
+  test("cost block shows spend against the limit and +$25 posts a raise", async ({ page }) => {
+    const { sent } = await mockApi(page, { transcripts: {} });
+    await page.goto("/#/sessions/session_b1");
+    await expect(page.getByText("Fyrd today: $120.00 of $500.00")).toBeVisible();
+    const pane = page.getByRole("complementary", { name: "Session details" });
+    await expect(pane.getByText("$47.50 (estimated)")).toBeVisible();
+    await expect(pane.getByRole("progressbar", { name: "95 percent of today's $50.00 limit used" })).toBeVisible();
+    await pane.getByRole("button", { name: "+$25 to today's limit" }).click();
+    await expect.poll(() => sent).toContainEqual({ url: "/api/hub/sessions/session_b1/budget", body: { amountUsd: 25 } });
+    await expect(pane.getByText("63% of $75.00 limit today")).toBeVisible();
+  });
+
   test("a pending question is answerable in the thread; Other reveals the text box", async ({ page }) => {
     const { sent } = await mockApi(page, { transcripts: { session_b2: docsTranscript() }, questions: [QUESTION] });
     await page.goto("/#/sessions/session_b2");

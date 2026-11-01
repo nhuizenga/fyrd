@@ -18,6 +18,14 @@ const APPLY_NOTE = "Changes apply to sessions created from now on.";
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** A whole number from `min` to `max` typed in a field, or null. */
+const parseWholeNumber = (v: string, min: number, max: number) => {
+  const t = v.trim();
+  const n = Number(t);
+  return /^\d+$/.test(t) && n >= min && n <= max ? n : null;
+};
+const rangeMessage = (min: number, max: number) => `Enter a whole number from ${min} to ${max}.`;
+
 function EnvironmentCard() {
   const [env, setEnv] = useState("");
   const [cap, setCap] = useState("20");
@@ -45,12 +53,13 @@ function EnvironmentCard() {
   };
 
   const saveCap = () => {
-    const n = Number(cap);
-    if (!/^\d+$/.test(cap.trim()) || n < 1 || n > 100) {
-      setCapError("Enter a whole number from 1 to 100.");
+    const n = parseWholeNumber(cap, 1, 100);
+    if (n === null) {
+      setCapError(rangeMessage(1, 100));
       return;
     }
     setCapError(null);
+    setCap(String(n));
     void save({ sessionCap: n }, "Session cap");
   };
 
@@ -86,9 +95,6 @@ function EnvironmentCard() {
   );
 }
 
-const LIMIT_RANGE = "Enter a whole number from 1 to 10000.";
-const validLimit = (v: string) => /^\d+$/.test(v.trim()) && Number(v) >= 1 && Number(v) <= 10000;
-
 function SpendLimitsCard() {
   const [sessionLimit, setSessionLimit] = useState("50");
   const [fyrdLimit, setFyrdLimit] = useState("500");
@@ -96,10 +102,12 @@ function SpendLimitsCard() {
   const [fyrdError, setFyrdError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [timeZone, setTimeZone] = useState<string | null>(null);
 
   useEffect(() => {
     api.getConfig().then((c) => {
       if (!c) return;
+      setTimeZone(c.timeZone);
       setSessionLimit(String(c.sessionDailyLimitUsd));
       setFyrdLimit(String(c.fyrdDailyLimitUsd));
     }).catch((e) => setError(errText(e)));
@@ -119,11 +127,12 @@ function SpendLimitsCard() {
   return (
     <section className="card" aria-labelledby="limits-h">
       <Text variant="headline" el="h3" size="medium" id="limits-h">Spend limits</Text>
-      <Text subdued>Daily limits on estimated (list-price) spend. A day runs from midnight in your browser's time zone.</Text>
+      <Text subdued>Daily limits on estimated (list-price) spend. A day runs from midnight in {timeZone ?? "your browser's time zone"}; the last browser to load the console sets it.</Text>
       {error && <Alert status="danger" title={error} role="alert" />}
       {saved && <Text role="status">{saved}</Text>}
       <TextField
         label="Per-session daily limit (USD)"
+        description="Whole dollars, 1 to 10000."
         inputMode="numeric"
         value={sessionLimit}
         error={sessionError ?? undefined}
@@ -134,9 +143,11 @@ function SpendLimitsCard() {
           appearance="primary"
           aria-label="Save session limit"
           onClick={() => {
-            if (!validLimit(sessionLimit)) return setSessionError(LIMIT_RANGE);
+            const n = parseWholeNumber(sessionLimit, 1, 10000);
+            if (n === null) return setSessionError(rangeMessage(1, 10000));
             setSessionError(null);
-            void save({ sessionDailyLimitUsd: Number(sessionLimit) }, "Session limit");
+            setSessionLimit(String(n));
+            void save({ sessionDailyLimitUsd: n }, "Session limit");
           }}
         >
           Save
@@ -144,6 +155,7 @@ function SpendLimitsCard() {
       </div>
       <TextField
         label="Fyrd-wide daily limit (USD)"
+        description="Whole dollars, 1 to 10000."
         inputMode="numeric"
         value={fyrdLimit}
         error={fyrdError ?? undefined}
@@ -154,9 +166,11 @@ function SpendLimitsCard() {
           appearance="primary"
           aria-label="Save fyrd limit"
           onClick={() => {
-            if (!validLimit(fyrdLimit)) return setFyrdError(LIMIT_RANGE);
+            const n = parseWholeNumber(fyrdLimit, 1, 10000);
+            if (n === null) return setFyrdError(rangeMessage(1, 10000));
             setFyrdError(null);
-            void save({ fyrdDailyLimitUsd: Number(fyrdLimit) }, "Fyrd limit");
+            setFyrdLimit(String(n));
+            void save({ fyrdDailyLimitUsd: n }, "Fyrd limit");
           }}
         >
           Save

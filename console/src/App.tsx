@@ -45,8 +45,9 @@ export default function App() {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const c = await api.getConfig();
         if (live && tz && c && c.timeZone !== tz) await api.updateConfig({ timeZone: tz });
-      } catch {
-        /* spend limits keep using the previous zone */
+      } catch (e) {
+        // Spend limits keep using the previous zone.
+        console.warn("Could not sync the browser time zone to the Fyrd config", e);
       }
     })();
     return () => { live = false; };
