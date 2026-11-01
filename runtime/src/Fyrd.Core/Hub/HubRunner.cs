@@ -11,7 +11,7 @@ namespace Fyrd.Core.Hub;
 /// </summary>
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
-    HubState state, FyrdPaths paths, TimeProvider time)
+    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -105,7 +105,25 @@ public sealed partial class HubRunner(
         }
 
         Prune(sessions.Select(s => s.Id).Concat(failed).ToHashSet(StringComparer.Ordinal));
-        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed);
+
+        // Costs are settled before publishing so the views carry them. A guard failure keeps the previous cost.
+        HubBudgetView? budget = state.Budget;
+        try
+        {
+            var controllerLive = _controllerId is { } c && sessions.Any(x => x.Id == c) && !failed.Contains(c);
+            var pass = await guard.RunAsync(views.Select(v => (v.Id, v.Title)).ToList(), controllerLive, ct);
+            budget = pass.Budget;
+            if (pass.Error is not null) lastError ??= pass.Error;
+            views = views.Select(v => pass.Views.TryGetValue(v.Id, out var cost) ? v with { Cost = cost } : v).ToList();
+        }
+        catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
+                                  && (e is not OperationCanceledException || !ct.IsCancellationRequested))
+        {
+            lastError ??= $"budget: {e.Message}";
+            views = views.Select(v => v.Cost is null && previousViews.TryGetValue(v.Id, out var old) ? v with { Cost = old.Cost } : v).ToList();
+        }
+
+        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, budget);
 
         try
         {
@@ -138,6 +156,8 @@ public sealed partial class HubRunner(
             fresh = idx >= 0 ? fetched.Skip(idx + 1) : [];
         }
         Capture(s, fresh, cursors);
+        ledger.Feed(s.Id, fetched);
+        ledger.Observe(s.Id, s.Raw);
         if (fetched.Count > 0 && fetched[^1].Uuid is { Length: > 0 } last && (!cursors.TryGetValue(s.Id, out var c) || c != last))
         {
             cursors[s.Id] = last;

@@ -10,7 +10,19 @@ public sealed record HubQuestion(
 
 public sealed record HubSessionView(
     string Id, string Title, string Role, string Status, string? Repo, string? Branch,
-    DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags);
+    DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags,
+    HubCostView? Cost = null);
+
+/// <summary>
+/// One session's spend today against its limit. <c>Blocked</c> is "session", "fyrd" or null. The Controller is
+/// <c>Exempt</c>: it shows cost and ratio but is never blocked and cannot be raised.
+/// </summary>
+public sealed record HubCostView(
+    decimal CostToday, decimal LimitUsd, double Ratio, bool Estimated, string? Blocked, bool CanExtend, bool Exempt);
+
+/// <summary>Fyrd-wide spend today. <c>Date</c> is the local day (yyyy-MM-dd) in <c>TimeZone</c>.</summary>
+public sealed record HubBudgetView(
+    string Date, string TimeZone, decimal FyrdCostToday, decimal FyrdLimitUsd, bool FyrdBlocked);
 
 /// <summary>Result of recording one answer: the question is gone, siblings are still unanswered, or the request is complete.</summary>
 public sealed record AnswerProgress(bool Pending, int WaitingFor, HubQuestion? Question, IReadOnlyDictionary<string, string>? Answers)
@@ -33,6 +45,7 @@ public sealed class HubState(TimeProvider? time = null)
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private volatile IReadOnlyList<HubSessionView> _sessions = [];
     private volatile IReadOnlyList<HubQuestion> _questions = [];
+    private volatile HubBudgetView? _budget;
     private volatile bool _signedOut;
     private volatile string? _lastError;
     private readonly object _gate = new();
@@ -59,6 +72,8 @@ public sealed class HubState(TimeProvider? time = null)
     public IReadOnlyList<HubSessionView> Sessions => _sessions;
     public IReadOnlyList<HubQuestion> Questions => _questions;
 
+    public HubBudgetView? Budget => _budget;
+
     public bool SignedOut { get => _signedOut; set => _signedOut = value; }
     public string? LastError { get => _lastError; set => _lastError = value; }
 
@@ -74,7 +89,8 @@ public sealed class HubState(TimeProvider? time = null)
     /// <see cref="ClaimTtl"/>. Claims on sessions in <paramref name="failedSessions"/> are kept: that poll saw nothing.
     /// </summary>
     public void Publish(
-        IReadOnlyList<HubSessionView> sessions, IReadOnlyList<HubQuestion> questions, IReadOnlySet<string>? failedSessions = null)
+        IReadOnlyList<HubSessionView> sessions, IReadOnlyList<HubQuestion> questions, IReadOnlySet<string>? failedSessions = null,
+        HubBudgetView? budget = null)
     {
         lock (_gate)
         {
@@ -87,6 +103,7 @@ public sealed class HubState(TimeProvider? time = null)
             }
             foreach (var rid in _partial.Keys.Where(k => !seen.Contains(k)).ToList()) _partial.Remove(rid);
             _sessions = sessions.ToArray();
+            _budget = budget;
             _questions = questions.Where(q => !_claims.ContainsKey(q.RequestId)).ToArray();
         }
     }
