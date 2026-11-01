@@ -216,8 +216,10 @@ public sealed partial class CloudSessionClient : ICloudSessions
             var line = await reader.ReadLineAsync(ct);
             if (line is null || line.Length == 0)
             {
-                if (name == "client_event" && data.Length > 0 && ParseStreamFrame(data.ToString(), id) is { } ev)
+                if (data.Length > 0 && name == "client_event" && ParseStreamFrame(data.ToString(), id) is { } ev)
                     yield return ev;
+                else if (data.Length > 0 && name == "ephemeral_event" && ParseEphemeralFrame(data.ToString()) is { } progress)
+                    yield return progress;
                 if (line is null) yield break;
                 name = id = null;
                 data.Clear();
@@ -259,6 +261,30 @@ public sealed partial class CloudSessionClient : ICloudSessions
             if (DateTimeOffset.TryParse(Str(root, "created_at"), out var created)) ev = ev with { CreatedAt = created };
             if (ev.Uuid.Length == 0 && Str(root, "event_id") is { } eventId) ev = ev with { Uuid = eventId };
             return new StreamedEvent(seq, ev);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// An <c>ephemeral_event</c> frame as a progress event, or null for noise (partial output, hooks) and bad JSON.
+    /// Only <c>system</c> <c>task_summary</c> and <c>status</c> events say what the agent is doing.
+    /// </summary>
+    private static StreamedEvent? ParseEphemeralFrame(string data)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
+                || Str(payload, "type") != "system" || Str(payload, "subtype") is not ("task_summary" or "status"))
+                return null;
+            var ev = ParseEvent(payload);
+            if (DateTimeOffset.TryParse(Str(root, "timestamp"), out var at)) ev = ev with { CreatedAt = at };
+            return new StreamedEvent(0, ev, Ephemeral: true);
         }
         catch (JsonException)
         {

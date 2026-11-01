@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
@@ -122,6 +122,25 @@ it("select session streams its transcript", async () => {
   FakeEventSource.latest().emit("item", item({ role: "user", text: "Go ahead" }));
   expect(screen.getByText("Working on it").closest(".msg")).toHaveClass("msg-agent");
   expect(screen.getByText("Go ahead").closest(".msg")).toHaveClass("msg-user");
+});
+
+it("an ephemeral progress frame shows as an in-progress agent bubble until the next item", async () => {
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  FakeEventSource.latest().emit("item", item({ text: "Starting" }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Running the tests" }));
+  const bubble = screen.getByText("Running the tests").closest(".msg");
+  expect(bubble).toHaveClass("msg-agent");
+  expect(bubble).toHaveClass("msg-progress");
+  expect(within(bubble as HTMLElement).getByRole("status")).toBeInTheDocument();
+  expect(screen.getByRole("log").lastElementChild?.lastElementChild).toBe(bubble);
+
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Writing the fix" }));
+  expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
+  expect(screen.getByText("Writing the fix")).toBeInTheDocument();
+
+  FakeEventSource.latest().emit("item", item({ text: "Done" }));
+  expect(screen.queryByText("Writing the fix")).not.toBeInTheDocument();
 });
 
 it("switching sessions closes the old stream", async () => {

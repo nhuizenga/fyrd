@@ -258,6 +258,13 @@ internal static class HubEndpoints
                     {
                         await foreach (var e in cloud.StreamEventsAsync(id, last, ct))
                         {
+                            if (e.Ephemeral)
+                            {
+                                // Live-only: no id (so EventSource's resume point is untouched) and never deduplicated.
+                                foreach (var item in HubTranscript.Map(e))
+                                    await Write($"event: progress\ndata: {JsonSerializer.Serialize(item, options)}\n\n");
+                                continue;
+                            }
                             if (last is { } seen && e.Sequence <= seen) continue;
                             last = e.Sequence;
                             foreach (var item in HubTranscript.Map(e))
