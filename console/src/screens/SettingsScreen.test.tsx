@@ -4,7 +4,7 @@ import { vi } from "vitest";
 import * as api from "../api";
 import { config, hubState } from "../test/fixtures";
 import { useRoute } from "../route";
-import type { HubMemory, HubPersona } from "../types";
+import type { HubMemory, HubPersona, HubState } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SettingsScreen from "./SettingsScreen";
 
@@ -41,8 +41,8 @@ beforeEach(() => {
   vi.mocked(api.deletePersona).mockResolvedValue(undefined);
 });
 
-const renderSettings = async (section: "Environment" | "Personas" | "Agent memory" = "Personas") => {
-  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+const renderSettings = async (section: "Environment" | "Spend limits" | "Personas" | "Agent memory" = "Personas", state = hubState()) => {
+  render(<Routed state={state} onChanged={vi.fn()} />);
   await userEvent.click(screen.getByRole("button", { name: section }));
   if (section === "Personas") await screen.findByRole("button", { name: /^Builder/ });
   else if (section === "Agent memory") await screen.findByText("Shared note");
@@ -51,7 +51,7 @@ const renderSettings = async (section: "Environment" | "Personas" | "Agent memor
 it("settings sections are a left nav showing one section at a time", async () => {
   render(<Routed state={hubState()} onChanged={vi.fn()} />);
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
-  expect(nav).toHaveTextContent("EnvironmentPersonasAgent memory");
+  expect(nav).toHaveTextContent("EnvironmentSpend limitsPersonasAgent memory");
   expect(screen.getByRole("heading", { name: "Environment" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Personas" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
@@ -219,4 +219,61 @@ it("a persona with a newer default shows a chip and can be reset to default", as
   await userEvent.click(screen.getByRole("button", { name: "Reset to default" }));
   expect(api.resetPersona).toHaveBeenCalledWith("builder");
   expect(await screen.findByDisplayValue("Build better things.")).toBeInTheDocument();
+});
+
+it("spend limits load, validate and save both limits", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config({ sessionDailyLimitUsd: 40, fyrdDailyLimitUsd: 400 }));
+  await renderSettings("Spend limits");
+  const s = await screen.findByLabelText("Per-session daily limit (USD)");
+  await vi.waitFor(() => expect(s).toHaveValue("40"));
+  expect(screen.getByLabelText("Fyrd-wide daily limit (USD)")).toHaveValue("400");
+  expect(screen.getAllByText("Whole dollars, 1 to 10000.")).toHaveLength(2);
+  await userEvent.clear(s);
+  await userEvent.type(s, "0");
+  await userEvent.click(screen.getByRole("button", { name: "Save session limit" }));
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  expect(screen.getByText("Enter a whole number from 1 to 10000.")).toBeInTheDocument();
+  await userEvent.clear(s);
+  await userEvent.type(s, " 75 ");
+  await userEvent.click(screen.getByRole("button", { name: "Save session limit" }));
+  expect(api.updateConfig).toHaveBeenCalledWith({ sessionDailyLimitUsd: 75 });
+  expect(await screen.findByText("Session limit saved.")).toBeInTheDocument();
+  const f = screen.getByLabelText("Fyrd-wide daily limit (USD)");
+  await userEvent.clear(f);
+  await userEvent.type(f, "10001");
+  await userEvent.click(screen.getByRole("button", { name: "Save fyrd limit" }));
+  expect(api.updateConfig).toHaveBeenCalledTimes(1);
+  await userEvent.clear(f);
+  await userEvent.type(f, "900");
+  await userEvent.click(screen.getByRole("button", { name: "Save fyrd limit" }));
+  expect(api.updateConfig).toHaveBeenCalledWith({ fyrdDailyLimitUsd: 900 });
+  expect(await screen.findByText("Fyrd limit saved.")).toBeInTheDocument();
+});
+
+const budget = (o: Partial<NonNullable<HubState["budget"]>> = {}) => ({
+  date: "2026-11-01", timeZone: "America/Chicago", fyrdCostToday: 123.456, fyrdLimitUsd: 500, fyrdBlocked: false, ...o,
+});
+
+it("spend limits show today's total spend against the Fyrd-wide limit", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config());
+  await renderSettings("Spend limits", hubState({ budget: budget() }));
+  const total = await screen.findByRole("status", { name: "Total spend today" });
+  expect(total).toHaveTextContent("$123.46 of $500");
+  expect(total).toHaveTextContent("25%");
+  expect(total).toHaveTextContent("2026-11-01");
+  expect(screen.queryByText("Limit reached")).not.toBeInTheDocument();
+});
+
+it("the total spend status says when the Fyrd-wide limit is reached", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config());
+  await renderSettings("Spend limits", hubState({ budget: budget({ fyrdCostToday: 512.5, fyrdBlocked: true }) }));
+  const total = await screen.findByRole("status", { name: "Total spend today" });
+  expect(total).toHaveTextContent("$512.50 of $500");
+  expect(total).toHaveTextContent("Limit reached");
+});
+
+it("the total spend status copes with no spend data yet", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config());
+  await renderSettings("Spend limits", hubState({ budget: null }));
+  expect(await screen.findByRole("status", { name: "Total spend today" })).toHaveTextContent("No spend data yet");
 });

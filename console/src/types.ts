@@ -6,6 +6,12 @@ export interface FyrdConfig {
   environmentId: string | null;
   leadModel: string;
   peerModel: string;
+  /** Daily spend limit per session, in USD (1–10,000). */
+  sessionDailyLimitUsd: number;
+  /** Daily spend limit for the whole fyrd, in USD (1–10,000). */
+  fyrdDailyLimitUsd: number;
+  /** IANA time zone that defines "today" for spend; null until the console reports one. */
+  timeZone: string | null;
 }
 
 /** Mutating responses may carry a relay failure alongside the saved value. */
@@ -23,6 +29,7 @@ export interface HubSessionView {
   tags: string[];
   /** URLs of the pull requests the session opened. */
   pullRequests: string[];
+  cost?: HubCostView | null;
 }
 
 /** One of a session's pull requests with live GitHub status (`GET /api/hub/sessions/{id}/pull-requests`). */
@@ -36,6 +43,25 @@ export interface PullRequestStatus {
   /** Why GitHub could not be read, when `state` is `unknown`. */
   error?: string | null;
   canMerge: boolean;
+}
+
+/** A session's estimated (list-price) spend for today against its daily limit. */
+export interface HubCostView {
+  costToday: number;
+  limitUsd: number;
+  ratio: number;
+  estimated: boolean;
+  blocked: "session" | "fyrd" | null;
+  canExtend: boolean;
+  exempt: boolean;
+}
+
+export interface HubBudgetView {
+  date: string;
+  timeZone: string;
+  fyrdCostToday: number;
+  fyrdLimitUsd: number;
+  fyrdBlocked: boolean;
 }
 
 export interface HubQuestion {
@@ -63,6 +89,7 @@ export interface HubState {
   lastError: string | null;
   lastPollAt: string | null;
   controller: ControllerInfo | null;
+  budget?: HubBudgetView | null;
 }
 
 export interface TranscriptOption {
@@ -87,6 +114,8 @@ export interface TranscriptItem {
   at: string;
   questions?: TranscriptQuestion[] | null;
   toolUseId?: string | null;
+  /** Progress frames only: what the agent is doing now (a tool, "Thinking…"); `text` is the reply streamed so far. Both empty = nothing in progress. */
+  status?: string | null;
 }
 
 export interface HubPersona {

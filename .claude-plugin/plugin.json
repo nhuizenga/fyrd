@@ -1,7 +1,11 @@
 {
   "name": "fyrd",
   "description": "Build software with an army of specialized agents, managed from a one-click console.",
-  "version": "0.1.10",
+<<<<<<< HEAD
+  "version": "0.2.2",
+=======
+  "version": "0.2.2",
+>>>>>>> fyrd/role-rules-text
   "author": {
     "name": "nhuizenga",
     "email": "nhuizenga@servicetitan.com"

@@ -322,106 +322,31 @@ public sealed class CloudSessionClientTests : IDisposable
     }
 
     [Fact]
-    public async Task StreamEvents_LogsEveryRawEphemeralPayload_ToTheLogFile()
+    public async Task StreamEvents_YieldsOnlyTheEphemeralEventsThatShowProgress()
     {
-        const string sse = """
-            event: ephemeral_event
-            data: {"event_type":"stream_event","payload":{"type":"stream_event","n":1}}
-
-            event: client_event
-            id: 5
-            data: {"event_id":"ev_5","sequence_num":5,"payload":{"type":"user","message":{"content":"hi"}}}
-
-            event: ephemeral_event
-            data: {"event_type":"system","payload":{"type":"system","subtype":"hook_started"}}
-            """;
-        var log = Path.Combine(Path.GetTempPath(), $"fyrd-eph-{Guid.NewGuid():N}", "ephemeral.jsonl");
-        try
-        {
-            var client = new CloudSessionClient(new HttpClient(new FakeHandler(HttpStatusCode.OK, sse)), new ClaudeCredentials(_home), log);
-            await Drain(client.StreamEventsAsync("session_01abc", null));
-
-            var lines = File.ReadAllLines(log).Select(l => System.Text.Json.JsonDocument.Parse(l).RootElement).ToList();
-            Assert.Equal(2, lines.Count);
-            Assert.All(lines, l => Assert.Equal("session_01abc", l.GetProperty("session").GetString()));
-            Assert.All(lines, l => Assert.True(l.TryGetProperty("at", out _)));
-            Assert.All(lines, l => Assert.Equal("ephemeral_event", l.GetProperty("frame").GetString()));
-            Assert.Equal(1, lines[0].GetProperty("data").GetProperty("payload").GetProperty("n").GetInt32());
-            Assert.Equal("hook_started", lines[1].GetProperty("data").GetProperty("payload").GetProperty("subtype").GetString());
-        }
-        finally { Directory.Delete(Path.GetDirectoryName(log)!, true); }
-    }
-
-    [Fact]
-    public async Task StreamEvents_AlsoLogsResultEvents_TaggedWithTheirFrameKind()
-    {
-        const string sse = """
-            event: client_event
-            id: 8
-            data: {"event_id":"ev_8","sequence_num":8,"payload":{"type":"result","subtype":"success","result":"done","duration_ms":1234}}
-
-            event: client_event
-            id: 9
-            data: {"event_id":"ev_9","sequence_num":9,"payload":{"type":"user","message":{"content":"hi"}}}
-
-            event: ephemeral_event
-            data: {"payload":{"type":"stream_event"}}
-            """;
-        var log = Path.Combine(Path.GetTempPath(), $"fyrd-eph-{Guid.NewGuid():N}", "ephemeral.jsonl");
-        try
-        {
-            var client = new CloudSessionClient(new HttpClient(new FakeHandler(HttpStatusCode.OK, sse)), new ClaudeCredentials(_home), log);
-            Assert.Equal(2, (await Drain(client.StreamEventsAsync("session_01abc", null))).Count);
-
-            var lines = File.ReadAllLines(log).Select(l => System.Text.Json.JsonDocument.Parse(l).RootElement).ToList();
-            Assert.Equal(["client_event", "ephemeral_event"], lines.Select(l => l.GetProperty("frame").GetString()));
-            Assert.Equal("success", lines[0].GetProperty("data").GetProperty("payload").GetProperty("subtype").GetString());
-            Assert.Equal(1234, lines[0].GetProperty("data").GetProperty("payload").GetProperty("duration_ms").GetInt32());
-        }
-        finally { Directory.Delete(Path.GetDirectoryName(log)!, true); }
-    }
-
-    [Fact]
-    public async Task StreamEvents_UnwritableEphemeralLog_DoesNotBreakTheStream()
-    {
-        const string sse = """
-            event: ephemeral_event
-            data: {"payload":{"type":"stream_event"}}
-
-            event: client_event
-            id: 5
-            data: {"event_id":"ev_5","sequence_num":5,"payload":{"type":"user","message":{"content":"hi"}}}
-            """;
-        var blocked = Path.Combine(Path.GetTempPath(), $"fyrd-eph-{Guid.NewGuid():N}");
-        File.WriteAllText(blocked, "a file, not a directory");
-        try
-        {
-            var client = new CloudSessionClient(new HttpClient(new FakeHandler(HttpStatusCode.OK, sse)), new ClaudeCredentials(_home), Path.Combine(blocked, "x.jsonl"));
-            Assert.Single(await Drain(client.StreamEventsAsync("session_01abc", null)));
-        }
-        finally { File.Delete(blocked); }
-    }
-
-    [Fact]
-    public async Task StreamEvents_YieldsProgressEphemeralEvents_FlaggedAndUnsequenced()
-    {
-        const string sse = """
-            event: ephemeral_event
-            data: {"event_type":"system","payload":{"type":"system","subtype":"task_summary","summary":"Running the tests"},"timestamp":"2026-11-01T10:00:02Z"}
-
-            event: ephemeral_event
-            data: {"event_type":"system","payload":{"type":"system","subtype":"hook_started"}}
-
-            event: ephemeral_event
-            data: {"event_type":"stream_event","payload":{"type":"stream_event"}}
-            """;
+        static string Frame(string payload) => $"event: ephemeral_event\ndata: {{\"event_type\":\"x\",\"payload\":{payload},\"timestamp\":\"2026-11-01T10:00:02Z\"}}\n\n";
+        var sse = string.Concat(
+            Frame("""{"type":"system","subtype":"task_summary","detail":"Running grep"}"""),
+            Frame("""{"type":"stream_event","event":{"type":"message_start","message":{"content":[]}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Read"}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"""),
+            Frame("""{"type":"system","subtype":"post_turn_summary","status_detail":"done"}"""),
+            Frame("""{"type":"tool_progress","tool_name":"Bash","elapsed_time_seconds":30,"heartbeat":true}"""),
+            // Noise, all dropped:
+            Frame("""{"type":"system","subtype":"status","status":"requesting"}"""),
+            Frame("""{"type":"system","subtype":"thinking_tokens","estimated_tokens":5}"""),
+            Frame("""{"type":"system","subtype":"hook_started"}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{"}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"x"}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"""),
+            Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_sub","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"from a subagent"}}}"""));
         var events = await Drain(Client(new FakeHandler(HttpStatusCode.OK, sse)).StreamEventsAsync("session_01abc", null));
 
-        var e = Assert.Single(events);
-        Assert.True(e.Ephemeral);
-        Assert.Equal(0, e.Sequence);
-        Assert.Equal("system", e.Event.Type);
-        Assert.Equal("Running the tests", e.Event.Raw.GetProperty("summary").GetString());
+        Assert.Equal(6, events.Count);
+        Assert.All(events, e => { Assert.True(e.Ephemeral); Assert.Equal(0, e.Sequence); });
+        Assert.Equal(DateTimeOffset.Parse("2026-11-01T10:00:02Z"), events[0].Event.CreatedAt);
+        Assert.Equal("Running grep", events[0].Event.Raw.GetProperty("detail").GetString());
+        Assert.Equal("Hello", events[3].Event.Raw.GetProperty("event").GetProperty("delta").GetProperty("text").GetString());
     }
 
     [Fact]

@@ -47,8 +47,8 @@ A message starting `Review request:` from a Builder names a PR, its base branch,
 1. **Titles.** `reviewer-<builder suffix>` and `validator-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
 2. **Repo.** It comes from the PR, so ask nothing.
 3. **Session cap.** Check once for both sessions. If over, ask as in Start step 5.
-4. **Recycle.** Only for sessions actually being started.
-5. **Create.** Reviewer `prompt`: `Review pull request <url> against the spec below. Post one GitHub review with inline comments and a summary, then reply with your findings.` followed by the spec links. Validator `prompt`: `Validate pull request <url> against the spec below. Reply with your findings. If anything fails, also send them to the Builder with send_message (session <builder id>).` followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
+4. **Recycle.** As in Start step 6, and only for sessions actually being started.
+5. **Create.** Reviewer `prompt`: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.` followed by the spec links. Validator `prompt`: `Validate pull request <url> against the spec below. Base branch: <base>. Reply with your findings. If anything fails, also send them to the Builder with send_message (session <builder id>).` followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
 6. Reply with both titles and session ids.
 
 ## Tear down
