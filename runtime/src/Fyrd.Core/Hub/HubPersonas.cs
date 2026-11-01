@@ -58,16 +58,20 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         }
     }
 
-    /// <summary>Replaces a persona with its current seed text. Throws when the persona has no seed.</summary>
+    /// <summary>
+    /// Replaces a persona with its current seed text. Reset is an explicit owner action, so it also recreates a persona the
+    /// owner deleted (sync alone never does). Throws <see cref="KeyNotFoundException"/> when the persona has no seed.
+    /// </summary>
     public HubPersona Reset(string id)
     {
         lock (_gate)
         {
             SeedIfNeeded();
             Validate(id);
-            if (!_seeds.TryGetValue(id, out var seed)) throw new InvalidOperationException($"Persona '{id}' has no default to reset to.");
+            if (!_seeds.TryGetValue(id, out var seed)) throw new KeyNotFoundException($"Persona '{id}' has no default to reset to.");
             var existing = Read(FileFor(id));
-            var reset = seed with { Name = existing is { Locked: true } ? existing.Name : seed.Name, Locked = existing?.Locked ?? seed.Locked, SeedHash = Hash(seed) };
+            var effective = Effective(seed, existing);
+            var reset = effective with { Locked = existing?.Locked ?? seed.Locked, SeedHash = Hash(effective) };
             AtomicFile.Write(FileFor(id), JsonSerializer.Serialize(reset, Json.Options));
             return reset;
         }
@@ -79,12 +83,16 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
     public static string Hash(string name, string model, string definition) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name + "\n" + model + "\n" + definition))).ToLowerInvariant();
 
+    /// <summary>A locked persona keeps its stored name, so its seed is compared and hashed under that name.</summary>
+    private static HubPersona Effective(HubPersona seed, HubPersona? stored) =>
+        stored is { Locked: true } ? seed with { Name = stored.Name } : seed;
+
     private HubPersona? Flag(HubPersona? p)
     {
         if (p is null) return null;
         if (!_seeds.TryGetValue(p.Id, out var seed)) return p with { UpdateAvailable = false };
         var own = Hash(p);
-        var seedHash = Hash(seed);
+        var seedHash = Hash(Effective(seed, p));
         return p with { UpdateAvailable = own != seedHash && p.SeedHash != seedHash };
     }
 
@@ -168,7 +176,8 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
             else if (key == "locked") locked = val.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
         if (!AllowedModels.Contains(model)) return null;
-        return new HubPersona(id, name, model, m.Groups["body"].Value.Trim(), locked);
+        // Normalised so a CRLF checkout hashes the same as the LF text seed-history.json was built from.
+        return new HubPersona(id, name, model, m.Groups["body"].Value.Replace("\r\n", "\n").Trim(), locked);
     }
 
     private Dictionary<string, HashSet<string>> ReadHistory()
@@ -207,8 +216,8 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
             var seed = ParseSeed(f);
             if (seed is null) continue;
             _seeds[id] = seed;
-            var seedHash = Hash(seed);
             var stored = Read(FileFor(id));
+            var seedHash = Hash(Effective(seed, stored));
             if (!seededIds.Contains(id))
             {
                 seededIds.Add(id);
@@ -233,7 +242,7 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
                 if (stored.SeedHash != origin) Write(stored with { SeedHash = origin });
                 continue;
             }
-            Write(seed with { Name = stored.Locked ? stored.Name : seed.Name, Locked = stored.Locked, SeedHash = seedHash });
+            Write(Effective(seed, stored) with { Locked = stored.Locked, SeedHash = seedHash });
         }
         if (markerChanged) AtomicFile.Write(marker, string.Join("\n", seededIds.Order(StringComparer.Ordinal)) + "\n");
 

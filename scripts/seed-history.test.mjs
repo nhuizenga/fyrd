@@ -19,6 +19,21 @@ test("hashPersona is sha256 of name, model and definition joined by newlines", (
   assert.notEqual(hashPersona({ name: "A", model: "m", definition: "d" }), hashPersona({ name: "A", model: "m", definition: "e" }));
 });
 
+test("parseSeed hashes CRLF and LF text the same", () => {
+  const lf = "---\nname: B\nmodel: m\n---\nOne\nTwo\n";
+  assert.equal(hashPersona(parseSeed("b", lf)), hashPersona(parseSeed("b", lf.replace(/\n/g, "\r\n"))));
+});
+
+test("seed-history.json contains the hash of every current persona", () => {
+  const dir = path.join(root, "personas/hub");
+  const history = JSON.parse(fs.readFileSync(path.join(dir, "seed-history.json"), "utf8"));
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+    const id = f.slice(0, -3);
+    const h = hashPersona(parseSeed(id, fs.readFileSync(path.join(dir, f), "utf8")));
+    assert.ok(history[id]?.includes(h), `${id}: seed-history.json is stale; run node scripts/seed-history.mjs and commit it`);
+  }
+});
+
 test("seed-history.json lists every persona with valid hashes", () => {
   const dir = path.join(root, "personas/hub");
   const history = JSON.parse(fs.readFileSync(path.join(dir, "seed-history.json"), "utf8"));

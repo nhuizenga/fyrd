@@ -23,7 +23,8 @@ export function parseSeed(id, text) {
     if (key === "name") name = val;
     else if (key === "model") model = val;
   }
-  return { name, model, definition: m[2].trim() };
+  // CRLF normalised, as HubPersonas.ParseSeed does.
+  return { name, model, definition: m[2].replace(/\r\n/g, "\n").trim() };
 }
 
 export function hashPersona({ name, model, definition }) {

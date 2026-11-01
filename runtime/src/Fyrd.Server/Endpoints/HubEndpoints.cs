@@ -232,7 +232,7 @@ internal static class HubEndpoints
         group.MapPost("/personas/{id}/reset", (string id, HubPersonas personas) => ApiErrors.Run(() =>
         {
             try { return Results.Ok(personas.Reset(id)); }
-            catch (InvalidOperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status404NotFound); }
+            catch (KeyNotFoundException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status404NotFound); }
         }));
 
         group.MapDelete("/personas/{id}", (string id, HubPersonas personas) => ApiErrors.Run(() =>
