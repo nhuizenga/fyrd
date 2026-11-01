@@ -221,7 +221,7 @@ public sealed partial class HubRunner(
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
         return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
-            CreatedAt(s.Raw), lastActivity, s.Tags.ToList());
+            CreatedAt(s.Raw), lastActivity, s.Tags.ToList()) { PullRequests = PullRequests(s.Raw) };
     }
 
     private bool IsController(CloudSession s) => s.Id == _controllerId;
@@ -254,6 +254,31 @@ public sealed partial class HubRunner(
             && First(gi, "branches") is { ValueKind: JsonValueKind.String } b)
             branch = b.GetString();
         return (repo, branch);
+    }
+
+    /// <summary>
+    /// Pull request URLs in the session's outcomes' <c>git_info</c>: a <c>pull_requests</c> array (URL strings or objects
+    /// with a <c>url</c>) and/or a single <c>pr_url</c> / <c>pull_request_url</c>. Distinct, in order seen.
+    /// </summary>
+    private static IReadOnlyList<string> PullRequests(JsonElement raw)
+    {
+        var urls = new List<string>();
+        void Add(string? u) { if (!string.IsNullOrWhiteSpace(u) && !urls.Contains(u)) urls.Add(u); }
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("session_context", out var ctx)
+            || ctx.ValueKind != JsonValueKind.Object || !ctx.TryGetProperty("outcomes", out var outcomes)
+            || outcomes.ValueKind != JsonValueKind.Array)
+            return urls;
+        foreach (var o in outcomes.EnumerateArray())
+        {
+            if (o.ValueKind != JsonValueKind.Object || !o.TryGetProperty("git_info", out var gi) || gi.ValueKind != JsonValueKind.Object)
+                continue;
+            if (gi.TryGetProperty("pull_requests", out var prs) && prs.ValueKind == JsonValueKind.Array)
+                foreach (var pr in prs.EnumerateArray())
+                    Add(pr.ValueKind == JsonValueKind.String ? pr.GetString() : Str(pr, "url"));
+            Add(Str(gi, "pr_url"));
+            Add(Str(gi, "pull_request_url"));
+        }
+        return urls;
     }
 
     private static JsonElement? First(JsonElement obj, string name) =>

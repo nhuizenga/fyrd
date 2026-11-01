@@ -11,6 +11,9 @@ export interface Transcript {
   fault: string | null;
 }
 
+/** Progress is live-only (the server never replays it), so keep each session's last line for when the owner comes back. */
+const lastProgress = new Map<string, TranscriptItem>();
+
 const empty: Transcript = { items: [], progress: null, connected: false, fault: null };
 
 /**
@@ -21,7 +24,7 @@ export function useTranscript(sessionId: string | null): Transcript {
   const [transcript, setTranscript] = useState<Transcript>(empty);
 
   useEffect(() => {
-    setTranscript(empty);
+    setTranscript(sessionId ? { ...empty, progress: lastProgress.get(sessionId) ?? null } : empty);
     if (!sessionId) return;
     const source = new EventSource(`/api/hub/sessions/${encodeURIComponent(sessionId)}/stream`);
     const seen = new Set<string>();
@@ -30,10 +33,12 @@ export function useTranscript(sessionId: string | null): Transcript {
       const item = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
       if (seen.has(item.key)) return;
       seen.add(item.key);
+      lastProgress.delete(sessionId);
       setTranscript((t) => ({ ...t, fault: null, progress: null, items: [...t.items, item] }));
     });
     source.addEventListener("progress", (e) => {
       const progress = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
+      lastProgress.set(sessionId, progress);
       setTranscript((t) => ({ ...t, progress }));
     });
     source.addEventListener("fault", (e) => {
