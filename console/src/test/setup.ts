@@ -1,4 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { FakeEventSource } from "./fakeEventSource";
+
+globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+beforeEach(() => {
+  FakeEventSource.instances = [];
+});
 
 // Anvil2 relies on browser APIs that jsdom lacks.
 if (!window.matchMedia) {

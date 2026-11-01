@@ -9,3 +9,7 @@ runtime/src/Fyrd.Server/wwwroot/
 console/node_modules/
 spikes/cloud-sessions/out/
 spikes/cloud-cli/out-*.txt
+
+# Playwright
+console/test-results/
+console/playwright-report/

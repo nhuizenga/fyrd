@@ -105,8 +105,6 @@ public sealed partial class HubRunner(
         }
 
         Prune(sessions.Select(s => s.Id).Concat(failed).ToHashSet(StringComparer.Ordinal));
-        state.PublishRecent(_windows.ToDictionary(
-            kv => kv.Key, kv => (IReadOnlyList<SessionEvent>)kv.Value.Recent.ToArray(), StringComparer.Ordinal));
         state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed);
 
         try

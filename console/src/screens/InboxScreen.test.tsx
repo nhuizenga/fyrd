@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
+import { FakeEventSource, item } from "../test/fakeEventSource";
 import { hubState, question, session } from "../test/fixtures";
 import InboxScreen from "./InboxScreen";
 
@@ -28,12 +29,25 @@ it("option click answers", async () => {
   expect(onChanged).toHaveBeenCalled();
 });
 
-it("free text reply", async () => {
+it("the answer box appears only after choosing Other", async () => {
   vi.mocked(api.answerQuestion).mockResolvedValue(undefined);
   renderInbox();
-  await userEvent.type(screen.getByLabelText("Your reply"), "Something else");
-  await userEvent.click(screen.getByRole("button", { name: "Send reply" }));
+  expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Other" }));
+  await userEvent.type(screen.getByLabelText("Your answer"), "Something else");
+  await userEvent.click(screen.getByRole("button", { name: "Send answer" }));
   expect(api.answerQuestion).toHaveBeenCalledWith("s1:r1:0", { text: "Something else" });
+});
+
+it("multi-select Other adds free text to the chosen labels", async () => {
+  vi.mocked(api.answerQuestion).mockResolvedValue(undefined);
+  renderInbox([question({ multiSelect: true, options: ["A", "B"] })]);
+  expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByLabelText("A"));
+  await userEvent.click(screen.getByLabelText("Other"));
+  await userEvent.type(screen.getByLabelText("Your answer"), "Z");
+  await userEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(api.answerQuestion).toHaveBeenCalledWith("s1:r1:0", { text: "A, Z" });
 });
 
 it("multi-select sends chosen labels joined", async () => {
@@ -53,26 +67,33 @@ it("409 shows no-longer-waiting message and an Open in claude.ai link", async ()
   expect(screen.getByRole("link", { name: "Open in claude.ai" })).toHaveAttribute("href", "https://claude.ai/code/s1");
 });
 
-it("card shows the session's repo and age, and loads the conversation on expand", async () => {
-  vi.mocked(api.getMessages).mockResolvedValue([{ role: "agent", text: "Which DB should I use?", at: "t" }]);
+it("card shows repo and age, and the live conversation above the answer buttons", async () => {
   const askedAt = new Date(Date.now() - 5 * 60_000).toISOString();
   render(
     <InboxScreen
       state={hubState({
         sessions: [session({ id: "s1", repo: "acme/web" })],
-        questions: [question({ askedAt })],
+        questions: [question({ askedAt, toolUseId: "tu1" })],
       })}
       onChanged={vi.fn()}
     />,
   );
   expect(screen.getByText(/acme\/web/)).toBeInTheDocument();
-  expect(screen.getByText(/5m ago/)).toBeInTheDocument();
-  expect(api.getMessages).not.toHaveBeenCalled();
-  const toggle = screen.getByRole("button", { name: "Conversation so far" });
-  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByText(/5 minutes ago/)).toBeInTheDocument();
+  expect(FakeEventSource.latest().url).toBe("/api/hub/sessions/s1/stream");
+  FakeEventSource.latest().emit("item", item({ text: "Which DB should I use?" }));
+  FakeEventSource.latest().emit("item", item({ kind: "question", text: "Which DB?", toolUseId: "tu1",
+    questions: [{ question: "Which DB?", multiSelect: false, options: [{ label: "Postgres" }] }] }));
+  const log = screen.getByRole("log", { name: "Conversation" });
+  expect(log).toHaveTextContent("Which DB should I use?");
+  // The pending question shows once, as answer buttons, not again in the conversation.
+  expect(log).not.toHaveTextContent("Postgres");
+  const answer = screen.getByRole("button", { name: "Postgres" });
+  expect(log.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const toggle = screen.getByRole("button", { name: "Show whole conversation" });
+  expect(log).not.toHaveClass("inbox-log-expanded");
   await userEvent.click(toggle);
-  expect(api.getMessages).toHaveBeenCalledWith("s1");
-  expect(await screen.findByText("Which DB should I use?")).toBeInTheDocument();
+  expect(log).toHaveClass("inbox-log-expanded");
   expect(toggle).toHaveAttribute("aria-expanded", "true");
 });
 

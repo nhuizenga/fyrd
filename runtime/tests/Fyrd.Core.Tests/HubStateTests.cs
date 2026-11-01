@@ -102,16 +102,6 @@ public sealed class HubStateTests
     }
 
     [Fact]
-    public void RecentEvents_EmptyUntilPublished()
-    {
-        var s = new HubState(_time);
-        Assert.Empty(s.RecentEvents("s1"));
-        var e = new Fyrd.Core.CloudSessions.SessionEvent("e1", "user", DateTimeOffset.UnixEpoch, "hi", Input);
-        s.PublishRecent(new Dictionary<string, IReadOnlyList<Fyrd.Core.CloudSessions.SessionEvent>> { ["s1"] = [e] });
-        Assert.Single(s.RecentEvents("s1"));
-    }
-
-    [Fact]
     public void RequestPoll_CompletesUntilReset()
     {
         var s = new HubState();

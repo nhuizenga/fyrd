@@ -702,6 +702,8 @@ public class SpecRunnerTests
         public Task ArchiveAsync(string id, CancellationToken ct = default) => inner.ArchiveAsync(id, ct);
         public Task AnswerQuestionAsync(string id, Fyrd.Core.Hub.HubQuestion q, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default) =>
             inner.AnswerQuestionAsync(id, q, answers, ct);
+        public IAsyncEnumerable<StreamedEvent> StreamEventsAsync(string id, long? after, CancellationToken ct = default) =>
+            inner.StreamEventsAsync(id, after, ct);
     }
 
     [Fact]

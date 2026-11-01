@@ -1,5 +1,9 @@
+using System.Text;
+using System.Text.Json;
 using Fyrd.Core.CloudSessions;
 using Fyrd.Core.Hub;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.Options;
 
 namespace Fyrd.Server.Endpoints;
 
@@ -7,15 +11,17 @@ namespace Fyrd.Server.Endpoints;
 internal static class HubEndpoints
 {
     private const int MaxText = 20_000;
-    private const int MessageCount = 50;
     private const string ResumeText = "Continue where you left off.";
     private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
     private const string NotPending = "This question is no longer waiting for an answer.";
+    private const string SignedOut = "Signed out of Claude — run `claude auth login`";
+    private static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan ReopenDelay = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(10);
 
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
     private sealed record AnswerBody(string? Choice, string? Text);
-    private sealed record MessageView(string Role, string Text, DateTimeOffset At);
 
     public static IEndpointRouteBuilder MapHub(this IEndpointRouteBuilder app)
     {
@@ -62,8 +68,19 @@ internal static class HubEndpoints
                 return Results.NoContent();
             }));
 
-        group.MapGet("/sessions/{id}/messages", (string id, HubState state) =>
-            InHub(id, state, () => Task.FromResult(Results.Ok(RecentMessages(state, id)))));
+
+        // Live transcript: relays the cloud session's own event stream as Server-Sent Events of TranscriptItems.
+        group.MapGet("/sessions/{id}/stream", async (string id, HttpContext http, HubState state, ICloudSessions cloud,
+            IOptions<JsonOptions> json) =>
+        {
+            if (!state.Sessions.Any(s => s.Id == id))
+            {
+                await Results.Problem($"Session '{id}' is not a hub session.", statusCode: StatusCodes.Status404NotFound)
+                    .ExecuteAsync(http);
+                return;
+            }
+            await StreamTranscript(id, http, cloud, json.Value.SerializerOptions);
+        });
 
         group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
             InHub(id, state, () =>
@@ -190,6 +207,93 @@ internal static class HubEndpoints
         return app;
     }
 
+    /// <summary>
+    /// Writes <c>event: item</c> frames until the client goes away, reopening the upstream stream whenever it ends.
+    /// Resumes after <c>Last-Event-ID</c> (or <c>?after=</c>); drops sequence numbers already sent.
+    /// </summary>
+    private static async Task StreamTranscript(string id, HttpContext http, ICloudSessions cloud, JsonSerializerOptions options)
+    {
+        var ct = http.RequestAborted;
+        long? last = long.TryParse(http.Request.Headers["Last-Event-ID"].ToString(), out var h) ? h
+            : long.TryParse(http.Request.Query["after"].ToString(), out var q) ? q
+            : null;
+
+        var resp = http.Response;
+        resp.ContentType = "text/event-stream";
+        resp.Headers.CacheControl = "no-cache";
+        resp.Headers["X-Accel-Buffering"] = "no";
+
+        // Writes are serialized: the keep-alive timer and the relay loop share the response.
+        var gate = new SemaphoreSlim(1, 1);
+        var lastWrite = DateTimeOffset.UtcNow;
+        async Task Write(string frame)
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                await resp.WriteAsync(frame, Encoding.UTF8, ct);
+                await resp.Body.FlushAsync(ct);
+                lastWrite = DateTimeOffset.UtcNow;
+            }
+            finally { gate.Release(); }
+        }
+
+        try
+        {
+            await Write(": connected\n\n");
+            using var keepAliveCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var keepAlive = Task.Run(async () =>
+            {
+                using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+                while (await timer.WaitForNextTickAsync(keepAliveCts.Token))
+                    if (DateTimeOffset.UtcNow - lastWrite >= KeepAlive) await Write(": keep-alive\n\n");
+            }, keepAliveCts.Token);
+
+            try
+            {
+                var delay = ReopenDelay;
+                while (!ct.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await foreach (var e in cloud.StreamEventsAsync(id, last, ct))
+                        {
+                            if (last is { } seen && e.Sequence <= seen) continue;
+                            last = e.Sequence;
+                            foreach (var item in HubTranscript.Map(e))
+                                await Write($"id: {item.Seq}\nevent: item\ndata: {JsonSerializer.Serialize(item, options)}\n\n");
+                        }
+                        delay = ReopenDelay;
+                    }
+                    catch (Exception e) when (e is ClaudeAuthMissingException or CloudSessionAuthException)
+                    {
+                        await Fault(SignedOut);
+                        return;
+                    }
+                    // Any other failure (API error, dropped connection, missing setting) is reported, then retried.
+                    catch (Exception e) when (!ct.IsCancellationRequested)
+                    {
+                        await Fault(e.Message);
+                        delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, MaxBackoff.Ticks));
+                    }
+                    await Task.Delay(delay, ct);
+                }
+            }
+            finally
+            {
+                keepAliveCts.Cancel();
+                try { await keepAlive; } catch { /* the client is gone or the relay ended; nothing to report */ }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The client went away.
+        }
+
+        Task Fault(string detail) =>
+            Write($"event: fault\ndata: {JsonSerializer.Serialize(new { detail }, options)}\n\n");
+    }
+
     private static IResult SavePersona(string? id, HubPersona? body, HubPersonas personas) => ApiErrors.Run(() =>
     {
         if (body is null) return Bad("Body is required.");
@@ -198,14 +302,6 @@ internal static class HubEndpoints
         try { return Results.Ok(personas.Save(p)); }
         catch (InvalidOperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict); }
     });
-
-    /// <summary>The last user/assistant messages from the poll's in-memory event window; no cloud calls.</summary>
-    private static IReadOnlyList<MessageView> RecentMessages(HubState state, string id) =>
-        state.RecentEvents(id)
-            .Where(e => e.Type is "user" or "assistant" && !string.IsNullOrWhiteSpace(e.Text))
-            .TakeLast(MessageCount)
-            .Select(e => new MessageView(e.Type == "user" ? "user" : "agent", e.Text!, e.CreatedAt))
-            .ToList();
 
     private static IResult? TextError(string? text) =>
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")

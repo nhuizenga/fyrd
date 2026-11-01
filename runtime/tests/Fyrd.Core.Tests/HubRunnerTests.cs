@@ -452,13 +452,4 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Equal(_time.GetUtcNow(), _state.LastPollAt);
         Assert.Null(_state.LastError);
     }
-
-    [Fact]
-    public async Task Poll_PublishesRecentEventWindow()
-    {
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
-        _cloud.AddAssistantEvent("s1", "e1", "hello");
-        await Make().PollOnceAsync(default);
-        Assert.Equal("hello", Assert.Single(_state.RecentEvents("s1")).Text);
-    }
 }

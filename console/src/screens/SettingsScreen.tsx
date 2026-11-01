@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, SelectFieldSync, Text, TextField, Textarea } from "@servicetitan/anvil2";
+import DeleteIcon from "@servicetitan/anvil2/assets/icons/material/round/delete.svg?react";
+import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import * as api from "../api";
+import { navigate } from "../route";
 import type { HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
@@ -109,7 +112,8 @@ function PersonasCard() {
       setError("Give the persona a name.");
       return;
     }
-    if (editing!.isNew && (id === "shared" || personas.some((p) => p.id === id))) {
+    const taken = (p: HubPersona) => p.id !== d.id && (p.id === slug(d.name) || p.name.trim().toLowerCase() === d.name.trim().toLowerCase());
+    if ((editing!.isNew && (id === "shared" || personas.some((p) => p.id === id))) || (!editing!.isNew && personas.some(taken))) {
       setError("A persona with this name already exists.");
       return;
     }
@@ -166,7 +170,13 @@ function PersonasCard() {
             <Text subdued>Select a persona to edit it.</Text>
           ) : (
             <>
-              <TextField label="Name" value={d.name} disabled={!editing!.isNew} onChange={(e) => patch({ name: e.target.value })} />
+              <TextField
+                label="Name"
+                value={d.name}
+                disabled={locked}
+                hint={locked ? "The Controller persona can't be renamed." : undefined}
+                onChange={(e) => patch({ name: e.target.value })}
+              />
               <SelectFieldSync
                 label="Claude model"
                 disableSearch
@@ -202,14 +212,12 @@ function PersonasCard() {
 function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; onChanged: () => Promise<void>; setError: (s: string | null) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
-  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   const attempt = async (fn: () => Promise<unknown>) => {
     setError(null);
     try {
       await fn();
       setEditingId(null);
-      setConfirmId(null);
       await onChanged();
     } catch (e) {
       setError(errText(e));
@@ -228,19 +236,11 @@ function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; on
         </>
       ) : (
         <>
-          <Text>{e.text}</Text>
-          {confirmId === e.id ? (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <Text size="small">Delete this entry? Agents will stop seeing it.</Text>
-              <Button appearance="secondary" aria-label="Confirm delete" onClick={() => attempt(() => api.deleteMemory(scope.scope, e.id))}>Delete</Button>
-              <Button appearance="ghost" onClick={() => setConfirmId(null)}>Cancel</Button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button appearance="ghost" onClick={() => { setEditingId(e.id); setEditText(e.text); }}>Edit</Button>
-              <Button appearance="ghost" onClick={() => setConfirmId(e.id)}>Delete</Button>
-            </div>
-          )}
+          <div className="memory-row">
+            <Text>{e.text}</Text>
+            <Button appearance="ghost" size="small" icon={EditIcon} aria-label="Edit" onClick={() => { setEditingId(e.id); setEditText(e.text); }} />
+            <Button appearance="ghost" size="small" icon={DeleteIcon} aria-label="Delete" onClick={() => attempt(() => api.deleteMemory(scope.scope, e.id))} />
+          </div>
         </>
       )}
     </li>
@@ -311,14 +311,34 @@ function MemoryCard() {
   );
 }
 
-export default function SettingsScreen(_props: ScreenProps) {
+const SECTIONS = [
+  { id: "environment", label: "Environment", Card: EnvironmentCard },
+  { id: "personas", label: "Personas", Card: PersonasCard },
+  { id: "memory", label: "Agent memory", Card: MemoryCard },
+] as const;
+
+export default function SettingsScreen({ routeId }: ScreenProps) {
+  const { id: section, Card } = SECTIONS.find((s) => s.id === routeId) ?? SECTIONS[0];
   return (
     <>
       <Text variant="headline" el="h2" size="large">Settings</Text>
       <Text subdued>Applies to all sessions in this fyrd</Text>
-      <EnvironmentCard />
-      <PersonasCard />
-      <MemoryCard />
+      <div className="settings">
+        <nav aria-label="Settings sections" className="settings-nav">
+          {SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="row-btn"
+              aria-current={s.id === section ? "page" : undefined}
+              onClick={() => navigate("settings", s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+        <div className="settings-body"><Card /></div>
+      </div>
     </>
   );
 }

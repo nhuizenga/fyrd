@@ -288,60 +288,6 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task Messages_ReturnsUserAndAgentText_FromPollWindow()
-    {
-        using var f = new FyrdFactory();
-        Seed(f);
-        var empty = Core.Tests.FakeCloudSessions.Empty;
-        f.Services.GetRequiredService<HubState>().PublishRecent(new Dictionary<string, IReadOnlyList<SessionEvent>>
-        {
-            [SessionId] =
-            [
-                new("e1", "user", DateTimeOffset.UnixEpoch, "do it", empty),
-                new("e2", "system", DateTimeOffset.UnixEpoch, null, empty),
-                new("e3", "user", DateTimeOffset.UnixEpoch, "", empty),
-                new("e4", "assistant", DateTimeOffset.UnixEpoch, "done", empty),
-            ],
-        });
-        var list = (await ReadJson(await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages")))
-            .EnumerateArray().ToList();
-        Assert.Equal(2, list.Count);
-        Assert.Equal("user", list[0].GetProperty("role").GetString());
-        Assert.Equal("do it", list[0].GetProperty("text").GetString());
-        Assert.Equal("agent", list[1].GetProperty("role").GetString());
-        Assert.True(list[1].TryGetProperty("at", out _));
-        Assert.Empty(f.Cloud.EventAfterIds); // served from memory, no cloud calls
-    }
-
-    [Fact]
-    public async Task Messages_KeepsLast50()
-    {
-        using var f = new FyrdFactory();
-        Seed(f);
-        var events = Enumerable.Range(0, 120)
-            .Select(i => new SessionEvent("e" + i, "assistant", DateTimeOffset.UnixEpoch, "m" + i, Core.Tests.FakeCloudSessions.Empty))
-            .ToList();
-        f.Services.GetRequiredService<HubState>().PublishRecent(
-            new Dictionary<string, IReadOnlyList<SessionEvent>> { [SessionId] = events });
-        var list = (await ReadJson(await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages")))
-            .EnumerateArray().ToList();
-        Assert.Equal(50, list.Count);
-        Assert.Equal("m70", list[0].GetProperty("text").GetString());
-        Assert.Equal("m119", list[^1].GetProperty("text").GetString());
-    }
-
-    [Fact]
-    public async Task Messages_WindowNotPopulated_Empty()
-    {
-        using var f = new FyrdFactory();
-        Seed(f);
-        var r = await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/messages");
-        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
-        Assert.Equal(0, (await ReadJson(r)).GetArrayLength());
-        Assert.Empty(f.Cloud.EventAfterIds);
-    }
-
-    [Fact]
     public async Task Persona_DeleteController_409()
     {
         using var f = new FyrdFactory();

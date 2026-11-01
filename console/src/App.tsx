@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, AnvilProvider, Badge, Button, Flex, Text } from "@servicetitan/anvil2";
 import * as api from "./api";
+import { navigate, useRoute, type Screen } from "./route";
 import InboxScreen from "./screens/InboxScreen";
 import SessionsScreen from "./screens/SessionsScreen";
 import SettingsScreen from "./screens/SettingsScreen";
@@ -8,10 +9,8 @@ import type { HubState } from "./types";
 
 const POLL_MS = 3000;
 
-type Screen = "inbox" | "sessions" | "settings";
-
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("inbox");
+  const { screen, id: routeId } = useRoute();
   const [state, setState] = useState<HubState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -46,7 +45,7 @@ export default function App() {
       appearance={screen === id ? "secondary" : "ghost"}
       aria-current={screen === id ? "page" : undefined}
       aria-label={count ? `${label} ${count}` : label}
-      onClick={() => setScreen(id)}
+      onClick={() => navigate(id)}
     >
       {label}
       {count ? <Badge>{count}</Badge> : null}
@@ -57,7 +56,7 @@ export default function App() {
     <AnvilProvider>
       <div className="shell">
         <header className="shell-header">
-          <Text variant="headline" el="h1" size="medium">fyrd</Text>
+          <div className="brand"><img src="/fyrd-icon-32.png" alt="" width={24} height={24} /><Text variant="headline" el="h1" size="medium">fyrd</Text></div>
           <nav aria-label="Primary">
             <Flex gap="2">
               {navButton("inbox", "Inbox", questions.length)}
@@ -66,7 +65,8 @@ export default function App() {
             </Flex>
           </nav>
         </header>
-        <main className="shell-main">
+        <main className={screen === "sessions" ? "shell-fill" : "shell-scroll"}>
+          <div className={screen === "sessions" ? "sessions" : "shell-main"}>
           {error && (
             <Alert status="danger" title={`Can't reach the Fyrd server: ${error}`} role="alert" />
           )}
@@ -81,12 +81,13 @@ export default function App() {
             </Alert>
           )}
           {screen === "inbox" ? (
-            <InboxScreen state={state} onChanged={refresh} />
+            <InboxScreen state={state} onChanged={refresh} routeId={routeId} />
           ) : screen === "sessions" ? (
-            <SessionsScreen state={state} onChanged={refresh} onOpenInbox={() => setScreen("inbox")} />
+            <SessionsScreen state={state} onChanged={refresh} routeId={routeId} />
           ) : (
-            <SettingsScreen state={state} onChanged={refresh} />
+            <SettingsScreen state={state} onChanged={refresh} routeId={routeId} />
           )}
+          </div>
         </main>
       </div>
     </AnvilProvider>

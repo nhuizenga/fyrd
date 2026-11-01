@@ -50,10 +50,28 @@ export interface HubState {
   controller: ControllerInfo | null;
 }
 
-export interface HubMessage {
+export interface TranscriptOption {
+  label: string;
+  description?: string | null;
+}
+
+export interface TranscriptQuestion {
+  question: string;
+  header?: string | null;
+  multiSelect: boolean;
+  options: TranscriptOption[];
+}
+
+/** One frame of `GET /api/hub/sessions/{id}/stream` (`event: item`). */
+export interface TranscriptItem {
+  key: string;
+  seq: number;
   role: "user" | "agent";
+  kind: "text" | "question" | "answer";
   text: string;
   at: string;
+  questions?: TranscriptQuestion[] | null;
+  toolUseId?: string | null;
 }
 
 export interface HubPersona {

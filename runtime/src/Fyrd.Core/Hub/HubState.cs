@@ -29,13 +29,10 @@ public sealed class HubState(TimeProvider? time = null)
     /// <summary>A claim outlives a poll that still sees its request for at most this long.</summary>
     public static readonly TimeSpan ClaimTtl = TimeSpan.FromMinutes(10);
 
-    private static readonly IReadOnlyList<SessionEvent> NoEvents = [];
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private volatile IReadOnlyList<HubSessionView> _sessions = [];
     private volatile IReadOnlyList<HubQuestion> _questions = [];
-    private volatile IReadOnlyDictionary<string, IReadOnlyList<SessionEvent>> _recent =
-        new Dictionary<string, IReadOnlyList<SessionEvent>>();
     private volatile bool _signedOut;
     private volatile string? _lastError;
     private readonly object _gate = new();
@@ -93,13 +90,6 @@ public sealed class HubState(TimeProvider? time = null)
             _questions = questions.Where(q => !_claims.ContainsKey(q.RequestId)).ToArray();
         }
     }
-
-    /// <summary>The poll's recent-event window per session (oldest first); empty until a poll has read the session.</summary>
-    public IReadOnlyList<SessionEvent> RecentEvents(string sessionId) =>
-        _recent.TryGetValue(sessionId, out var events) ? events : NoEvents;
-
-    public void PublishRecent(IReadOnlyDictionary<string, IReadOnlyList<SessionEvent>> recent) =>
-        _recent = new Dictionary<string, IReadOnlyList<SessionEvent>>(recent, StringComparer.Ordinal);
 
     /// <summary>
     /// Records the answer to one question. Returns <see cref="AnswerProgress.NotPending"/> when the question is not
