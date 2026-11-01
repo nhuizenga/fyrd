@@ -37,6 +37,22 @@ export default function App() {
     };
   }, [refresh]);
 
+  // The server defines "today" in this zone, so keep it in step with the browser's. Once, after the first config load.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const c = await api.getConfig();
+        if (live && tz && c && c.timeZone !== tz) await api.updateConfig({ timeZone: tz });
+      } catch (e) {
+        // Spend limits keep using the previous zone.
+        console.warn("Could not sync the browser time zone to the Fyrd config", e);
+      }
+    })();
+    return () => { live = false; };
+  }, []);
+
   const questions = state?.questions ?? [];
   const lastError = state?.lastError && state.lastError !== dismissedError ? state.lastError : null;
 

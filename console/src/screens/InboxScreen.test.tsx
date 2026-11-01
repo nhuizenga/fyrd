@@ -67,6 +67,15 @@ it("409 shows no-longer-waiting message and an Open in claude.ai link", async ()
   expect(screen.getByRole("link", { name: "Open in claude.ai" })).toHaveAttribute("href", "https://claude.ai/code/s1");
 });
 
+it("a budget 409 on answer shows the server's reason, with no claude.ai link, and can be retried", async () => {
+  vi.mocked(api.answerQuestion).mockRejectedValue(new Error("This session reached its daily spend limit."));
+  renderInbox();
+  await userEvent.click(screen.getByRole("button", { name: "Apple" }));
+  expect(await screen.findByText("This session reached its daily spend limit.")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open in claude.ai" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Apple" })).toBeEnabled();
+});
+
 it("card shows repo and age, and the live conversation above the answer buttons", async () => {
   const askedAt = new Date(Date.now() - 5 * 60_000).toISOString();
   render(

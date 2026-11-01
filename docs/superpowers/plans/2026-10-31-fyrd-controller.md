@@ -411,7 +411,7 @@ The owner runs this; agents can't read Claude credentials. Tasks 6 and 7 consume
     - `select session loads messages`
     - `Message this session sends`
     - `pause and resume`
-    - `cost and budget are placeholders`: `+$5` is disabled, and the cost shows `—`.
+    - `cost and budget`: superseded by the cost-limits work; `+$25` and `+$100` are disabled until a session reaches 90% of its limit, and the cost shows `—` when the server sends none.
     - `search filters by name`
   - **Settings:**
     - `environment save calls putConfig`

@@ -41,7 +41,7 @@ beforeEach(() => {
   vi.mocked(api.deletePersona).mockResolvedValue(undefined);
 });
 
-const renderSettings = async (section: "Environment" | "Personas" | "Agent memory" = "Personas") => {
+const renderSettings = async (section: "Environment" | "Spend limits" | "Personas" | "Agent memory" = "Personas") => {
   render(<Routed state={hubState()} onChanged={vi.fn()} />);
   await userEvent.click(screen.getByRole("button", { name: section }));
   if (section === "Personas") await screen.findByRole("button", { name: /^Builder/ });
@@ -51,7 +51,7 @@ const renderSettings = async (section: "Environment" | "Personas" | "Agent memor
 it("settings sections are a left nav showing one section at a time", async () => {
   render(<Routed state={hubState()} onChanged={vi.fn()} />);
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
-  expect(nav).toHaveTextContent("EnvironmentPersonasAgent memory");
+  expect(nav).toHaveTextContent("EnvironmentSpend limitsPersonasAgent memory");
   expect(screen.getByRole("heading", { name: "Environment" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Personas" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
@@ -205,4 +205,33 @@ it("renaming a persona to another persona's name is rejected", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
   expect(await screen.findByText("A persona with this name already exists.")).toBeInTheDocument();
   expect(api.savePersona).not.toHaveBeenCalled();
+});
+
+it("spend limits load, validate and save both limits", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config({ sessionDailyLimitUsd: 40, fyrdDailyLimitUsd: 400 }));
+  await renderSettings("Spend limits");
+  const s = await screen.findByLabelText("Per-session daily limit (USD)");
+  await vi.waitFor(() => expect(s).toHaveValue("40"));
+  expect(screen.getByLabelText("Fyrd-wide daily limit (USD)")).toHaveValue("400");
+  expect(screen.getAllByText("Whole dollars, 1 to 10000.")).toHaveLength(2);
+  await userEvent.clear(s);
+  await userEvent.type(s, "0");
+  await userEvent.click(screen.getByRole("button", { name: "Save session limit" }));
+  expect(api.updateConfig).not.toHaveBeenCalled();
+  expect(screen.getByText("Enter a whole number from 1 to 10000.")).toBeInTheDocument();
+  await userEvent.clear(s);
+  await userEvent.type(s, " 75 ");
+  await userEvent.click(screen.getByRole("button", { name: "Save session limit" }));
+  expect(api.updateConfig).toHaveBeenCalledWith({ sessionDailyLimitUsd: 75 });
+  expect(await screen.findByText("Session limit saved.")).toBeInTheDocument();
+  const f = screen.getByLabelText("Fyrd-wide daily limit (USD)");
+  await userEvent.clear(f);
+  await userEvent.type(f, "10001");
+  await userEvent.click(screen.getByRole("button", { name: "Save fyrd limit" }));
+  expect(api.updateConfig).toHaveBeenCalledTimes(1);
+  await userEvent.clear(f);
+  await userEvent.type(f, "900");
+  await userEvent.click(screen.getByRole("button", { name: "Save fyrd limit" }));
+  expect(api.updateConfig).toHaveBeenCalledWith({ fyrdDailyLimitUsd: 900 });
+  expect(await screen.findByText("Fyrd limit saved.")).toBeInTheDocument();
 });

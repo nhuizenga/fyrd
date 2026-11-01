@@ -1,4 +1,7 @@
+using System.Text.Json;
 using Fyrd.Core.Config;
+using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.Options;
 using Fyrd.Core.Orchestration;
 
 namespace Fyrd.Server.Endpoints;
@@ -11,10 +14,23 @@ internal static class ConfigEndpoints
 
         group.MapGet("/", (ConfigStore config) => Results.Ok(config.Load()));
 
-        group.MapPut("/", (FyrdConfig? body, ConfigStore config, LeadRelay relay, CancellationToken ct) => ApiErrors.RunAsync(async () =>
+        group.MapPut("/", (HttpRequest request, IOptions<JsonOptions> json, ConfigStore config, LeadRelay relay, CancellationToken ct) => ApiErrors.RunAsync(async () =>
         {
-            if (body is null) return Results.Problem("Body is required.", statusCode: StatusCodes.Status400BadRequest);
-            var previousCap = config.Load().SquadCap;
+            JsonElement raw;
+            try { raw = await request.ReadFromJsonAsync<JsonElement>(json.Value.SerializerOptions, ct); }
+            catch (JsonException) { return Results.Problem("Body is required.", statusCode: StatusCodes.Status400BadRequest); }
+            if (raw.ValueKind != JsonValueKind.Object || raw.Deserialize<FyrdConfig>(json.Value.SerializerOptions) is not { } body)
+                return Results.Problem("Body is required.", statusCode: StatusCodes.Status400BadRequest);
+            var stored = config.Load();
+            // A client that predates the spend-limit fields must not reset them: fields it omits keep their stored value.
+            bool Has(string name) => raw.EnumerateObject().Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            body = body with
+            {
+                SessionDailyLimitUsd = Has(nameof(FyrdConfig.SessionDailyLimitUsd)) ? body.SessionDailyLimitUsd : stored.SessionDailyLimitUsd,
+                FyrdDailyLimitUsd = Has(nameof(FyrdConfig.FyrdDailyLimitUsd)) ? body.FyrdDailyLimitUsd : stored.FyrdDailyLimitUsd,
+                TimeZone = Has(nameof(FyrdConfig.TimeZone)) ? body.TimeZone : stored.TimeZone,
+            };
+            var previousCap = stored.SquadCap;
             config.Save(body);
             var saved = config.Load();
             if (saved.SquadCap != previousCap)

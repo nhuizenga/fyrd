@@ -14,6 +14,8 @@ internal static class HubEndpoints
     private const string ResumeText = "Continue where you left off.";
     private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
     private const string NotPending = "This question is no longer waiting for an answer.";
+    private const string SessionBlocked = "This session reached its daily spend limit.";
+    private const string FyrdBlocked = "Fyrd reached its daily spend limit.";
     private const string SignedOut = "Signed out of Claude — run `claude auth login`";
     private static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ReopenDelay = TimeSpan.FromSeconds(1);
@@ -21,6 +23,7 @@ internal static class HubEndpoints
 
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
+    private sealed record BudgetBody(JsonElement? AmountUsd);
     private sealed record PrBody(string? Url);
     private sealed record AnswerBody(string? Choice, string? Text);
 
@@ -44,6 +47,7 @@ internal static class HubEndpoints
                 signedOut = state.SignedOut,
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
+                budget = state.Budget,
                 controller = id is null ? null : new { sessionId = id, url = "https://claude.ai/code/" + id },
             });
         }));
@@ -86,6 +90,7 @@ internal static class HubEndpoints
         group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
             InHub(id, state, () =>
             {
+                if (BlockedError(id, state) is { } blocked) return Task.FromResult(blocked);
                 if (TextError(body?.Text) is { } error) return Task.FromResult(error);
                 return Cloud(async () =>
                 {
@@ -144,16 +149,42 @@ internal static class HubEndpoints
             }));
 
         group.MapPost("/sessions/{id}/resume", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
-            InHub(id, state, () => Cloud(async () =>
+            InHub(id, state, () => BlockedError(id, state) is { } blocked
+                ? Task.FromResult(blocked)
+                : Cloud(async () =>
+                {
+                    await cloud.SendMessageAsync(id, ResumeText, ct);
+                    return Results.NoContent();
+                })));
+
+        // Raises one session's limit for today. Only +$25 and +$100, and only once the session has used 90% of its limit.
+        group.MapPost("/sessions/{id}/budget", (string id, BudgetBody? body, HubState state, CostGuard guard) =>
+            InHub(id, state, () => Task.FromResult(ApiErrors.Run(() =>
             {
-                await cloud.SendMessageAsync(id, ResumeText, ct);
-                return Results.NoContent();
-            })));
+                if (body?.AmountUsd is not { ValueKind: JsonValueKind.Number } n || !n.TryGetDecimal(out var amount)
+                    || !CostGuard.ExtendAmounts.Contains(amount))
+                    return Bad("amountUsd must be 25 or 100.");
+                // One snapshot of the session list: the poll swaps it as a whole.
+                var ids = state.Sessions.Select(s => s.Id).ToList();
+                if (!ids.Contains(id))
+                    return Results.Problem($"Session '{id}' is not a hub session.", statusCode: StatusCodes.Status404NotFound);
+                var (status, view) = guard.TryExtend(id, amount, ids);
+                return status switch
+                {
+                    CostGuard.ExtendStatus.Ok => RaisedOk(state, view),
+                    CostGuard.ExtendStatus.NoData => Results.Problem("This session has no cost data yet.", statusCode: StatusCodes.Status409Conflict),
+                    CostGuard.ExtendStatus.Exempt => Results.Problem("The Controller has no spend limit to raise.", statusCode: StatusCodes.Status409Conflict),
+                    CostGuard.ExtendStatus.FyrdBlocked => Results.Problem("Fyrd reached its daily spend limit; raising one session does not lift it.", statusCode: StatusCodes.Status409Conflict),
+                    _ => Results.Problem("A limit can be raised once 90% of it is used.", statusCode: StatusCodes.Status409Conflict),
+                };
+            }))));
 
         group.MapPost("/questions/{id}/answer", (string id, AnswerBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
         {
             var q = state.Questions.FirstOrDefault(x => x.Id == id);
             if (q is null) return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
+            // Answering resumes the session, so a budget block applies here too.
+            if (BlockedError(q.SessionId, state) is { } blocked) return Task.FromResult(blocked);
 
             var hasChoice = !string.IsNullOrEmpty(body?.Choice);
             var hasText = !string.IsNullOrWhiteSpace(body?.Text);
@@ -357,6 +388,21 @@ internal static class HubEndpoints
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")
         : text.Length > MaxText ? Bad($"Text is longer than {MaxText} characters.")
         : null;
+
+    /// <summary>409 when the last poll blocked this session (its own limit, or the fyrd's); the Controller is never blocked.</summary>
+    private static IResult? BlockedError(string id, HubState state) =>
+        state.Sessions.FirstOrDefault(s => s.Id == id)?.Cost?.Blocked switch
+        {
+            "session" => Results.Problem(SessionBlocked, statusCode: StatusCodes.Status409Conflict),
+            "fyrd" => Results.Problem(FyrdBlocked, statusCode: StatusCodes.Status409Conflict),
+            _ => null,
+        };
+
+    private static IResult RaisedOk(HubState state, HubCostView? view)
+    {
+        state.RequestPoll();
+        return Results.Ok(view);
+    }
 
     /// <summary>Runs a PR action on one of this session's own pull requests, with its freshly read status.</summary>
     private static Task<IResult> PrAction(string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct,
