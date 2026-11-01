@@ -65,7 +65,7 @@ public sealed class HubSkillsTests
     public void Research_PublishesPlanAsArtifact()
     {
         var text = Read("fyrd-research");
-        Assert.Contains("publish the plan as a claude.ai artifact and reply with its link and a short summary", text, StringComparison.Ordinal);
+        Assert.Contains("commit the plan as markdown to your branch and push it, publish it as a claude.ai artifact, then reply with the artifact link, branch, file path and a short summary", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -80,6 +80,43 @@ public sealed class HubSkillsTests
         Assert.DoesNotContain("API-created sessions such as the Controller", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Fallback", text, StringComparison.Ordinal);
         Assert.DoesNotContain("follow-up is filed", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EverySkillUsesTheRepoRule_NotSourceUrlOnlyWhen()
+    {
+        foreach (var n in Names)
+        {
+            var text = Read(n);
+            Assert.DoesNotContain("`source_url` only", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("source_url`: only when", text, StringComparison.Ordinal);
+            Assert.Contains("source_url", text, StringComparison.Ordinal);
+            Assert.Contains("No repo", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Build_CarriesBaseBranchControllerSessionAndPushAsYouGo()
+    {
+        var text = Read("fyrd-build");
+        Assert.Contains("Base branch:", text, StringComparison.Ordinal);
+        Assert.Contains("Controller session:", text, StringComparison.Ordinal);
+        Assert.Contains("source_revision", text, StringComparison.Ordinal);
+        Assert.Contains("push the branch as you go", text, StringComparison.Ordinal);
+        Assert.Contains("draft pull request", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Peasant_RequiresBaseBranchInFollowUps_AndHandlesReviewRequests()
+    {
+        var text = Read("fyrd-peasant");
+        Assert.Contains("`Base branch:` line", text, StringComparison.Ordinal);
+        var section = text.IndexOf("## Review request from a Builder", StringComparison.Ordinal);
+        Assert.True(section > 0);
+        var tail = text[section..];
+        var cap = tail.IndexOf("**Session cap.**", StringComparison.Ordinal);
+        var recycle = tail.IndexOf("**Recycle.**", StringComparison.Ordinal);
+        Assert.True(cap > 0 && recycle > cap, "review request: session cap must come before recycling");
     }
 
     [Fact]

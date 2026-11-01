@@ -71,6 +71,54 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Controller_MayCloneOnlyToRead()
+    {
+        var d = Get("controller").Definition;
+        Assert.DoesNotContain("never clone a repo", d, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Never edit, commit or push from your clones", d, StringComparison.Ordinal);
+        Assert.Contains("No repo", d, StringComparison.Ordinal);
+        Assert.Contains("Base branch:", d, StringComparison.Ordinal);
+        Assert.Contains("Review request", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Builder_PushesAsItGoes_AndKnowsItsBase()
+    {
+        var d = Get("builder").Definition;
+        Assert.Contains("git push -u origin", d, StringComparison.Ordinal);
+        Assert.Contains("after every commit", d, StringComparison.Ordinal);
+        Assert.Contains("origin/HEAD", d, StringComparison.Ordinal);
+        Assert.Contains("subscribe_pr_activity", d, StringComparison.Ordinal);
+        Assert.Contains("Review request:", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryPersona_HasTheDraftPullRequestBullet()
+    {
+        foreach (var p in Load())
+            Assert.True(p.Definition.Contains("- **Pull requests.** You may open a pull request, but only when the owner or a Fyrd session explicitly asks for one", StringComparison.Ordinal)
+                && p.Definition.Contains("`draft: true`", StringComparison.Ordinal), $"{p.Id} lacks the Pull requests bullet");
+    }
+
+    [Fact]
+    public void Reviewer_PostsOneInlineReview_NeverApproves()
+    {
+        var d = Get("reviewer").Definition;
+        Assert.Contains("add_comment_to_pending_review", d, StringComparison.Ordinal);
+        Assert.Contains("submit_pending", d, StringComparison.Ordinal);
+        Assert.Contains("event: COMMENT", d, StringComparison.Ordinal);
+        Assert.Contains("Never approve or request changes", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Researcher_CommitsThePlanByDefault()
+    {
+        var d = Get("researcher").Definition;
+        Assert.DoesNotContain("never commit", d, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Commit it and push the branch", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryPeasantMentions_ArtifactTool()
     {
         foreach (var p in Load().Where(p => p.Id != "controller"))
