@@ -93,11 +93,13 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
-    public void EveryPersona_HasTheDraftPullRequestBullet()
+    public void EveryPersona_HasTheSameDraftPullRequestBullet()
     {
-        foreach (var p in Load())
-            Assert.True(p.Definition.Contains("- **Pull requests.** You may open a pull request, but only when the owner or a Fyrd session explicitly asks for one", StringComparison.Ordinal)
-                && p.Definition.Contains("`draft: true`", StringComparison.Ordinal), $"{p.Id} lacks the Pull requests bullet");
+        static string Bullet(string d) => d.Split('\n').SingleOrDefault(l => l.StartsWith("- **Pull requests.**", StringComparison.Ordinal)) ?? "";
+        var all = Load();
+        var expected = Bullet(all[0].Definition);
+        Assert.Contains("`draft: true`", expected, StringComparison.Ordinal);
+        foreach (var p in all) Assert.Equal(expected, Bullet(p.Definition));
     }
 
     [Fact]
