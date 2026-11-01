@@ -20,49 +20,10 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     private const int MaxListPages = 20;
 
-    // TEMPORARY: raw ephemeral_event payload sampling (JSON lines), to learn what they carry. Remove once collected.
-    private readonly string? _ephemeralLog;
-    private readonly object _ephemeralLogLock = new();
-
-    public CloudSessionClient(HttpClient http, ClaudeCredentials credentials, string? ephemeralLogPath = null)
+    public CloudSessionClient(HttpClient http, ClaudeCredentials credentials)
     {
         _http = http;
         _credentials = credentials;
-        _ephemeralLog = ephemeralLogPath;
-    }
-
-    /// <summary>
-    /// TEMPORARY. Appends one raw frame as <c>{at, session, frame, data}</c> (<c>frame</c> is <c>ephemeral_event</c>, or
-    /// <c>client_event</c> for a <c>result</c>); logging never breaks the stream.
-    /// </summary>
-    private void LogFrame(string sessionId, string frame, string data)
-    {
-        if (_ephemeralLog is null) return;
-        try
-        {
-            using var doc = JsonDocument.Parse(data);
-            // Saved frames are only sampled for turn results; every ephemeral frame is.
-            if (frame == "client_event"
-                && !(doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("payload", out var p)
-                     && Str(p, "type") == "result"))
-                return;
-            var line = new JsonObject
-            {
-                ["at"] = DateTimeOffset.UtcNow.ToString("o"),
-                ["session"] = sessionId,
-                ["frame"] = frame,
-                ["data"] = JsonNode.Parse(doc.RootElement.GetRawText()),
-            }.ToJsonString();
-            lock (_ephemeralLogLock)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_ephemeralLog))!);
-                File.AppendAllText(_ephemeralLog, line + "\n");
-            }
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
-        {
-            // Sampling is best effort.
-        }
     }
 
     [GeneratedRegex("^session_[A-Za-z0-9]+$")]
@@ -255,7 +216,6 @@ public sealed partial class CloudSessionClient : ICloudSessions
             var line = await reader.ReadLineAsync(ct);
             if (line is null || line.Length == 0)
             {
-                if (data.Length > 0 && name is "ephemeral_event" or "client_event") LogFrame(sessionId, name!, data.ToString());
                 if (data.Length > 0 && name == "client_event" && ParseStreamFrame(data.ToString(), id) is { } ev)
                     yield return ev;
                 else if (data.Length > 0 && name == "ephemeral_event" && ParseEphemeralFrame(data.ToString()) is { } progress)
