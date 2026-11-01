@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Fyrd.Core;
 using Fyrd.Core.Config;
 using Fyrd.Core.CloudSessions;
+using Fyrd.Core.Hub;
 using Fyrd.Core.Orchestration;
 using Fyrd.Core.Specs;
 using Fyrd.Server;
@@ -31,6 +32,15 @@ builder.Services.AddSingleton<SpecRunner>();
 builder.Services.AddSingleton<LeadRelay>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
     builder.Services.AddHostedService<SpecRunnerService>();
+builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPaths>(),
+    Path.GetFullPath(builder.Configuration["Fyrd:HubPersonasSeedDir"]
+        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "personas", "hub"))));
+builder.Services.AddSingleton<HubMemory>();
+builder.Services.AddSingleton<ControllerManager>();
+builder.Services.AddSingleton<HubState>();
+builder.Services.AddSingleton<HubRunner>();
+if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
+    builder.Services.AddHostedService<HubRunnerService>();
 builder.Services.AddSingleton(sp =>
 {
     var dir = Path.GetFullPath(builder.Configuration["Fyrd:PersonasDir"]
@@ -68,6 +78,7 @@ app.MapInbox();
 app.MapConfig();
 app.MapBoard();
 app.MapMemory();
+app.MapHub();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 

@@ -1,43 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
+import { Alert, AnvilProvider, Badge, Button, Flex, Text } from "@servicetitan/anvil2";
 import * as api from "./api";
-import BoardTab from "./board/BoardTab";
-import MemoryTab from "./memory/MemoryTab";
-import InboxTab from "./inbox/InboxTab";
-import type { Board, FyrdConfig, InboxCard } from "./types";
+import InboxScreen from "./screens/InboxScreen";
+import SessionsScreen from "./screens/SessionsScreen";
+import SettingsScreen from "./screens/SettingsScreen";
+import type { HubState } from "./types";
 
 const POLL_MS = 3000;
 
+type Screen = "inbox" | "sessions" | "settings";
+
 export default function App() {
-  const [tab, setTab] = useState<"inbox" | "board" | "memory">("inbox");
-  const [cards, setCards] = useState<InboxCard[]>([]);
-  const [undelivered, setUndelivered] = useState<InboxCard[]>([]);
-  const [board, setBoard] = useState<Board | null>(null);
-  const [relayError, setRelayError] = useState<string | null>(null);
-  const [dismissedError, setDismissedError] = useState<string | null>(null);
-  const specs = board?.specs ?? [];
-  const [config, setConfig] = useState<FyrdConfig | null>(null);
+  const [screen, setScreen] = useState<Screen>("inbox");
+  const [state, setState] = useState<HubState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dismissedError, setDismissedError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    // Each endpoint degrades on its own: a failure keeps that tab's last data instead of freezing the rest.
-    const [inbox, bd, cfg, und] = await Promise.allSettled([
-      api.getInbox(), api.getBoard(), api.getConfig(), api.getUndelivered(),
-    ]);
-    if (und.status === "fulfilled") setUndelivered(und.value ?? []);
-    if (inbox.status === "fulfilled") setCards(inbox.value);
-    if (cfg.status === "fulfilled") setConfig(cfg.value);
-    if (bd.status === "fulfilled") setBoard(bd.value);
-    const failures = [inbox, bd, cfg, und].filter((r): r is PromiseRejectedResult => r.status === "rejected");
-    if (failures.length === 4) {
-      const reason = failures[0].reason;
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } else {
+    try {
+      setState(await api.getHubState());
       setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
-
-  const onRelayError = useCallback((message?: string) => {
-    if (message) setRelayError(message);
   }, []);
 
   useEffect(() => {
@@ -53,58 +38,57 @@ export default function App() {
     };
   }, [refresh]);
 
-  const units = specs.flatMap((s) => s.units);
-  const done = units.filter((u) => u.state === "Done").length;
-  const boardLabel = units.length > 0 ? `Board · ${done}/${units.length} done` : "Board";
+  const questions = state?.questions ?? [];
+  const lastError = state?.lastError && state.lastError !== dismissedError ? state.lastError : null;
 
-  const lastError = board?.lastError && board.lastError !== dismissedError ? board.lastError : null;
-  const amber = relayError ?? lastError;
+  const navButton = (id: Screen, label: string, count?: number) => (
+    <Button
+      appearance={screen === id ? "secondary" : "ghost"}
+      aria-current={screen === id ? "page" : undefined}
+      aria-label={count ? `${label} ${count}` : label}
+      onClick={() => setScreen(id)}
+    >
+      {label}
+      {count ? <Badge>{count}</Badge> : null}
+    </Button>
+  );
 
   return (
-    <main>
-      <h1>Fyrd</h1>
-      <div role="tablist" className="tabs">
-        <button role="tab" aria-selected={tab === "inbox"} onClick={() => setTab("inbox")}>
-          {`Inbox (${cards.length})`}
-        </button>
-        <button role="tab" aria-selected={tab === "board"} onClick={() => setTab("board")}>
-          {boardLabel}
-        </button>
-        <button role="tab" aria-selected={tab === "memory"} onClick={() => setTab("memory")}>
-          Memory
-        </button>
+    <AnvilProvider>
+      <div className="shell">
+        <header className="shell-header">
+          <Text variant="headline" el="h1" size="medium">fyrd</Text>
+          <nav aria-label="Primary">
+            <Flex gap="2">
+              {navButton("inbox", "Inbox", questions.length)}
+              {navButton("sessions", "Sessions")}
+              {navButton("settings", "Settings")}
+            </Flex>
+          </nav>
+        </header>
+        <main className="shell-main">
+          {error && (
+            <Alert status="danger" title={`Can't reach the Fyrd server: ${error}`} role="alert" />
+          )}
+          {state?.signedOut && (
+            <Alert status="danger" title="Signed out of Claude" role="alert">
+              Run <code>claude auth login</code>
+            </Alert>
+          )}
+          {lastError && (
+            <Alert status="warning" title="Poll problem" role="alert" onClose={() => setDismissedError(lastError)}>
+              {lastError}
+            </Alert>
+          )}
+          {screen === "inbox" ? (
+            <InboxScreen state={state} onChanged={refresh} />
+          ) : screen === "sessions" ? (
+            <SessionsScreen state={state} onChanged={refresh} onOpenInbox={() => setScreen("inbox")} />
+          ) : (
+            <SettingsScreen state={state} onChanged={refresh} />
+          )}
+        </main>
       </div>
-      {error && <p className="error" role="alert">Can't reach the Fyrd server: {error}</p>}
-      {board?.signedOut && (
-        <div className="banner banner-signedout" role="alert">
-          <span>Signed out of Claude — run <code>claude auth login</code></span>
-        </div>
-      )}
-      {amber && (
-        <div className="banner" role="alert">
-          <span>{amber}</span>
-          <button type="button" aria-label="Dismiss" onClick={() => (relayError ? setRelayError(null) : setDismissedError(amber))}>
-            Dismiss
-          </button>
-        </div>
-      )}
-      {board?.rateLimit && (
-        <div className="chips">
-          <span className="chip">
-            {`Rate limit: ${board.rateLimit.status ?? "unknown"}${board.rateLimit.resetsAt ? ` · resets ${new Date(board.rateLimit.resetsAt).toLocaleString()}` : ""}`}
-          </span>
-        </div>
-      )}
-      {tab === "inbox" ? (
-        <InboxTab cards={cards} undelivered={undelivered} specs={specs.map((s) => s.entry)} onAnswered={(r) => {
-          onRelayError(r);
-          void refresh();
-        }} />
-      ) : tab === "memory" ? (
-        <MemoryTab />
-      ) : (
-        <BoardTab specs={specs} config={config} onChange={refresh} onRelayError={onRelayError} />
-      )}
-    </main>
+    </AnvilProvider>
   );
 }

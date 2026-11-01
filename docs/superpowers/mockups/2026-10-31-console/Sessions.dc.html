@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sessions</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/anvil2/colors_and_type.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+*:focus-visible{outline:2px solid #0265dc;outline-offset:2px}
+a{color:var(--a2-foreground-color-primary)}
+a:hover{text-decoration:underline}
+.btn{font:600 14px/1 var(--a2-font-family-base);height:36px;padding:0 16px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;box-sizing:border-box}
+.btn:hover{text-decoration:none}
+.btn-primary{background:var(--a2-background-color-primary);color:#fff;border:1px solid transparent}
+.btn-primary:hover{background:var(--a2-background-color-primary-hover)}
+.btn-default{background:var(--a2-background-color-default);color:var(--a2-foreground-color-default);border:1px solid var(--a2-border-color-default)}
+.btn-default:hover{background:var(--a2-background-color-default-hover)}
+.btn-ghost{background:transparent;color:var(--a2-foreground-color-default);border:1px solid transparent}
+.btn-ghost:hover{background:var(--a2-background-color-secondary)}
+.btn[disabled]{background:var(--a2-background-color-stronger);color:var(--a2-foreground-color-subdued);border-color:transparent;cursor:not-allowed}
+.tab:hover{color:var(--a2-foreground-color-default)}
+.row-btn{background:transparent}
+.row-btn:hover{background:var(--a2-background-color-default-hover)}
+</style>
+</helmet>
+<div class="anvil2 theme-core mode-light" style="height: 900px; display: flex; flex-direction: column; background: var(--a2-color-blue-grey-10); color: var(--a2-foreground-color-default); font-family: var(--a2-font-family-base)">
+
+  <header style="height: 56px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: 24px; padding: 0 20px; background: var(--a2-background-color-default); border-bottom: 1px solid var(--a2-border-color-subdued)">
+    <a href="Main.dc.html" style="display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--a2-foreground-color-default)">
+      <img src="/_blob/28e99be389069585332925695b9fc877" alt="" width="28" height="28" style="display: block; width: 28px; height: 28px; border-radius: 6px">
+      <span style="font: 700 20px/1 var(--a2-font-family-display)">fyrd</span>
+    </a>
+    <nav aria-label="Primary" style="display: flex; align-self: stretch; gap: 4px">
+      <a class="tab" href="Main.dc.html" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px">
+        <span>Inbox</span>
+        <span style="min-width: 20px; height: 20px; box-sizing: border-box; padding: 0 6px; border-radius: 10px; background: #0265dc; color: #ffffff; font: 700 12px/20px var(--a2-font-family-base); text-align: center">4</span>
+      </a>
+      <a class="tab" href="Sessions.dc.html" aria-current="page" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-default); text-decoration: none; border-bottom: 2px solid var(--a2-border-color-primary); margin-bottom: -1px">Sessions</a>
+      <a class="tab" href="Settings.dc.html" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px">Settings</a>
+    </nav>
+    <div style="flex-grow: 1"></div>
+        <span role="img" aria-label="Signed in as Neil" style="width: 32px; height: 32px; border-radius: 50%; background: var(--a2-color-blue-grey-100); color: var(--a2-color-blue-grey-700); font: 700 12px/32px var(--a2-font-family-base); text-align: center">NH</span>
+  </header>
+
+  <div style="flex-grow: 1; min-height: 0; display: flex">
+
+    <!-- Sessions list -->
+    <aside aria-label="Sessions" style="width: 340px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--a2-background-color-default); border-right: 1px solid var(--a2-border-color-subdued)">
+      <div style="padding: 16px; border-bottom: 1px solid var(--a2-border-color-subdued)">
+        <h1 style="margin: 0; font: 700 18px/1.5 var(--a2-font-family-base)">Sessions</h1>
+        <p style="margin: 0; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ sessionCount }} Claude Code sessions</p>
+      </div>
+      <div style="flex-grow: 1; min-height: 0; overflow-y: auto">
+        <sc-for list="{{ rows }}" as="s" hint-placeholder-count="6">
+          <div style="{{ s.wrapStyle }}">
+          <sc-if value="{{ s.showHeader }}" hint-placeholder-val="{{ true }}">
+            <div style="padding: 12px 16px 6px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">{{ s.headerLabel }}</div>
+          </sc-if>
+          <button class="row-btn" type="button" onClick="{{ s.select }}" aria-current="{{ s.current }}" style="{{ s.rowStyle }}">
+            <span style="flex-shrink: 0; width: 20px; height: 20px; margin-top: 1px">
+              <sc-if value="{{ s.isRunning }}" hint-placeholder-val="{{ true }}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Running" style="color: var(--a2-color-cyan-600)"><path d="M21 12a9 9 0 1 1-6.2-8.55"/><path d="M10 9l5 3-5 3z" fill="currentColor"/></svg>
+              </sc-if>
+              <sc-if value="{{ s.isWaiting }}" hint-placeholder-val="{{ false }}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Waiting for you" style="color: var(--a2-color-yellow-700)"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              </sc-if>
+              <sc-if value="{{ s.isPaused }}" hint-placeholder-val="{{ false }}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Paused" style="color: var(--a2-foreground-color-subdued)"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg>
+              </sc-if>
+              <sc-if value="{{ s.isDone }}" hint-placeholder-val="{{ false }}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Completed" style="color: var(--a2-color-green-600)"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>
+              </sc-if>
+              <sc-if value="{{ s.isError }}" hint-placeholder-val="{{ false }}">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Failed" style="color: var(--a2-color-red-600)"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.2v.1"/></svg>
+              </sc-if>
+            </span>
+            <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+              <span style="display: block; font: 600 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ s.name }}</span>
+              <sc-if value="{{ s.isRootRow }}" hint-placeholder-val="{{ false }}">
+                <span style="display: block; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ s.sub }}</span>
+              </sc-if>
+              <sc-if value="{{ s.notRootRow }}" hint-placeholder-val="{{ true }}">
+                <span style="display: flex; align-items: baseline; gap: 6px; min-width: 0; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued); white-space: nowrap">
+                  <span style="flex-shrink: 0">{{ s.repo }}</span>
+                  <span style="min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--a2-font-family-mono)">{{ s.branch }}</span>
+                </span>
+              </sc-if>
+              <span style="display: flex; align-items: center; gap: 6px; margin-top: 4px">
+                <sc-if value="{{ s.prDraft }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-stronger); color: var(--a2-foreground-color-default); font: 600 11px/1 var(--a2-font-family-base)">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8M18 16V9a3 3 0 0 0-3-3h-3"/></svg>
+                    <span>PR draft</span>
+                  </span>
+                </sc-if>
+                <sc-if value="{{ s.prReady }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-primary-subdued); color: var(--a2-foreground-color-primary-active); font: 600 11px/1 var(--a2-font-family-base)">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8M18 16V9a3 3 0 0 0-3-3h-3"/></svg>
+                    <span>PR ready</span>
+                  </span>
+                </sc-if>
+                <sc-if value="{{ s.prMerged }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-success-subdued); color: var(--a2-color-green-700); font: 600 11px/1 var(--a2-font-family-base)">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 8v8M8 6h4a4 4 0 0 1 4 4v0"/></svg>
+                    <span>PR merged</span>
+                  </span>
+                </sc-if>
+                <sc-if value="{{ s.prClosed }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-danger-subdued); color: #731100; font: 600 11px/1 var(--a2-font-family-base)">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M15 5l6 6M21 5l-6 6"/></svg>
+                    <span>PR closed</span>
+                  </span>
+                </sc-if>
+                <sc-if value="{{ s.hasChecks }}" hint-placeholder-val="{{ false }}">
+                  <span role="img" aria-label="{{ s.checksAria }}" title="{{ s.checksAria }}" style="display: inline-flex; gap: 4px; font: 700 11px/20px var(--a2-font-family-base)"><span style="color: #a31900">{{ s.cFailed }}</span><span style="color: #707070">/</span><span style="color: #05613e">{{ s.cPassed }}</span><span style="color: #707070">/</span><span style="color: #545454">{{ s.cIncomplete }}</span></span>
+                </sc-if>
+                <sc-if value="{{ s.noPr }}" hint-placeholder-val="{{ false }}">
+                  <span style="font: 400 11px/20px var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">No PR</span>
+                </sc-if>
+                <sc-if value="{{ s.hasPrExtra }}" hint-placeholder-val="{{ false }}">
+                  <span style="font: 600 11px/20px var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ s.prExtra }}</span>
+                </sc-if>
+                <span style="margin-left: auto; flex-shrink: 0; font: 400 12px/20px var(--a2-font-family-base); color: var(--a2-foreground-color-subdued); white-space: nowrap">{{ s.age }}</span>
+              </span>
+            </span>
+          </button>
+          <sc-if value="{{ s.showSearch }}" hint-placeholder-val="{{ true }}">
+            <div style="padding: 8px 12px; background: var(--a2-background-color-default); border-top: 1px solid var(--a2-border-color-subdued)">
+              <label style="display: flex; align-items: center; gap: 8px; height: 36px; box-sizing: border-box; padding: 0 12px; border: 1px solid var(--a2-border-color-default); border-radius: 6px; background: var(--a2-background-color-default); color: var(--a2-foreground-color-subdued)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+                <input type="search" value="{{ s.query }}" onChange="{{ s.onQuery }}" placeholder="Search sessions" aria-label="Search sessions" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-default)">
+              </label>
+            </div>
+          </sc-if>
+          </div>
+        </sc-for>
+        <sc-if value="{{ noMatch }}" hint-placeholder-val="{{ false }}">
+          <p style="margin: 0; padding: 16px; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">No sessions match that search.</p>
+        </sc-if>
+      </div>
+    </aside>
+
+    <!-- Session details -->
+    <section aria-label="Session details" style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; background: var(--a2-background-color-default)">
+
+      <div style="flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 12px 24px; border-bottom: 1px solid var(--a2-border-color-subdued)">
+        <div style="flex-grow: 1; min-width: 0">
+          <h2 style="margin: 0; font: 700 16px/1.5 var(--a2-font-family-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ d.name }}</h2>
+          <div style="display: flex; align-items: center; gap: 8px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">
+            <span>{{ d.repo }}</span>
+            <span style="font-family: var(--a2-font-family-mono)">{{ d.branch }}</span>
+            <span>·</span>
+            <span>{{ d.age }}</span>
+          </div>
+        </div>
+        <sc-if value="{{ d.canPause }}" hint-placeholder-val="{{ true }}">
+          <button class="btn btn-default" type="button" onClick="{{ d.toggleRun }}">Pause session</button>
+        </sc-if>
+        <sc-if value="{{ d.canResume }}" hint-placeholder-val="{{ false }}">
+          <button class="btn btn-primary" type="button" onClick="{{ d.toggleRun }}">Resume session</button>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ d.isWaiting }}" hint-placeholder-val="{{ false }}">
+        <div style="flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 10px 24px; background: var(--a2-background-color-warning-subdued); border-bottom: 1px solid var(--a2-border-color-warning)">
+          <span style="flex-grow: 1; font: 400 14px/1.5 var(--a2-font-family-base)">This session is waiting for your response.</span>
+          <a class="btn btn-default" href="Main.dc.html" style="height: 28px; font-size: 13px">Respond in inbox</a>
+        </div>
+      </sc-if>
+
+      <div style="flex-grow: 1; min-height: 0; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+        <sc-for list="{{ messages }}" as="m" hint-placeholder-count="5">
+          <div style="display: flex; flex-direction: column">
+            <sc-if value="{{ m.isAgent }}" hint-placeholder-val="{{ true }}">
+              <div style="align-self: flex-start; max-width: 72%; display: flex; flex-direction: column; gap: 4px">
+                <div style="padding: 12px 16px; border-radius: 12px 12px 12px 4px; background: var(--a2-background-color-stronger); color: var(--a2-foreground-color-default); font: 400 14px/1.5 var(--a2-font-family-base); white-space: pre-line">{{ m.text }}</div>
+                <span style="padding-left: 4px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Claude · {{ m.time }}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ false }}">
+              <div style="align-self: flex-end; max-width: 72%; display: flex; flex-direction: column; align-items: flex-end; gap: 4px">
+                <div style="padding: 12px 16px; border-radius: 12px 12px 4px 12px; background: #0265dc; color: #ffffff; font: 400 14px/1.5 var(--a2-font-family-base); white-space: pre-line">{{ m.text }}</div>
+                <span style="padding-right: 4px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">You · {{ m.time }}</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ m.isEvent }}" hint-placeholder-val="{{ false }}">
+              <div style="align-self: center; padding: 2px 12px; border-radius: 10px; background: var(--a2-background-color-secondary); font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active)">{{ m.text }}</div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="flex-shrink: 0; display: flex; align-items: flex-end; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--a2-border-color-subdued); background: var(--a2-background-color-default)">
+        <label for="composer" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Message this session</label>
+        <textarea id="composer" rows="2" value="{{ draft }}" onChange="{{ onDraft }}" placeholder="Message this session" style="flex-grow: 1; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--a2-border-color-default); border-radius: 6px; background: var(--a2-background-color-default); color: var(--a2-foreground-color-default); font: 400 14px/1.5 var(--a2-font-family-base); resize: none"></textarea>
+        <sc-if value="{{ hasDraft }}" hint-placeholder-val="{{ false }}">
+          <button class="btn btn-primary" type="button" onClick="{{ send }}">Send</button>
+        </sc-if>
+        <sc-if value="{{ noDraft }}" hint-placeholder-val="{{ true }}">
+          <button class="btn btn-primary" type="button" disabled="{{ true }}">Send</button>
+        </sc-if>
+      </div>
+    </section>
+
+    <!-- Session attributes -->
+    <aside aria-label="Session attributes" style="width: 320px; flex-shrink: 0; overflow-y: auto; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px; background: var(--a2-background-color-default); border-left: 1px solid var(--a2-border-color-subdued)">
+
+      <section>
+        <h3 style="margin: 0 0 8px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">Agent</h3>
+        <div style="font: 600 14px/1.5 var(--a2-font-family-base)">{{ d.persona }}</div>
+        <div style="font: 400 12px/1.5 var(--a2-font-family-mono); color: var(--a2-foreground-color-subdued)">{{ d.template }}</div>
+        <div style="margin-top: 4px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Model: {{ d.model }}</div>
+      </section>
+
+      <section>
+        <h3 style="margin: 0 0 8px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">Estimated cost</h3>
+        <div style="font: 700 24px/1.25 var(--a2-font-family-display)">{{ d.costText }}</div>
+        <div role="img" aria-label="{{ d.costAria }}" style="height: 8px; margin: 8px 0; border-radius: 4px; background: var(--a2-background-color-stronger); overflow: hidden">
+          <div style="{{ d.costBarStyle }}"></div>
+        </div>
+        <div style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ d.costNote }}</div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-top: 12px">
+          <span style="font: 600 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active)">Add budget</span>
+          <button class="btn btn-default" type="button" onClick="{{ d.add5 }}" aria-label="Add $5 to budget" style="height: 28px; padding: 0 12px; font-size: 13px">+$5</button>
+          <button class="btn btn-default" type="button" onClick="{{ d.add25 }}" aria-label="Add $25 to budget" style="height: 28px; padding: 0 12px; font-size: 13px">+$25</button>
+          <button class="btn btn-default" type="button" onClick="{{ d.add100 }}" aria-label="Add $100 to budget" style="height: 28px; padding: 0 12px; font-size: 13px">+$100</button>
+        </div>
+      </section>
+
+      <section>
+        <h3 style="margin: 0 0 8px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">Tags</h3>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px">
+          <sc-for list="{{ d.tags }}" as="t" hint-placeholder-count="3">
+            <span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 12px; background: var(--a2-color-blue-grey-100); color: var(--a2-color-blue-grey-700); font: 600 12px/1 var(--a2-font-family-base)">{{ t.label }}</span>
+          </sc-for>
+        </div>
+      </section>
+
+      <section>
+        <h3 style="margin: 0 0 8px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">Pull requests</h3>
+        <sc-if value="{{ d.noPrs }}" hint-placeholder-val="{{ false }}">
+          <p style="margin: 0; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">This session hasn't opened a pull request.</p>
+        </sc-if>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{ d.prs }}" as="p" hint-placeholder-count="2">
+            <div style="padding: 12px; border: 1px solid var(--a2-border-color-subdued); border-radius: 8px; display: flex; flex-direction: column; gap: 6px">
+              <a href="{{ p.href }}" style="display: flex; align-items: flex-start; gap: 6px; font: 600 14px/1.5 var(--a2-font-family-base); text-decoration: none">
+                <span style="flex-grow: 1">{{ p.title }}</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-label="Opens pull request" role="img" style="flex-shrink: 0; margin-top: 4px"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+              </a>
+              <div style="display: flex; align-items: center; gap: 8px">
+                <sc-if value="{{ p.prDraft }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-stronger); color: var(--a2-foreground-color-default); font: 600 11px/1 var(--a2-font-family-base)">Draft</span>
+                </sc-if>
+                <sc-if value="{{ p.prReady }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-primary-subdued); color: var(--a2-foreground-color-primary-active); font: 600 11px/1 var(--a2-font-family-base)">Ready for review</span>
+                </sc-if>
+                <sc-if value="{{ p.prMerged }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-success-subdued); color: var(--a2-color-green-700); font: 600 11px/1 var(--a2-font-family-base)">Merged</span>
+                </sc-if>
+                <sc-if value="{{ p.prClosed }}" hint-placeholder-val="{{ false }}">
+                  <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-danger-subdued); color: #731100; font: 600 11px/1 var(--a2-font-family-base)">Closed</span>
+                </sc-if>
+                <span style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">#{{ p.n }} · {{ p.repo }}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px">
+                <span style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Checks</span>
+                <span role="img" aria-label="{{ p.checksAria }}" title="{{ p.checksAria }}" style="display: inline-flex; gap: 4px; font: 700 12px/1.5 var(--a2-font-family-base)"><span style="color: #a31900">{{ p.cFailed }}</span><span style="color: #707070">/</span><span style="color: #05613e">{{ p.cPassed }}</span><span style="color: #707070">/</span><span style="color: #545454">{{ p.cIncomplete }}</span></span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <section>
+        <h3 style="margin: 0 0 8px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">Details</h3>
+        <dl style="margin: 0; font: 400 13px/1.5 var(--a2-font-family-base)">
+          <div style="display: flex; justify-content: space-between; gap: 12px; padding: 4px 0"><dt style="color: var(--a2-foreground-color-subdued)">Repository</dt><dd style="margin: 0; text-align: right">{{ d.repo }}</dd></div>
+          <div style="display: flex; justify-content: space-between; gap: 12px; padding: 4px 0"><dt style="color: var(--a2-foreground-color-subdued)">Started</dt><dd style="margin: 0; text-align: right">{{ d.started }}</dd></div>
+          <div style="display: flex; justify-content: space-between; gap: 12px; padding: 4px 0"><dt style="color: var(--a2-foreground-color-subdued)">Last activity</dt><dd style="margin: 0; text-align: right">{{ d.age }}</dd></div>
+          <div style="display: flex; justify-content: space-between; gap: 12px; padding: 4px 0"><dt style="color: var(--a2-foreground-color-subdued)">Role</dt><dd style="margin: 0; text-align: right">{{ d.role }}</dd></div>
+        </dl>
+      </section>
+
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+const SESSIONS = [
+  {
+    id: 'root', root: true, name: 'controller', repo: 'All repositories', branch: 'main',
+    status: 'running', age: 'Active now', started: 'Today, 8:55 AM',
+    persona: 'Controller', template: 'controller · v1.2', model: 'Sonnet 5.5',
+    cost: 6.40, budget: 25, tokens: '2.1M tokens in · 120K out',
+    tags: ['controller', 'workspace'],
+    prs: [],
+    msgs: [
+      { r: 'user', t: 'Keep the reporting work moving. Only ping me when a session is blocked on a decision.', time: '8:55 AM' },
+      { r: 'agent', t: 'Understood. I split the work into 5 sessions and I am batching anything that needs you into your inbox.', time: '8:56 AM' },
+      { r: 'event', t: 'Started 5 sessions · Posted 4 inbox items' },
+      { r: 'agent', t: 'Current status: 1 running, 1 waiting on you, 1 paused, 1 failed, 1 completed. Next I will unblock the backfill once you reply about schema drift, and resume the export test fix if you allow the CI change.', time: '2:35 PM' }
+    ]
+  },
+  {
+    id: 's1', name: 'data-platform-engineer-1', repo: 'data-platform', branch: 'neil/cdc-iceberg-v2',
+    status: 'running', age: 'Active now', started: 'Today, 2:02 PM',
+    persona: 'Data platform engineer', template: 'feature-dev · v2.3', model: 'Sonnet 5.5',
+    cost: 4.82, budget: 10, tokens: '1.2M tokens in · 84K out',
+    tags: ['spark', 'iceberg', 'migration'],
+    prs: [
+      { n: 4821, title: 'Move CDC consumer to Iceberg v2 table format', repo: 'data-platform', status: 'draft', checks: { f: 1, p: 9, i: 2 } },
+      { n: 4815, title: 'Add Iceberg v2 catalog config', repo: 'data-platform', status: 'merged', checks: { f: 0, p: 14, i: 0 } }
+    ],
+    msgs: [
+      { r: 'user', t: 'Migrate the CDC consumer to write Iceberg v2 tables. Keep the Kafka offset semantics the same and do not touch the streaming job checkpoint location.', time: '2:02 PM' },
+      { r: 'agent', t: 'Understood. I will read the current consumer and the catalog config first so I know what changes between v1 and v2. Checkpointing stays untouched.', time: '2:02 PM' },
+      { r: 'event', t: 'Read 6 files · Ran 2 searches' },
+      { r: 'agent', t: 'The consumer writes through the v1 DataFrameWriter path. Moving to v2 means switching to writeTo with explicit table properties.\n\nI opened a draft PR with the writer change and the catalog config, and I am running the integration tests against the staging catalog.', time: '2:19 PM' },
+      { r: 'event', t: 'Edited 4 files · Opened draft PR #4821' },
+      { r: 'user', t: 'Good. Make sure the compaction job does not pick up the new tables until I have reviewed.', time: '2:31 PM' },
+      { r: 'agent', t: 'Done. I added the new tables to the compaction exclude list and noted it in the PR description. Tests are running, and I will post the results here when they finish.', time: '2:33 PM' }
+    ]
+  },
+  {
+    id: 's2', name: 'embedded-analytics-engineer-ts-filters', repo: 'workspace-reporting', branch: 'neil/ts-embed-filters',
+    status: 'waiting', age: '6 min ago', started: 'Today, 1:10 PM',
+    persona: 'Embedded analytics engineer', template: 'feature-dev · v2.3', model: 'Sonnet 5.5',
+    cost: 2.15, budget: 10, tokens: '640K tokens in · 41K out',
+    tags: ['thoughtspot', 'embed', 'rls'],
+    prs: [
+      { n: 4807, title: 'Pass tenant filters to embedded Liveboard', repo: 'workspace-reporting', status: 'ready', checks: { f: 0, p: 15, i: 2 } },
+      { n: 4803, title: 'Add tenant claim to embed token', repo: 'workspace-reporting', status: 'merged', checks: { f: 0, p: 12, i: 0 } }
+    ],
+    msgs: [
+      { r: 'user', t: 'The embedded Liveboard shows every tenant. Make it respect the tenant of the signed-in user.', time: '1:10 PM' },
+      { r: 'agent', t: 'I traced how the embed is initialized. It loads the Liveboard without any tenant scoping, so every user sees the full dataset.', time: '1:24 PM' },
+      { r: 'event', t: 'Read 9 files · Ran 4 searches' },
+      { r: 'agent', t: 'There are two ways to fix it. Runtime filters are a one-file change, but a user could alter them in the browser. Token-scoped row-level security cannot be bypassed, but it needs a new claim from the auth service and a staging rollout.\n\nWhich approach do you want me to use? I have asked in your inbox.', time: '1:52 PM' }
+    ]
+  },
+  {
+    id: 's3', name: 'test-reliability-engineer-1', repo: 'workspace-reporting', branch: 'neil/fix-export-flake',
+    status: 'paused', age: '1 hr ago', started: 'Today, 11:40 AM',
+    persona: 'Test reliability engineer', template: 'bugfix · v1.8', model: 'Sonnet 5.5',
+    cost: 0.96, budget: 5, tokens: '310K tokens in · 18K out',
+    tags: ['flaky-test', 'ci'],
+    prs: [ { n: 4799, title: 'Stabilize report export timing test', repo: 'workspace-reporting', status: 'closed', checks: { f: 2, p: 6, i: 0 } } ],
+    msgs: [
+      { r: 'user', t: 'The report export test fails about 1 in 12 CI runs. Find out why and fix it.', time: '11:40 AM' },
+      { r: 'agent', t: 'The failure comes from a slow render worker start on the CI runner. The test checks for the file before the worker has finished writing it.', time: '12:05 PM' },
+      { r: 'event', t: 'Ran test suite 30 times · Closed PR #4799 (superseded)' },
+      { r: 'agent', t: 'I want to fix the wait condition in the test, and raise the CI retry count as a safety net. I need permission to edit the shared CI configuration, so I paused here.', time: '12:31 PM' }
+    ]
+  },
+  {
+    id: 's4', name: 'technical-writer-2', repo: 'docs', branch: 'neil/reporting-api-schemas',
+    status: 'done', age: 'Yesterday', started: 'Yesterday, 3:15 PM',
+    persona: 'Technical writer', template: 'docs · v1.4', model: 'Haiku 5.5',
+    cost: 1.38, budget: 5, tokens: '520K tokens in · 36K out',
+    tags: ['docs', 'api'],
+    prs: [ { n: 4790, title: 'Document reporting API response schemas', repo: 'docs', status: 'merged', checks: { f: 0, p: 8, i: 0 } } ],
+    msgs: [
+      { r: 'user', t: 'Document the response schemas for the reporting API endpoints. Match the format of the existing docs.', time: '3:15 PM' },
+      { r: 'agent', t: 'I documented 11 endpoints, including pagination and error shapes, and linked each one to its example response.', time: '4:02 PM' },
+      { r: 'event', t: 'Edited 12 files · PR #4790 merged' },
+      { r: 'agent', t: 'The pull request is merged and the docs site has rebuilt. Nothing else is pending.', time: '4:40 PM' }
+    ]
+  },
+  {
+    id: 's5', name: 'data-platform-engineer-backfill-retry', repo: 'data-platform', branch: 'neil/backfill-retry',
+    status: 'error', age: '3 hr ago', started: 'Today, 9:20 AM',
+    persona: 'Data platform engineer', template: 'feature-dev · v2.3', model: 'Sonnet 5.5',
+    cost: 3.07, budget: 10, tokens: '880K tokens in · 52K out',
+    tags: ['backfill', 'reliability'],
+    prs: [ { n: 4833, title: 'Add exponential backoff to backfill worker', repo: 'data-platform', status: 'draft', checks: { f: 1, p: 4, i: 7 } } ],
+    msgs: [
+      { r: 'user', t: 'Add exponential backoff to the backfill worker and run it against last week of partitions.', time: '9:20 AM' },
+      { r: 'agent', t: 'Backoff is in place and the draft PR is open. I started the backfill on staging.', time: '10:48 AM' },
+      { r: 'event', t: 'Run stopped: partition 2026-10-14 failed the schema check after 3 retries' },
+      { r: 'agent', t: 'Two columns were added to the source mid-day on 2026-10-14, so the schema check fails. I have not retried or changed anything. I need a decision on how to handle drifted partitions.', time: '11:02 AM' }
+    ]
+  }
+];
+
+// Least complete first: a session shows the PR that is furthest from done.
+const RANK = { draft: 0, ready: 1, closed: 2, merged: 3 };
+const byCompleteness = (a, b) => RANK[a.status] - RANK[b.status];
+// Check totals: f = failed, p = passed, i = incomplete.
+const sumChecks = (prs) => prs.reduce((t, p) => ({ f: t.f + p.checks.f, p: t.p + p.checks.p, i: t.i + p.checks.i }), { f: 0, p: 0, i: 0 });
+const checksAria = (c) => c.f + ' failed, ' + c.p + ' passed, ' + c.i + ' incomplete';
+
+class Component extends DCLogic {
+  state = { selected: 's1', override: {}, drafts: {}, sent: {}, budgetAdd: {}, query: '' };
+
+  addBudget(id, amount) {
+    const next = Object.assign({}, this.state.budgetAdd);
+    next[id] = (next[id] || 0) + amount;
+    this.setState({ budgetAdd: next });
+  }
+
+  renderVals() {
+    const st = this.state;
+    const statusText = { running: 'Running', waiting: 'Waiting for you', paused: 'Paused', done: 'Completed', error: 'Failed' };
+    const eff = (o) => st.override[o.id] || o.status;
+    const sflags = (s) => ({ isRunning: s === 'running', isWaiting: s === 'waiting', isPaused: s === 'paused', isDone: s === 'done', isError: s === 'error' });
+    const pflags = (p) => ({
+      prDraft: !!p && p.status === 'draft',
+      prReady: !!p && p.status === 'ready',
+      prMerged: !!p && p.status === 'merged',
+      prClosed: !!p && p.status === 'closed'
+    });
+
+    const q = (st.query || '').trim().toLowerCase();
+    const visible = SESSIONS.filter((o) => o.root || !q || (o.name + ' ' + o.repo + ' ' + o.branch).toLowerCase().indexOf(q) >= 0);
+    const rows = visible.map((o, i) => {
+      const sel = o.id === st.selected;
+      const first = o.prs.slice().sort(byCompleteness)[0];
+      const tot = sumChecks(o.prs);
+      return Object.assign({
+        id: o.id, name: o.name, age: o.age, repo: o.repo, branch: o.branch,
+        isRootRow: !!o.root, notRootRow: !o.root,
+        sub: 'Coordinating ' + (SESSIONS.length - 1) + ' sessions',
+        showSearch: !!o.root,
+        query: st.query || '',
+        onQuery: (e) => this.setState({ query: e.target.value }),
+        hasChecks: o.prs.length > 0,
+        cFailed: tot.f, cPassed: tot.p, cIncomplete: tot.i, checksAria: checksAria(tot),
+        showHeader: !!o.root || i === 1,
+        headerLabel: o.root ? 'Controller' : 'Sessions',
+        wrapStyle: o.root ? 'position:sticky;top:0;z-index:2;background:var(--a2-color-blue-grey-10);border-bottom:2px solid var(--a2-border-color-default)' : '',
+        current: sel,
+        rowStyle: 'display:flex;align-items:flex-start;gap:12px;width:100%;box-sizing:border-box;text-align:left;padding:12px 16px;border:0;border-bottom:1px solid var(--a2-border-color-subdued);cursor:pointer;font-family:var(--a2-font-family-base);' + (sel ? 'background:var(--a2-background-color-primary-subdued);' : ''),
+        select: () => this.setState({ selected: o.id }),
+        noPr: !first,
+        hasPrExtra: o.prs.length > 1,
+        prExtra: o.prs.length > 1 ? '+' + (o.prs.length - 1) + ' more' : ''
+      }, sflags(eff(o)), pflags(first));
+    });
+
+    const cur = SESSIONS.filter((o) => o.id === st.selected)[0];
+    const status = eff(cur);
+    const budget = cur.budget + (st.budgetAdd[cur.id] || 0);
+    const pct = Math.min(100, Math.round((cur.cost / budget) * 100));
+    const d = Object.assign({
+      name: cur.name, repo: cur.repo, branch: cur.branch, age: cur.age, started: cur.started,
+      role: cur.root ? 'Controller' : 'Session',
+      statusLabel: statusText[status],
+      persona: cur.persona, template: cur.template, model: cur.model,
+      costText: '$' + cur.cost.toFixed(2),
+      costNote: pct + '% of $' + budget.toFixed(2) + ' budget · ' + cur.tokens,
+      add5: () => this.addBudget(cur.id, 5),
+      add25: () => this.addBudget(cur.id, 25),
+      add100: () => this.addBudget(cur.id, 100),
+      costAria: pct + ' percent of budget used',
+      costBarStyle: 'width:' + pct + '%;height:100%;background:#0265dc;border-radius:4px',
+      tags: cur.tags.map((t) => ({ label: t })),
+      noPrs: cur.prs.length === 0,
+      prs: cur.prs.slice().sort(byCompleteness).map((p) => Object.assign({ n: p.n, title: p.title, repo: p.repo, href: '#pr-' + p.n, cFailed: p.checks.f, cPassed: p.checks.p, cIncomplete: p.checks.i, checksAria: checksAria(p.checks) }, pflags(p))),
+      canPause: status === 'running',
+      canResume: status === 'paused',
+      toggleRun: () => {
+        const next = Object.assign({}, this.state.override);
+        next[cur.id] = status === 'running' ? 'paused' : 'running';
+        this.setState({ override: next });
+      }
+    }, sflags(status));
+
+    const sentHere = st.sent[cur.id] || [];
+    const all = cur.msgs.concat(sentHere);
+    const messages = all.map((m) => ({
+      isAgent: m.r === 'agent', isUser: m.r === 'user', isEvent: m.r === 'event',
+      text: m.t, time: m.time || ''
+    }));
+
+    const draft = st.drafts[cur.id] || '';
+    return {
+      sessionCount: SESSIONS.length - 1,
+      noMatch: !!q && visible.length === 1,
+      rows: rows,
+      d: d,
+      messages: messages,
+      draft: draft,
+      hasDraft: draft.trim().length > 0,
+      noDraft: draft.trim().length === 0,
+      onDraft: (e) => {
+        const next = Object.assign({}, this.state.drafts);
+        next[cur.id] = e.target.value;
+        this.setState({ drafts: next });
+      },
+      send: () => {
+        const text = (this.state.drafts[cur.id] || '').trim();
+        if (!text) return;
+        const sent = Object.assign({}, this.state.sent);
+        sent[cur.id] = (sent[cur.id] || []).concat([{ r: 'user', t: text, time: 'Just now' }]);
+        const drafts = Object.assign({}, this.state.drafts);
+        drafts[cur.id] = '';
+        this.setState({ sent: sent, drafts: drafts });
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

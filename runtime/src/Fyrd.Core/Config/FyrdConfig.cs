@@ -6,9 +6,11 @@ public sealed partial record FyrdConfig(
     int SquadCap = 4,
     string? EnvironmentId = null,
     string LeadModel = FyrdConfig.DefaultLeadModel,
-    string PeerModel = FyrdConfig.DefaultPeerModel)
+    string PeerModel = FyrdConfig.DefaultPeerModel,
+    int SessionCap = 20)
 {
     public const int MinSquadCap = 1, MaxSquadCap = 8;
+    public const int MinSessionCap = 1, MaxSessionCap = 100;
     public const string DefaultLeadModel = "claude-opus-5-5", DefaultPeerModel = "claude-sonnet-5-5";
 
     public static bool IsValidEnvironmentId(string? id) => id is not null && EnvironmentIdPattern().IsMatch(id);
@@ -32,6 +34,7 @@ public sealed class ConfigStore(FyrdPaths paths)
                 EnvironmentId = FyrdConfig.IsValidEnvironmentId(config.EnvironmentId) ? config.EnvironmentId : null,
                 LeadModel = string.IsNullOrWhiteSpace(config.LeadModel) ? FyrdConfig.DefaultLeadModel : config.LeadModel,
                 PeerModel = string.IsNullOrWhiteSpace(config.PeerModel) ? FyrdConfig.DefaultPeerModel : config.PeerModel,
+                SessionCap = Math.Clamp(config.SessionCap, FyrdConfig.MinSessionCap, FyrdConfig.MaxSessionCap),
             };
         }
         catch (Exception e) when (e is JsonException or IOException)
@@ -45,6 +48,9 @@ public sealed class ConfigStore(FyrdPaths paths)
         if (config.SquadCap is < FyrdConfig.MinSquadCap or > FyrdConfig.MaxSquadCap)
             throw new ArgumentOutOfRangeException(nameof(config), config.SquadCap,
                 $"SquadCap must be between {FyrdConfig.MinSquadCap} and {FyrdConfig.MaxSquadCap}.");
+        if (config.SessionCap is < FyrdConfig.MinSessionCap or > FyrdConfig.MaxSessionCap)
+            throw new ArgumentOutOfRangeException(nameof(config), config.SessionCap,
+                $"SessionCap must be between {FyrdConfig.MinSessionCap} and {FyrdConfig.MaxSessionCap}.");
         if (config.EnvironmentId is not null && !FyrdConfig.IsValidEnvironmentId(config.EnvironmentId))
             throw new ArgumentException("EnvironmentId must match ^(env|ccpool)_[A-Za-z0-9]+$.", nameof(config));
         AtomicFile.Write(paths.ConfigFile, JsonSerializer.Serialize(config, Json.Options));

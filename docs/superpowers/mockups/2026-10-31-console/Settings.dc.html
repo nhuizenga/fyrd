@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="ds/anvil2/colors_and_type.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+*:focus-visible{outline:2px solid #0265dc;outline-offset:2px}
+a{color:var(--a2-foreground-color-primary)}
+a:hover{text-decoration:underline}
+.btn{font:600 14px/1 var(--a2-font-family-base);height:36px;padding:0 16px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;white-space:nowrap;box-sizing:border-box}
+.btn:hover{text-decoration:none}
+.btn-primary{background:var(--a2-background-color-primary);color:#fff;border:1px solid transparent}
+.btn-primary:hover{background:var(--a2-background-color-primary-hover)}
+.btn-default{background:var(--a2-background-color-default);color:var(--a2-foreground-color-default);border:1px solid var(--a2-border-color-default)}
+.btn-default:hover{background:var(--a2-background-color-default-hover)}
+.btn-danger{background:var(--a2-background-color-default);color:#a31900;border:1px solid #a31900}
+.btn-danger:hover{background:var(--a2-background-color-danger-subdued)}
+.btn-ghost{background:transparent;color:var(--a2-foreground-color-default);border:1px solid transparent}
+.btn-ghost:hover{background:var(--a2-background-color-secondary)}
+.btn-sm{height:28px;padding:0 10px;font-size:13px}
+.btn[disabled]{background:var(--a2-background-color-stronger);color:var(--a2-foreground-color-subdued);border-color:transparent;cursor:not-allowed}
+.tab:hover{color:var(--a2-foreground-color-default)}
+.row-btn{background:transparent}
+.row-btn:hover{background:var(--a2-background-color-default-hover)}
+.field{width:100%;box-sizing:border-box;border:1px solid var(--a2-border-color-default);border-radius:6px;background:var(--a2-background-color-default);color:var(--a2-foreground-color-default);font:400 14px/1.5 var(--a2-font-family-base);padding:7px 12px}
+.field:hover{border-color:var(--a2-border-color-strong)}
+.field:focus{outline:2px solid #0265dc;outline-offset:-1px;border-color:transparent}
+</style>
+</helmet>
+<div class="anvil2 theme-core mode-light" style="height: 900px; display: flex; flex-direction: column; background: var(--a2-color-blue-grey-10); color: var(--a2-foreground-color-default); font-family: var(--a2-font-family-base)">
+
+  <header style="height: 56px; box-sizing: border-box; flex-shrink: 0; display: flex; align-items: center; gap: 24px; padding: 0 20px; background: var(--a2-background-color-default); border-bottom: 1px solid var(--a2-border-color-subdued)">
+    <a href="Main.dc.html" style="display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--a2-foreground-color-default)">
+      <img src="/_blob/28e99be389069585332925695b9fc877" alt="" width="28" height="28" style="display: block; width: 28px; height: 28px; border-radius: 6px">
+      <span style="font: 700 20px/1 var(--a2-font-family-display)">fyrd</span>
+    </a>
+    <nav aria-label="Primary" style="display: flex; align-self: stretch; gap: 4px">
+      <a class="tab" href="Main.dc.html" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px">
+        <span>Inbox</span>
+        <span style="min-width: 20px; height: 20px; box-sizing: border-box; padding: 0 6px; border-radius: 10px; background: #0265dc; color: #ffffff; font: 700 12px/20px var(--a2-font-family-base); text-align: center">4</span>
+      </a>
+      <a class="tab" href="Sessions.dc.html" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued-active); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px">Sessions</a>
+      <a class="tab" href="Settings.dc.html" aria-current="page" style="display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; font: 600 14px/1 var(--a2-font-family-base); color: var(--a2-foreground-color-default); text-decoration: none; border-bottom: 2px solid var(--a2-border-color-primary); margin-bottom: -1px">Settings</a>
+    </nav>
+    <div style="flex-grow: 1"></div>
+    <span role="img" aria-label="Signed in as Neil" style="width: 32px; height: 32px; border-radius: 50%; background: var(--a2-color-blue-grey-100); color: var(--a2-color-blue-grey-700); font: 700 12px/32px var(--a2-font-family-base); text-align: center">NH</span>
+  </header>
+
+  <div style="flex-grow: 1; min-height: 0; display: flex">
+
+    <!-- Settings navigation -->
+    <aside aria-label="Settings sections" style="width: 240px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--a2-background-color-default); border-right: 1px solid var(--a2-border-color-subdued)">
+      <div style="padding: 16px; border-bottom: 1px solid var(--a2-border-color-subdued)">
+        <h1 style="margin: 0; font: 700 18px/1.5 var(--a2-font-family-base)">Settings</h1>
+        <p style="margin: 0; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Applies to all sessions in this fyrd</p>
+      </div>
+      <nav style="padding: 8px 0">
+        <sc-for list="{{ nav }}" as="n" hint-placeholder-count="3">
+          <button class="row-btn" type="button" aria-current="{{ n.current }}" onClick="{{ n.go }}" style="{{ n.style }}">
+            <span style="display: block; font: 600 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-default)">{{ n.label }}</span>
+            <span style="display: block; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ n.desc }}</span>
+          </button>
+        </sc-for>
+      </nav>
+    </aside>
+
+    <main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column">
+
+      <!-- ===== Environment ===== -->
+      <sc-if value="{{ isEnv }}" hint-placeholder-val="{{ true }}">
+        <div style="flex-grow: 1; overflow-y: auto; padding: 32px">
+          <div style="max-width: 640px">
+            <h2 style="margin: 0; font: 700 20px/1.5 var(--a2-font-family-base)">Environment</h2>
+            <p style="margin: 4px 0 24px; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Where sessions run and how this fyrd is identified.</p>
+            <section style="padding: 24px; background: var(--a2-background-color-default); border: 1px solid var(--a2-border-color-subdued); border-radius: 8px">
+              <label for="env-name" style="display: block; font: 600 14px/1.5 var(--a2-font-family-base)">Cloud environment name</label>
+              <p id="env-help" style="margin: 0 0 8px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">The environment new sessions start in. Running sessions keep their current environment.</p>
+              <input id="env-name" class="field" type="text" value="{{ env.draft }}" onChange="{{ env.onChange }}" aria-describedby="env-help" placeholder="e.g. data-platform-dev" style="font-family: var(--a2-font-family-mono)">
+              <div style="display: flex; align-items: center; gap: 12px; margin-top: 16px">
+                <button class="btn btn-primary" type="button" disabled="{{ env.clean }}" onClick="{{ env.save }}">Save</button>
+                <sc-if value="{{ env.dirty }}" hint-placeholder-val="{{ false }}">
+                  <button class="btn btn-ghost" type="button" onClick="{{ env.discard }}">Discard</button>
+                </sc-if>
+                <span role="status" style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ env.note }}</span>
+              </div>
+            </section>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== Personas ===== -->
+      <sc-if value="{{ isPersonas }}" hint-placeholder-val="{{ false }}">
+        <div style="flex-grow: 1; min-height: 0; display: flex">
+          <div style="width: 300px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--a2-background-color-default); border-right: 1px solid var(--a2-border-color-subdued)">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--a2-border-color-subdued)">
+              <div style="flex-grow: 1">
+                <h2 style="margin: 0; font: 700 16px/1.5 var(--a2-font-family-base)">Personas</h2>
+                <p style="margin: 0; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ personaCount }} available to sessions</p>
+              </div>
+              <button class="btn btn-default btn-sm" type="button" onClick="{{ addPersona }}">Add persona</button>
+            </div>
+            <div style="flex-grow: 1; min-height: 0; overflow-y: auto">
+              <sc-for list="{{ personaRows }}" as="r" hint-placeholder-count="5">
+                <button class="row-btn" type="button" aria-current="{{ r.current }}" onClick="{{ r.select }}" style="{{ r.style }}">
+                  <span style="display: block; font: 600 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ r.name }}</span>
+                  <span style="display: flex; align-items: center; gap: 6px; margin-top: 4px">
+                    <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; background: var(--a2-background-color-stronger); font: 600 11px/1 var(--a2-font-family-base)">{{ r.modelLabel }}</span>
+                    <span style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ r.usage }}</span>
+                    <sc-if value="{{ r.dirty }}" hint-placeholder-val="{{ false }}">
+                      <span style="margin-left: auto; font: 600 11px/1.5 var(--a2-font-family-base); color: #8f5d00">Unsaved</span>
+                    </sc-if>
+                  </span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex-grow: 1; min-width: 0; overflow-y: auto; padding: 32px">
+            <sc-if value="{{ hasPersona }}" hint-placeholder-val="{{ true }}">
+              <div style="max-width: 760px; display: flex; flex-direction: column; gap: 20px">
+                <div style="display: flex; gap: 16px">
+                  <div style="flex-grow: 1; min-width: 0">
+                    <label for="p-name" style="display: block; margin-bottom: 4px; font: 600 14px/1.5 var(--a2-font-family-base)">Name</label>
+                    <input id="p-name" class="field" type="text" value="{{ p.name }}" onChange="{{ p.onName }}">
+                  </div>
+                  <div style="width: 280px; flex-shrink: 0">
+                    <label for="p-model" style="display: block; margin-bottom: 4px; font: 600 14px/1.5 var(--a2-font-family-base)">Claude model</label>
+                    <select id="p-model" class="field" value="{{ p.model }}" onChange="{{ p.onModel }}" style="height: 38px">
+                      <option value="claude-opus-5-5">Opus 5.5 · claude-opus-5-5</option>
+                      <option value="claude-sonnet-5-5">Sonnet 5.5 · claude-sonnet-5-5</option>
+                      <option value="claude-haiku-5-5">Haiku 5.5 · claude-haiku-5-5</option>
+                      <option value="claude-fable-5-1">Fable 5.1 · claude-fable-5-1</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label for="p-def" style="display: block; font: 600 14px/1.5 var(--a2-font-family-base)">Definition</label>
+                  <p id="p-def-help" style="margin: 0 0 8px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Instructions given to the agent at the start of every session that uses this persona.</p>
+                  <textarea id="p-def" class="field" rows="18" aria-describedby="p-def-help" value="{{ p.definition }}" onChange="{{ p.onDef }}" style="display: block; resize: vertical; font: 400 13px/1.6 var(--a2-font-family-mono)"></textarea>
+                  <div style="margin-top: 4px; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued); text-align: right">{{ p.chars }}</div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; padding-top: 16px; border-top: 1px solid var(--a2-border-color-subdued)">
+                  <button class="btn btn-primary" type="button" disabled="{{ p.clean }}" onClick="{{ p.save }}">Save persona</button>
+                  <sc-if value="{{ p.dirty }}" hint-placeholder-val="{{ false }}">
+                    <button class="btn btn-ghost" type="button" onClick="{{ p.discard }}">Discard</button>
+                  </sc-if>
+                  <span role="status" style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ p.note }}</span>
+                  <div style="flex-grow: 1"></div>
+                  <sc-if value="{{ p.canDelete }}" hint-placeholder-val="{{ true }}">
+                    <button class="btn btn-danger" type="button" onClick="{{ p.remove }}">Delete persona</button>
+                  </sc-if>
+                  <sc-if value="{{ p.locked }}" hint-placeholder-val="{{ false }}">
+                    <span style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">The Controller persona can't be deleted</span>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ noPersona }}" hint-placeholder-val="{{ false }}">
+              <p style="margin: 0; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">Select a persona to edit it.</p>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== Memory ===== -->
+      <sc-if value="{{ isMemory }}" hint-placeholder-val="{{ false }}">
+        <div style="flex-grow: 1; min-height: 0; display: flex">
+          <div style="width: 300px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--a2-background-color-default); border-right: 1px solid var(--a2-border-color-subdued)">
+            <div style="padding: 16px; border-bottom: 1px solid var(--a2-border-color-subdued)">
+              <h2 style="margin: 0; font: 700 16px/1.5 var(--a2-font-family-base)">Agent memory</h2>
+              <p style="margin: 0; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ memCount }} entries across all agents</p>
+            </div>
+            <div style="flex-grow: 1; min-height: 0; overflow-y: auto">
+              <sc-for list="{{ memScopes }}" as="g" hint-placeholder-count="6">
+                <div>
+                  <sc-if value="{{ g.showHeader }}" hint-placeholder-val="{{ false }}">
+                    <div style="padding: 12px 16px 4px; font: 700 11px/1.5 var(--a2-font-family-base); letter-spacing: 0.06em; text-transform: uppercase; color: var(--a2-foreground-color-subdued)">{{ g.header }}</div>
+                  </sc-if>
+                  <button class="row-btn" type="button" aria-current="{{ g.current }}" onClick="{{ g.select }}" style="{{ g.style }}">
+                    <span style="flex-grow: 1; min-width: 0; font: 600 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-default); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ g.label }}</span>
+                    <span style="flex-shrink: 0; min-width: 24px; height: 20px; box-sizing: border-box; padding: 0 7px; border-radius: 10px; background: var(--a2-background-color-stronger); font: 600 11px/20px var(--a2-font-family-base); text-align: center">{{ g.count }}</span>
+                  </button>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="flex-grow: 1; min-width: 0; overflow-y: auto; padding: 24px 32px 48px">
+            <div style="max-width: 820px">
+              <h2 style="margin: 0; font: 700 20px/1.5 var(--a2-font-family-base)">{{ ms.label }}</h2>
+              <p style="margin: 0 0 20px; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ ms.desc }}</p>
+
+              <section aria-label="Add a memory entry" style="padding: 16px; margin-bottom: 24px; background: var(--a2-background-color-default); border: 1px solid var(--a2-border-color-subdued); border-radius: 8px">
+                <label for="mem-new" style="display: block; margin-bottom: 4px; font: 600 14px/1.5 var(--a2-font-family-base)">Add an entry</label>
+                <textarea id="mem-new" class="field" rows="2" value="{{ ms.newDraft }}" onChange="{{ ms.onNew }}" placeholder="Something these agents should remember" style="display: block; resize: vertical"></textarea>
+                <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px">
+                  <button class="btn btn-primary btn-sm" type="button" disabled="{{ ms.newClean }}" onClick="{{ ms.add }}">Add entry</button>
+                  <span role="status" style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ ms.note }}</span>
+                </div>
+              </section>
+
+              <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px">
+                <h3 style="margin: 0; font: 700 14px/1.5 var(--a2-font-family-base)">Entries</h3>
+                <span style="font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ ms.countText }} · newest first</span>
+              </div>
+              <ul style="list-style: none; margin: 0; padding: 0; background: var(--a2-background-color-default); border: 1px solid var(--a2-border-color-subdued); border-radius: 8px; overflow: hidden">
+                <sc-for list="{{ entries }}" as="e" hint-placeholder-count="5">
+                  <li style="{{ e.style }}">
+                    <sc-if value="{{ e.viewing }}" hint-placeholder-val="{{ true }}">
+                      <div style="display: flex; align-items: flex-start; gap: 16px">
+                        <div style="flex-grow: 1; min-width: 0">
+                          <p style="margin: 0; font: 400 14px/1.5 var(--a2-font-family-base); white-space: pre-wrap">{{ e.text }}</p>
+                          <p style="margin: 4px 0 0; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ e.meta }}</p>
+                        </div>
+                        <div style="flex-shrink: 0; display: flex; gap: 4px">
+                          <button class="btn btn-ghost btn-sm" type="button" onClick="{{ e.edit }}" aria-label="{{ e.editAria }}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                            <span>Edit</span>
+                          </button>
+                          <button class="btn btn-ghost btn-sm" type="button" onClick="{{ e.askDelete }}" aria-label="{{ e.deleteAria }}" style="color: #a31900">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ e.editing }}" hint-placeholder-val="{{ false }}">
+                      <label for="{{ e.fieldId }}" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Edit memory entry</label>
+                      <textarea id="{{ e.fieldId }}" class="field" rows="3" value="{{ e.draft }}" onChange="{{ e.onDraft }}" style="display: block; resize: vertical"></textarea>
+                      <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px">
+                        <button class="btn btn-primary btn-sm" type="button" disabled="{{ e.saveDisabled }}" onClick="{{ e.save }}">Save</button>
+                        <button class="btn btn-ghost btn-sm" type="button" onClick="{{ e.cancel }}">Cancel</button>
+                        <span style="margin-left: auto; font: 400 12px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">{{ e.meta }}</span>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ e.confirming }}" hint-placeholder-val="{{ false }}">
+                      <p style="margin: 0; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued); white-space: pre-wrap; text-decoration: line-through">{{ e.text }}</p>
+                      <div role="alert" style="display: flex; align-items: center; gap: 8px; margin-top: 8px">
+                        <span style="font: 600 14px/1.5 var(--a2-font-family-base); color: #a31900">Delete this entry? Agents will stop seeing it.</span>
+                        <div style="flex-grow: 1"></div>
+                        <button class="btn btn-danger btn-sm" type="button" onClick="{{ e.remove }}">Delete</button>
+                        <button class="btn btn-ghost btn-sm" type="button" onClick="{{ e.cancel }}">Cancel</button>
+                      </div>
+                    </sc-if>
+                  </li>
+                </sc-for>
+              </ul>
+              <sc-if value="{{ noEntries }}" hint-placeholder-val="{{ false }}">
+                <p style="margin: 12px 0 0; font: 400 14px/1.5 var(--a2-font-family-base); color: var(--a2-foreground-color-subdued)">No entries yet. Agents add entries as they work, or add one above.</p>
+              </sc-if>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+const MODEL_LABEL = {
+  'claude-opus-5-5': 'Opus 5.5',
+  'claude-sonnet-5-5': 'Sonnet 5.5',
+  'claude-haiku-5-5': 'Haiku 5.5',
+  'claude-fable-5-1': 'Fable 5.1'
+};
+
+const PERSONAS = [
+  { id: 'controller', name: 'Controller', model: 'claude-sonnet-5-5', locked: true, sessions: 1,
+    definition: 'You are the fyrd controller. You coordinate every other session in this fyrd.\n\n- Start new sessions when the user asks, picking the persona that fits the work.\n- Route questions that need the user to the inbox; never guess at product decisions.\n- Watch budgets. Pause a session that is about to exceed its budget and say why.\n- Keep a short running log of what each session is doing in /controller/routing.md.' },
+  { id: 'data-eng', name: 'Data platform engineer', model: 'claude-sonnet-5-5', sessions: 2,
+    definition: 'You are a senior data platform engineer working on the streaming CDC pipeline (Kafka, Spark, Iceberg).\n\n- Prefer small, reviewable PRs. Open them as drafts until checks pass.\n- Never run backfills or schema migrations against production without asking.\n- Write tests next to the code you change and run the affected suites before pushing.\n- Record table-format decisions in memory so later sessions follow them.' },
+  { id: 'analytics-eng', name: 'Embedded analytics engineer', model: 'claude-sonnet-5-5', sessions: 1,
+    definition: 'You build and maintain the ThoughtSpot embed inside the ServiceTitan monolith.\n\n- Tenant isolation is non-negotiable: every embed token must carry the tenant claim.\n- Follow the Anvil2 component guidance for any UI you touch.\n- Ask before changing a Liveboard or worksheet that other teams own.' },
+  { id: 'test-eng', name: 'Test reliability engineer', model: 'claude-haiku-5-5', sessions: 1,
+    definition: 'You find and fix flaky tests.\n\n- Reproduce the flake at least 20 times before and after a fix.\n- Fix the cause, not the symptom: no added sleeps or retries without a written reason.\n- If a test is wrong rather than flaky, say so and ask before deleting it.' },
+  { id: 'writer', name: 'Technical writer', model: 'claude-haiku-5-5', sessions: 1,
+    definition: 'You write and maintain developer documentation.\n\n- Plain language, short sentences, second person.\n- Every example must run as written; test it before you commit it.\n- Match the existing structure of the docs site.' }
+];
+
+const MEMORY = [
+  { id: 'm1', scope: 'shared', created: '2026-10-02', text: 'Branch names follow neil/<short-topic>.' },
+  { id: 'm2', scope: 'shared', created: '2026-10-02', text: 'Open PRs as drafts until every required check passes. Squash-merge only.' },
+  { id: 'm3', scope: 'shared', created: '2026-10-14', text: 'data-platform holds CDC consumers, Spark jobs and the Iceberg catalog config; workspace-reporting holds the ThoughtSpot embed and report export.' },
+  { id: 'm4', scope: 'shared', created: '2026-10-27', edited: '2026-10-28', text: 'Ask before touching anything in production, including read-only queries against prod Snowflake.' },
+  { id: 'm5', scope: 'controller', created: '2026-10-29', text: 'Neil prefers questions batched in the inbox rather than one at a time.' },
+  { id: 'm6', scope: 'controller', created: '2026-10-21', text: 'Default budget for a new session is $20 unless the task says otherwise.' },
+  { id: 'm7', scope: 'data-eng', created: '2026-10-29', text: 'Target Iceberg format v2 for all CDC tables.' },
+  { id: 'm8', scope: 'data-eng', created: '2026-10-29', text: 'Use merge-on-read for high-churn tables and copy-on-write elsewhere.' },
+  { id: 'm9', scope: 'data-eng', created: '2026-10-18', text: 'Snapshot expiry is 7 days; do not lower it without asking.' },
+  { id: 'm10', scope: 'analytics-eng', created: '2026-10-29', text: 'The embed token is minted by the monolith; the tenant claim was added in #4803.' },
+  { id: 'm11', scope: 'analytics-eng', created: '2026-10-29', text: 'Runtime filters pass through as tenantId and businessUnitId.' },
+  { id: 'm12', scope: 'test-eng', created: '2026-10-29', text: 'The report-export flake reproduces about 1 in 12 runs under parallel test execution.' },
+  { id: 'm13', scope: 'writer', created: '2026-10-08', text: 'Sentence-case headings. Code blocks always have a language tag.' }
+];
+
+const TODAY = '2026-10-29';
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(iso) { const p = iso.split('-'); return MONTHS[parseInt(p[1], 10) - 1] + ' ' + parseInt(p[2], 10) + ', ' + p[0]; }
+
+const NAV = [
+  { id: 'env', label: 'Environment', desc: 'Cloud environment name' },
+  { id: 'personas', label: 'Personas', desc: 'Agents sessions can run as' },
+  { id: 'memory', label: 'Agent memory', desc: 'What agents remember' }
+];
+
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+class Component extends DCLogic {
+  state = {
+    section: 'env',
+    env: 'data-platform-dev', envDraft: null, envNote: '',
+    personas: PERSONAS, pSel: 'data-eng', pDrafts: {}, pNote: '',
+    memory: MEMORY, mScope: 'shared', mNew: {}, mEdit: null, mEditDraft: '', mConfirm: null, mNote: '',
+    seq: 1
+  };
+
+  renderVals() {
+    const st = this.state;
+    const rowBase = 'display:block;width:100%;box-sizing:border-box;text-align:left;border:0;cursor:pointer;font-family:var(--a2-font-family-base);';
+    const selBg = 'background:var(--a2-background-color-primary-subdued);box-shadow:inset 3px 0 0 var(--a2-border-color-primary);';
+
+    const nav = NAV.map((n) => ({
+      label: n.label, desc: n.desc, current: st.section === n.id,
+      style: rowBase + 'padding:10px 16px;' + (st.section === n.id ? selBg : ''),
+      go: () => this.setState({ section: n.id })
+    }));
+
+    // Environment
+    const envDraft = st.envDraft === null ? st.env : st.envDraft;
+    const envDirty = envDraft.trim() !== st.env && envDraft.trim() !== '';
+    const env = {
+      draft: envDraft,
+      dirty: envDirty, clean: !envDirty,
+      note: envDirty ? 'Unsaved changes' : st.envNote,
+      onChange: (e) => this.setState({ envDraft: e.target.value, envNote: '' }),
+      save: () => this.setState({ env: envDraft.trim(), envDraft: null, envNote: 'Saved. New sessions will start in ' + envDraft.trim() + '.' }),
+      discard: () => this.setState({ envDraft: null, envNote: '' })
+    };
+
+    // Personas
+    const pMerged = (o) => Object.assign({}, o, st.pDrafts[o.id] || {});
+    const pIsDirty = (o) => {
+      const d = st.pDrafts[o.id];
+      if (!d) return false;
+      return Object.keys(d).some((k) => d[k] !== o[k]);
+    };
+    const personaRows = st.personas.map((o) => {
+      const m = pMerged(o);
+      const sel = o.id === st.pSel;
+      return {
+        name: m.name || 'Untitled persona', modelLabel: MODEL_LABEL[m.model],
+        usage: o.sessions ? plural(o.sessions, 'session', 'sessions') : 'Not in use',
+        dirty: pIsDirty(o), current: sel,
+        style: rowBase + 'padding:12px 16px;border-bottom:1px solid var(--a2-border-color-subdued);' + (sel ? selBg : ''),
+        select: () => this.setState({ pSel: o.id, pNote: '' })
+      };
+    });
+    const pCur = st.personas.filter((o) => o.id === st.pSel)[0];
+    const setPDraft = (key, val) => {
+      const drafts = Object.assign({}, st.pDrafts);
+      drafts[pCur.id] = Object.assign({}, drafts[pCur.id] || {});
+      drafts[pCur.id][key] = val;
+      this.setState({ pDrafts: drafts, pNote: '' });
+    };
+    let p = {};
+    if (pCur) {
+      const m = pMerged(pCur);
+      const dirty = pIsDirty(pCur) && (m.name || '').trim() !== '';
+      p = {
+        name: m.name, model: m.model, definition: m.definition,
+        chars: m.definition.length.toLocaleString() + ' characters',
+        dirty: dirty, clean: !dirty,
+        note: pIsDirty(pCur) ? ((m.name || '').trim() === '' ? 'A name is required' : 'Unsaved changes') : st.pNote,
+        canDelete: !pCur.locked, locked: !!pCur.locked,
+        onName: (e) => setPDraft('name', e.target.value),
+        onModel: (e) => setPDraft('model', e.target.value),
+        onDef: (e) => setPDraft('definition', e.target.value),
+        save: () => {
+          const drafts = Object.assign({}, st.pDrafts); delete drafts[pCur.id];
+          this.setState({ personas: st.personas.map((o) => o.id === pCur.id ? Object.assign({}, m, { name: m.name.trim() }) : o), pDrafts: drafts, pNote: 'Saved. Applies to sessions started from now on.' });
+        },
+        discard: () => {
+          const drafts = Object.assign({}, st.pDrafts); delete drafts[pCur.id];
+          this.setState({ pDrafts: drafts, pNote: '' });
+        },
+        remove: () => {
+          const rest = st.personas.filter((o) => o.id !== pCur.id);
+          this.setState({ personas: rest, pSel: rest.length ? rest[0].id : null, pNote: '', memory: st.memory.filter((f) => f.scope !== pCur.id) });
+        }
+      };
+    }
+    const addPersona = () => {
+      const id = 'new-' + st.seq;
+      const o = { id: id, name: 'New persona', model: 'claude-sonnet-5-5', sessions: 0, definition: 'Describe who this agent is, what it works on, and the rules it must follow.' };
+      this.setState({ personas: st.personas.concat([o]), pSel: id, seq: st.seq + 1, pNote: 'Persona added. Edit it, then save.' });
+    };
+
+    // Memory
+    const scopes = [{ id: 'shared', label: 'Shared', desc: 'Every agent reads these entries at the start of a session.' }]
+      .concat(st.personas.map((o) => ({ id: o.id, label: o.name, desc: 'Read by sessions running as ' + o.name + ', in addition to shared memory.' })));
+    const scopeId = scopes.some((s) => s.id === st.mScope) ? st.mScope : 'shared';
+    const memScopes = scopes.map((s, i) => {
+      const sel = s.id === scopeId;
+      return {
+        label: s.label, count: st.memory.filter((e) => e.scope === s.id).length,
+        showHeader: i === 0 || i === 1, header: i === 0 ? 'All agents' : 'Personas',
+        current: sel,
+        style: rowBase + 'display:flex;align-items:center;gap:8px;padding:10px 16px;' + (sel ? selBg : ''),
+        select: () => this.setState({ mScope: s.id, mEdit: null, mConfirm: null, mNote: '' })
+      };
+    });
+    const sc = scopes.filter((s) => s.id === scopeId)[0];
+    const list = st.memory.filter((e) => e.scope === scopeId)
+      .map((e, i) => ({ e: e, i: i }))
+      .sort((a, b) => (b.e.created > a.e.created ? 1 : b.e.created < a.e.created ? -1 : b.i - a.i))
+      .map((x) => x.e);
+    const newDraft = st.mNew[scopeId] || '';
+    const ms = {
+      label: sc.label, desc: sc.desc, newDraft: newDraft, newClean: newDraft.trim() === '', note: st.mNote,
+      countText: plural(list.length, 'entry', 'entries'),
+      onNew: (e) => { const n = Object.assign({}, st.mNew); n[scopeId] = e.target.value; this.setState({ mNew: n, mNote: '' }); },
+      add: () => {
+        const n = Object.assign({}, st.mNew); n[scopeId] = '';
+        const entry = { id: 'mn' + st.seq, scope: scopeId, created: TODAY, text: newDraft.trim() };
+        this.setState({ memory: [entry].concat(st.memory), mNew: n, seq: st.seq + 1, mNote: 'Entry added.' });
+      }
+    };
+    const entries = list.map((e, i) => {
+      const editing = st.mEdit === e.id;
+      const confirming = st.mConfirm === e.id;
+      const draft = editing ? st.mEditDraft : e.text;
+      const short = e.text.length > 40 ? e.text.slice(0, 40) + '…' : e.text;
+      return {
+        text: e.text, draft: draft, fieldId: 'mem-edit-' + e.id,
+        meta: 'Created ' + fmtDate(e.created) + (e.edited ? ' · Edited ' + fmtDate(e.edited) : ''),
+        viewing: !editing && !confirming, editing: editing, confirming: confirming,
+        saveDisabled: draft.trim() === '' || draft.trim() === e.text,
+        editAria: 'Edit entry: ' + short, deleteAria: 'Delete entry: ' + short,
+        style: 'padding: 14px 16px;' + (i > 0 ? 'border-top: 1px solid var(--a2-border-color-subdued);' : '') + (editing ? 'background: var(--a2-background-color-primary-subdued);' : confirming ? 'background: var(--a2-background-color-danger-subdued);' : ''),
+        edit: () => this.setState({ mEdit: e.id, mEditDraft: e.text, mConfirm: null, mNote: '' }),
+        onDraft: (ev) => this.setState({ mEditDraft: ev.target.value }),
+        save: () => this.setState({ memory: st.memory.map((x) => x.id === e.id ? Object.assign({}, x, { text: draft.trim(), edited: TODAY }) : x), mEdit: null, mNote: 'Entry updated.' }),
+        askDelete: () => this.setState({ mConfirm: e.id, mEdit: null, mNote: '' }),
+        remove: () => this.setState({ memory: st.memory.filter((x) => x.id !== e.id), mConfirm: null, mNote: 'Entry deleted.' }),
+        cancel: () => this.setState({ mEdit: null, mConfirm: null })
+      };
+    });
+
+    return {
+      nav: nav,
+      isEnv: st.section === 'env', isPersonas: st.section === 'personas', isMemory: st.section === 'memory',
+      env: env,
+      personaRows: personaRows, personaCount: st.personas.length, addPersona: addPersona,
+      hasPersona: !!pCur, noPersona: !pCur, p: p,
+      memScopes: memScopes, memCount: st.memory.length,
+      ms: ms, entries: entries, noEntries: entries.length === 0
+    };
+  }
+}
+</script>
+</body>
+</html>

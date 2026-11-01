@@ -12,6 +12,9 @@ public sealed class FakeCloudSessions : ICloudSessions
     private readonly Queue<Exception?> _next = new();
     private readonly object _createGate = new();
 
+    /// <summary>Runs once at the start of the next <see cref="ListEventsAsync"/> call, then is cleared.</summary>
+    public Func<Task>? BeforeNextListEvents { get; set; }
+
     /// <summary>Events returned per call; a smaller value forces multi-page listing.</summary>
     public int PageSize { get; set; } = 100;
 
@@ -20,6 +23,7 @@ public sealed class FakeCloudSessions : ICloudSessions
     public List<string?> EventAfterIds { get; } = [];
     public List<string> Interrupted { get; } = [];
     public List<string> Archived { get; } = [];
+    public List<(string SessionId, Fyrd.Core.Hub.HubQuestion Question, IReadOnlyDictionary<string, string> Answers)> Answered { get; } = [];
 
     /// <summary>The next call to any method throws this once (calls queue in order), then the fake behaves normally again.</summary>
     public void ThrowOnNextCall(Exception e) => _next.Enqueue(e);
@@ -65,6 +69,11 @@ public sealed class FakeCloudSessions : ICloudSessions
             Created.Add(request);
             var s = Session("created-" + Created.Count, "running", [.. request.Tags]);
             _sessions[s.Id] = s;
+            foreach (var tag in request.Tags)
+            {
+                if (!_byTag.TryGetValue(tag, out var list)) _byTag[tag] = list = [];
+                list.Add(s);
+            }
             return Task.FromResult(s);
         }
     }
@@ -77,9 +86,14 @@ public sealed class FakeCloudSessions : ICloudSessions
             : throw new CloudSessionApiException(404, "not found");
     }
 
-    public Task<EventPage> ListEventsAsync(
+    public async Task<EventPage> ListEventsAsync(
         string sessionId, int limit = 100, string? afterId = null, string? beforeId = null, CancellationToken ct = default)
     {
+        if (BeforeNextListEvents is { } hook)
+        {
+            BeforeNextListEvents = null;
+            await hook();
+        }
         MaybeThrow();
         EventAfterIds.Add(afterId);
         var all = _events.TryGetValue(sessionId, out var l) ? l : [];
@@ -92,7 +106,7 @@ public sealed class FakeCloudSessions : ICloudSessions
         var size = Math.Min(limit, PageSize);
         var page = all.Skip(start).Take(size).ToList();
         var hasMore = start + page.Count < all.Count;
-        return Task.FromResult(new EventPage(page, hasMore, page.FirstOrDefault()?.Uuid, page.LastOrDefault()?.Uuid));
+        return new EventPage(page, hasMore, page.FirstOrDefault()?.Uuid, page.LastOrDefault()?.Uuid);
     }
 
     public Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default)
@@ -119,6 +133,14 @@ public sealed class FakeCloudSessions : ICloudSessions
     {
         MaybeThrow();
         Archived.Add(sessionId);
+        return Task.CompletedTask;
+    }
+
+    public Task AnswerQuestionAsync(
+        string sessionId, Fyrd.Core.Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default)
+    {
+        MaybeThrow();
+        Answered.Add((sessionId, question, answers));
         return Task.CompletedTask;
     }
 }

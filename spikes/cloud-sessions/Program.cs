@@ -44,7 +44,20 @@ var cmd = argv[0].ToLowerInvariant();
 var envId = TakeOpt(argv, "--env") ?? DefaultEnv;
 var timeoutMin = int.TryParse(TakeOpt(argv, "--timeout"), out var tm) ? tm : 30;
 var leadOpt = TakeOpt(argv, "--lead");
+var viaOpt = TakeOpt(argv, "--via");
+var sessionOpt = TakeOpt(argv, "--session");
+var answerViaOpt = TakeOpt(argv, "--answer-via");
+var skillsProbe = argv.Remove("--skills-probe");
+var noRepo = argv.Remove("--no-repo");
+var createVia = TakeOpt(argv, "--create-via");
+var connectorsFrom = TakeOpt(argv, "--connectors-from");
 var positional = argv.Skip(1).Where(a => !a.StartsWith("--")).ToList();
+var unknown = argv.Skip(1).Where(a => a.StartsWith("--") && a != "--fresh").ToList();
+if (unknown.Count > 0)
+{
+    Console.Error.WriteLine($"unknown option(s): {string.Join(" ", unknown)}");
+    return Usage();
+}
 
 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
 var creds = new ClaudeCredentials();
@@ -66,6 +79,9 @@ try
         case "q5": await Q5(); break;
         case "q6": await Q6(); break;
         case "q7": await Q7(); break;
+        case "q8": await Q8(); break;
+        case "q9": await Q9(); break;
+        case "q10": await Q10(); break;
         default: return Usage();
     }
     return 0;
@@ -407,6 +423,297 @@ async Task Q7()
     await Task.CompletedTask;
 }
 
+// Q8: does `/clear`, posted as a plain user event (not via claude-code-remote send_message), clear the
+// conversation while keeping the append_system_prompt persona? See docs/superpowers/spikes/2026-10-31-clear-persona-probe.md.
+// --session <id>: use an existing session (e.g. one created in the web UI) instead of creating one; it has no persona,
+// and it is not archived afterwards.
+async Task Q8()
+{
+    var q = "q8";
+    const string Marker = "BEE-7731";
+    var word = sessionOpt is null ? "PAPAYA" : "MANGO";
+    var first = $"Remember the word {word}. Reply with only \"OK\"" + (sessionOpt is null ? " (plus your required ending line)." : ".");
+    var seen = new StatusSeen();
+    CloudSession s;
+    if (sessionOpt is null)
+    {
+        var persona = $"PERSONA MARKER: You are the probe peer. End every reply with the exact line \"{Marker}\". Never message other sessions.";
+        s = await client.CreateAsync(new CreateSessionRequest("fyrd spike q8 clear probe", ["fyrd", SpikeTag, "fyrd-probe-clear"],
+            envId, first, Model, persona, new SessionSource(Repo, null), "auto"));
+        LogSession(q, "created", s);
+        Console.WriteLine($"[q8] probe session: {s.Id}");
+        Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
+    }
+    else
+    {
+        s = await client.GetAsync(sessionOpt);
+        LogSession(q, "existing", s);
+        Console.WriteLine($"[q8] existing session: {s.Id} (status {s.SessionStatus})");
+        var b0 = await Baseline(s.Id);
+        await client.SendMessageAsync(s.Id, first);
+        Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), b0)}");
+    }
+    var replyA = LastAssistant(await FetchAllEvents(q, s.Id))?.Text;
+    var ctxA = await ContextUsage(s.Id);
+    Console.WriteLine($"[q8] reply A:\n{Trunc(replyA, 600)}\n[q8] context after A: {ctxA}");
+
+    // /clear may produce no assistant event, so wait for idle instead of WaitSettled.
+    var baseline = await Baseline(s.Id);
+    await SendClear(q, s.Id);
+    var deadline = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+    await Task.Delay(TimeSpan.FromSeconds(15));
+    while (DateTimeOffset.UtcNow < deadline && (await client.GetAsync(s.Id)).SessionStatus != "idle")
+        await Task.Delay(TimeSpan.FromSeconds(10));
+    var afterClear = (await FetchAllEvents(q, s.Id)).Where(e => !baseline.Contains(e.Uuid)).ToList();
+    Console.WriteLine($"[q8] events after /clear ({afterClear.Count}):");
+    foreach (var e in afterClear.Take(8)) Console.WriteLine($"  {Trunc(e.Raw.GetRawText(), 400)}");
+    Console.WriteLine($"[q8] context after /clear: {await ContextUsage(s.Id)}");
+
+    baseline = await Baseline(s.Id);
+    await client.SendMessageAsync(s.Id,
+        "Without using any tools, answer from memory only: what word did I ask you to remember earlier? If you have no memory of earlier messages, reply NONE.");
+    Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
+    var replyB = LastAssistant(await FetchAllEvents(q, s.Id))?.Text;
+    Console.WriteLine($"[q8] reply B:\n{Trunc(replyB, 600)}\n[q8] context after B: {await ContextUsage(s.Id)}");
+
+    if (sessionOpt is null) Console.WriteLine($"[q8] Q1 persona survives /clear: {(replyB?.Contains(Marker) == true ? "yes" : "no")}");
+    Console.WriteLine($"[q8] Q2 /clear cleared memory: {(replyB?.Contains(word) == true ? $"no (remembered {word})" : replyB?.Contains("NONE") == true ? "yes (NONE)" : "unclear")}");
+    if (sessionOpt is not null) return;
+    await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
+    Console.WriteLine($"[q8] archived {s.Id}");
+}
+
+// --via api (default): CloudSessionClient.SendMessageAsync, POST /v1/sessions/{id}/events. Run 2 showed /clear arrives as text.
+// --via code: the web UI's route, POST /v1/code/sessions/cse_<suffix>/events with {"events":[{"payload":<user event>}]}.
+// --via code-init: as code, preceded by the UI's {"subtype":"initialize"} control_request.
+async Task SendClear(string q, string sessionId)
+{
+    var via = viaOpt ?? "api";
+    if (via == "api")
+    {
+        await client.SendMessageAsync(sessionId, "/clear");
+    }
+    else
+    {
+        var cse = "cse_" + sessionId["session_".Length..];
+        var path = $"/v1/code/sessions/{cse}/events";
+        if (via == "code-init")
+        {
+            var init = await raw.SendAsync(HttpMethod.Post, path, new JsonObject
+            {
+                ["session_id"] = sessionId,
+                ["events"] = new JsonArray(new JsonObject
+                {
+                    ["payload"] = new JsonObject
+                    {
+                        ["type"] = "control_request",
+                        ["request_id"] = Guid.NewGuid().ToString(),
+                        ["request"] = new JsonObject { ["subtype"] = "initialize" },
+                        ["uuid"] = Guid.NewGuid().ToString(),
+                    },
+                }),
+            });
+            Log(q, "init", init.Describe());
+            Console.WriteLine($"[q8] initialize -> HTTP {init.Status} {Trunc(init.Text, 300)}");
+        }
+        var r = await raw.SendAsync(HttpMethod.Post, path, new JsonObject
+        {
+            ["events"] = new JsonArray(new JsonObject
+            {
+                ["payload"] = new JsonObject
+                {
+                    ["type"] = "user",
+                    ["uuid"] = Guid.NewGuid().ToString(),
+                    ["session_id"] = sessionId,
+                    ["parent_tool_use_id"] = null,
+                    ["message"] = new JsonObject { ["role"] = "user", ["content"] = "/clear" },
+                },
+            }),
+        });
+        Log(q, "clear", r.Describe());
+        Console.WriteLine($"[q8] /clear via {path} -> HTTP {r.Status} {Trunc(r.Text, 300)}");
+        if (r.Status >= 300) throw new InvalidOperationException("the /v1/code/sessions route rejected the /clear event");
+    }
+    Log(q, "sent-clear", new JsonObject { ["session"] = sessionId, ["via"] = via });
+}
+
+// Q10 (read-only): print a session's /v1/code/sessions config (mcp_connector_ids, sources) and its init MCP servers.
+async Task Q10()
+{
+    var id = sessionOpt ?? throw new InvalidOperationException("q10 needs --session <session_id>");
+    var r = await raw.SendAsync(HttpMethod.Get, $"/v1/code/sessions/{id}", null);
+    var root = r.Status < 300 ? JsonNode.Parse(r.Text) : null;
+    Console.WriteLine($"[q10] GET /v1/code/sessions/{id} -> HTTP {r.Status}");
+    var cfg = root?["response_shape"]?["config"] ?? root?["session"]?["config"] ?? root?["config"];
+    Console.WriteLine($"[q10] config keys: {string.Join(", ", (cfg as JsonObject)?.Select(kv => kv.Key) ?? [])}");
+    Console.WriteLine($"[q10] mcp_connector_ids: {cfg?["mcp_connector_ids"]?.ToJsonString() ?? "(absent)"}");
+    Console.WriteLine($"[q10] sources: {cfg?["sources"]?.ToJsonString() ?? "(absent)"}");
+    Console.WriteLine($"[q10] top-level keys: {string.Join(", ", (root as JsonObject)?.Select(kv => kv.Key) ?? [])}");
+    var events = await FetchAllEvents("q10", id, log: false);
+    foreach (var init in events.Where(e => e.Type == "system" && e.Raw.TryGetProperty("subtype", out var st) && st.GetString() == "init").Take(1))
+        Console.WriteLine($"[q10] first init mcp_servers: {(init.Raw.TryGetProperty("mcp_servers", out var ms) ? ms.GetRawText() : "(none)")}");
+}
+
+// Q9: how does a console answer an AskUserQuestion? Creates a session that asks, finds the pending item (assistant
+// tool_use AskUserQuestion, or control_request can_use_tool), optionally answers "Banana" via --answer-via, prints the reply.
+// --skills-probe: instead create an API session with the claude.ai probe prompt (do fyrd-* account skills load? is the artifact readable?).
+async Task Q9()
+{
+    var q = "q9";
+    const string SkillsPrompt = "1. List your available skills and say whether any named fyrd-* appear.\n2. Fetch https://claude.ai/artifact/LyjRt8594EXGq4V8UsQn5E with any tool you have and say which tool worked.";
+    const string AskPrompt = "Use the AskUserQuestion tool to ask me \"Pick a fruit\" with options Apple and Banana, then tell me what I picked.";
+    var seen = new StatusSeen();
+    CloudSession s;
+    if (createVia == "code")
+    {
+        // The web UI's create: POST /v1/code/sessions with `config` (not `session_context`), then the prompt as a user event.
+        var connectorIds = new JsonArray();
+        if (connectorsFrom is not null)
+        {
+            var src = await raw.SendAsync(HttpMethod.Get, $"/v1/code/sessions/{connectorsFrom}", null);
+            var srcCfg = JsonNode.Parse(src.Text)?["response_shape"]?["config"];
+            foreach (var cid in srcCfg?["mcp_connector_ids"]?.AsArray() ?? []) connectorIds.Add(cid?.GetValue<string>());
+            Console.WriteLine($"[q9] copying {connectorIds.Count} mcp_connector_ids from {connectorsFrom}");
+        }
+        var sources = new JsonArray();
+        if (!noRepo) sources.Add(new JsonObject { ["type"] = "git_repository", ["url"] = Repo });
+        var cr = await raw.SendAsync(HttpMethod.Post, "/v1/code/sessions", new JsonObject
+        {
+            ["title"] = "fyrd spike q9 create-via-code",
+            ["tags"] = new JsonArray("fyrd", SpikeTag, "fyrd-probe-q9"),
+            ["environment_id"] = envId,
+            ["config"] = new JsonObject { ["model"] = Model, ["sources"] = sources, ["outcomes"] = new JsonArray(), ["mcp_connector_ids"] = connectorIds },
+        });
+        Console.WriteLine($"[q9] create via /v1/code/sessions -> HTTP {cr.Status} {Trunc(cr.Text, 400)}");
+        if (cr.Status >= 300) throw new InvalidOperationException("the /v1/code/sessions create was rejected");
+        var created = JsonNode.Parse(cr.Text);
+        Console.WriteLine($"[q9] created config: {created?["session"]?["config"]?.ToJsonString()}");
+        var createdId = (created?["session"]?["id"] ?? created?["id"])?.GetValue<string>() ?? throw new InvalidOperationException("no id in create response");
+        var sessionId = createdId.StartsWith("cse_") ? "session_" + createdId["cse_".Length..] : createdId;
+        var ev = await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/cse_{sessionId["session_".Length..]}/events", new JsonObject
+        {
+            ["events"] = new JsonArray(new JsonObject
+            {
+                ["payload"] = new JsonObject
+                {
+                    ["type"] = "user", ["uuid"] = Guid.NewGuid().ToString(), ["session_id"] = sessionId, ["parent_tool_use_id"] = null,
+                    ["message"] = new JsonObject { ["role"] = "user", ["content"] = skillsProbe ? SkillsPrompt : AskPrompt },
+                },
+            }),
+        });
+        Console.WriteLine($"[q9] first message -> HTTP {ev.Status} {Trunc(ev.Text, 200)}");
+        s = await client.GetAsync(sessionId);
+    }
+    else
+        s = await client.CreateAsync(new CreateSessionRequest(skillsProbe ? "fyrd spike q9 skills probe" : "fyrd spike q9 ask probe",
+            ["fyrd", SpikeTag, "fyrd-probe-q9"], envId, skillsProbe ? SkillsPrompt : AskPrompt, Model, null, noRepo ? null : new SessionSource(Repo, null), "auto"));
+    LogSession(q, "created", s);
+    Console.WriteLine($"[q9] session: {s.Id}");
+    Console.WriteLine($"[q9] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(10))}");
+    var events = await FetchAllEvents(q, s.Id, log: false);
+    await File.WriteAllLinesAsync(Path.Combine(outDir, "q9-events.jsonl"), events.Select(e => e.Raw.GetRawText()));
+    Console.WriteLine($"[q9] {events.Count} events -> out/q9-events.jsonl (source: {(noRepo ? "none" : Repo)})");
+    foreach (var init in events.Where(e => e.Type == "system" && e.Raw.TryGetProperty("subtype", out var st) && st.GetString() == "init"))
+        Console.WriteLine($"[q9] init mcp_servers: {(init.Raw.TryGetProperty("mcp_servers", out var ms) ? ms.GetRawText() : "(none)")}");
+    if (skillsProbe)
+    {
+        Console.WriteLine($"[q9] reply:\n{Trunc(LastAssistant(events)?.Text, 3000)}");
+    }
+    else
+    {
+        string? toolUseId = null, requestId = null;
+        JsonNode? input = null;
+        foreach (var e in events)
+        {
+            var node = JsonNode.Parse(e.Raw.GetRawText());
+            if (node is null) continue;
+            var tu = FindNodes(node, n => n is JsonObject o && o["type"]?.GetValue<string>() == "tool_use" && o["name"]?.GetValue<string>() == "AskUserQuestion").FirstOrDefault();
+            if (tu is not null)
+            {
+                toolUseId = tu["id"]?.GetValue<string>(); input = tu["input"];
+                Console.WriteLine($"[q9] PENDING tool_use AskUserQuestion id={toolUseId} input={input?.ToJsonString()}");
+            }
+            if (node["type"]?.GetValue<string>() == "control_request" && node["request"]?["subtype"]?.GetValue<string>() == "can_use_tool")
+            {
+                requestId = node["request_id"]?.GetValue<string>(); input = node["request"]?["input"] ?? input;
+                Console.WriteLine($"[q9] PENDING control_request can_use_tool request_id={requestId} tool_name={node["request"]?["tool_name"]} input={node["request"]?["input"]?.ToJsonString()}");
+            }
+        }
+        if (toolUseId is null && requestId is null) Console.WriteLine("[q9] NO pending AskUserQuestion tool_use or can_use_tool control_request found in the events");
+        else if (answerViaOpt is not null)
+        {
+            var baseline = events.Select(e => e.Uuid).ToHashSet();
+            JsonObject? payload = null;
+            if (answerViaOpt == "tool-result")
+            {
+                if (toolUseId is null) Console.WriteLine("[q9] no tool_use id; cannot answer via tool-result");
+                else payload = new JsonObject
+                {
+                    ["type"] = "user", ["uuid"] = Guid.NewGuid().ToString(), ["session_id"] = s.Id, ["parent_tool_use_id"] = null,
+                    ["message"] = new JsonObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = new JsonArray(new JsonObject { ["type"] = "tool_result", ["tool_use_id"] = toolUseId, ["content"] = "Banana" }),
+                    },
+                };
+            }
+            else if (answerViaOpt == "control-response")
+            {
+                if (requestId is null) Console.WriteLine("[q9] no can_use_tool control_request; cannot answer via control-response");
+                else
+                {
+                    var upd = input is JsonObject io ? (JsonObject)JsonNode.Parse(io.ToJsonString())! : new JsonObject();
+                    upd["answers"] = new JsonObject { ["Pick a fruit"] = "Banana" };
+                    payload = new JsonObject
+                    {
+                        ["type"] = "control_response",
+                        ["response"] = new JsonObject
+                        {
+                            ["subtype"] = "success", ["request_id"] = requestId,
+                            // Same shape the claude.ai client sent in the 2026-10-31 runs.
+                            ["response"] = new JsonObject
+                            {
+                                ["behavior"] = "allow", ["toolUseID"] = toolUseId, ["tool_name"] = "AskUserQuestion", ["updatedInput"] = upd,
+                            },
+                        },
+                    };
+                }
+            }
+            else Console.WriteLine($"[q9] unknown --answer-via {answerViaOpt} (use tool-result or control-response)");
+            if (payload is not null)
+            {
+                var path = $"/v1/code/sessions/cse_{s.Id["session_".Length..]}/events";
+                var r = await raw.SendAsync(HttpMethod.Post, path, new JsonObject { ["events"] = new JsonArray(new JsonObject { ["payload"] = payload }) });
+                Log(q, "answer", r.Describe());
+                Console.WriteLine($"[q9] answer via {answerViaOpt} -> HTTP {r.Status} {Trunc(r.Text, 400)}");
+                if (r.Status < 300)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15));
+                    Console.WriteLine($"[q9] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(10), baseline)}");
+                    var after = await FetchAllEvents(q, s.Id, log: false);
+                    var fresh = after.Where(e => !baseline.Contains(e.Uuid)).ToList();
+                    await File.WriteAllLinesAsync(Path.Combine(outDir, "q9-answered.jsonl"), fresh.Select(e => e.Raw.GetRawText()));
+                    Console.WriteLine($"[q9] {fresh.Count} post-answer events -> out/q9-answered.jsonl");
+                    Console.WriteLine($"[q9] next assistant text:\n{Trunc(LastAssistant(fresh)?.Text, 1500)}");
+                }
+            }
+        }
+    }
+    await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
+    Console.WriteLine($"[q9] archived {s.Id}");
+}
+
+static IEnumerable<JsonNode> FindNodes(JsonNode? n, Func<JsonNode, bool> pred)
+{
+    if (n is null) yield break;
+    if (pred(n)) yield return n;
+    if (n is JsonObject o) foreach (var kv in o) foreach (var x in FindNodes(kv.Value, pred)) yield return x;
+    else if (n is JsonArray a) foreach (var v in a) foreach (var x in FindNodes(v, pred)) yield return x;
+}
+
+async Task<string> ContextUsage(string id) =>
+    Trunc(SessionNode(await client.GetAsync(id))["context_usage"]?.ToJsonString() ?? "(none)", 200);
+
 // ------------------------------------------------------------------------------------------------ helpers
 
 string LeadPrompt() =>
@@ -580,6 +887,13 @@ static string RunProcess(string file, string arguments)
 
 static string? TakeOpt(List<string> a, string name)
 {
+    var eq = a.FindIndex(x => x.StartsWith(name + "=", StringComparison.Ordinal));
+    if (eq >= 0)
+    {
+        var val = a[eq][(name.Length + 1)..];
+        a.RemoveAt(eq);
+        return val;
+    }
     var i = a.IndexOf(name);
     if (i < 0) return null;
     var v = i + 1 < a.Count ? a[i + 1] : null;
@@ -611,6 +925,9 @@ static int Usage()
           q5 [<id> ...]               poll statuses every 10 s (default: last lead + q2 children)
           q6 [<childId>] [--fresh]    interrupt then archive
           q7                          token expiry / refresh check
+          q8 [--via api|code|code-init] [--session <id>]  /clear via a direct user event: memory cleared, persona kept?
+          q9 [--answer-via tool-result|control-response] [--skills-probe] [--no-repo] [--create-via code [--connectors-from <session_id>]]
+          q10 --session <id>  read-only: session config (mcp_connector_ids) and init MCP servers  AskUserQuestion pending item + answer route; or account-skills probe
         options: --env <id> (default env_011v4b3WBhRMaGGti6Qw747c)   --timeout <minutes> (default 30)
         """);
     return 2;
