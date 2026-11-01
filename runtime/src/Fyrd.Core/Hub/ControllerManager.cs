@@ -23,13 +23,14 @@ public sealed partial class ControllerManager
     private const string Unavailable = "That session isn't available. Create a new one on claude.ai and paste its id.";
     private const string Peasant = "That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.";
 
-    private sealed record State(string? SessionId, string? PostedMemoryHash);
+    private sealed record State(string? SessionId, string? PostedMemoryHash, string? PostedInstructionsHash = null);
 
     private readonly ICloudSessions _cloud;
     private readonly HubPersonas _personas;
     private readonly HubMemory _memory;
     private readonly ConfigStore _config;
     private readonly TimeProvider _time;
+    private readonly HubSkills? _skills;
     private readonly string _file;
     private readonly SemaphoreSlim _gate = new(1);
     private readonly object _stateLock = new();
@@ -37,8 +38,9 @@ public sealed partial class ControllerManager
     private DateTimeOffset? _adoptedAt;
 
     public ControllerManager(
-        ICloudSessions cloud, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null)
+        ICloudSessions cloud, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null, HubSkills? skills = null)
     {
+        _skills = skills;
         _time = time ?? TimeProvider.System;
         _cloud = cloud;
         _personas = personas;
@@ -59,6 +61,30 @@ public sealed partial class ControllerManager
         get { lock (_stateLock) return _state.PostedMemoryHash; }
         set { lock (_stateLock) SaveState(_state with { PostedMemoryHash = value }); }
     }
+
+    public string? PostedInstructionsHash
+    {
+        get { lock (_stateLock) return _state.PostedInstructionsHash; }
+        set { lock (_stateLock) SaveState(_state with { PostedInstructionsHash = value }); }
+    }
+
+    /// <summary>
+    /// The full message that adopts a Controller or refreshes its instructions (preamble, instructions, memory), plus the
+    /// hashes of its instructions part and of its memory part. All three come from one snapshot, so what is marked as
+    /// posted is exactly what is sent.
+    /// </summary>
+    public (string Prompt, string InstructionsHash, string MemoryHash) BuildPrompt()
+    {
+        var personas = _personas.List();
+        var config = _config.Load();
+        var skills = _skills?.List();
+        return (PromptPreamble + "\n\n" + HubPrompt.Controller(personas, _memory, config, skills),
+            Hash(HubPrompt.Instructions(personas, config, skills)),
+            MemoryHash(_memory, personas));
+    }
+
+    /// <summary>Lowercase hex SHA-256 of the instructions part of the prompt (no memory, which has its own hash).</summary>
+    public string InstructionsHash() => BuildPrompt().InstructionsHash;
 
     /// <summary>Lowercase hex SHA-256 of the memory-update text for the current memory; the poll pass compares it to <see cref="PostedMemoryHash"/>.</summary>
     public static string MemoryHash(HubMemory memory, IReadOnlyList<HubPersona> personas) =>
@@ -88,9 +114,7 @@ public sealed partial class ControllerManager
                 throw new HubConfigException(Peasant);
 
             // Built before any side effect, so a missing Controller persona leaves the current Controller alone.
-            var personas = _personas.List();
-            var hash = MemoryHash(_memory, personas);
-            var prompt = PromptPreamble + "\n\n" + HubPrompt.Controller(personas, _memory, _config.Load());
+            var (prompt, instructionsHash, hash) = BuildPrompt();
 
             if (CurrentId is { } previous && previous != id && await LiveAsync(previous, ct) is not null)
             {
@@ -101,7 +125,7 @@ public sealed partial class ControllerManager
             await _cloud.SendMessageAsync(id, prompt, ct);
             lock (_stateLock)
             {
-                SaveState(new State(id, hash));
+                SaveState(new State(id, hash, instructionsHash));
                 _adoptedAt = _time.GetUtcNow();
             }
             return Info(id);

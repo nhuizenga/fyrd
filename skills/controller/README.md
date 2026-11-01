@@ -1,18 +1,16 @@
-# Controller account skills
+# Controller skills
 
-Four claude.ai account skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build`, `fyrd-peasant`, `fyrd-watch`. Each description starts with `Fyrd Controller only:` so it doesn't trigger in other sessions. The rules live in `personas/hub/controller.md`; each skill gives the tool-call steps for one request type.
+Four skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build`, `fyrd-peasant`, `fyrd-watch`. Each description starts with `Fyrd Controller only:`. The rules live in `personas/hub/controller.md`; each skill gives the tool-call steps for one request type.
 
-## Upload (manual step)
+## Delivery (automatic)
 
-Upload all four skills together. `fyrd-research`, `fyrd-build` and `fyrd-watch` point to `fyrd-peasant` for the session-cap and teardown steps, so none of them is complete on its own.
+Nothing is uploaded to claude.ai. The Fyrd service reads `skills/controller/*/SKILL.md` and embeds each skill in the Controller's message as a `<controller-skill>` block, after the peasant personas. It reads the files on every poll pass, so a `git pull` is enough.
 
-For each folder here (`fyrd-research`, `fyrd-build`, `fyrd-peasant`, `fyrd-watch`):
+When a skill, a persona, or the Controller settings change, the service re-sends the instructions to the live Controller as soon as it is idle. Persona edits made in Settings reach the Controller the same way. The message says the latest instructions replace earlier ones.
 
-1. Zip the folder so `SKILL.md` is inside it (for example `fyrd-build/SKILL.md`).
-2. On claude.ai open Settings > Capabilities > Skills, choose Upload skill, and select the zip.
-3. Make sure the skill is enabled.
+## One-time cleanup
 
-Re-upload a skill whenever its `SKILL.md` changes.
+If you uploaded the `fyrd-*` skills to claude.ai earlier, remove the uploaded fyrd-* skills: open Settings > Capabilities > Skills and delete (or disable) `fyrd-research`, `fyrd-build`, `fyrd-peasant` and `fyrd-watch`. Until you do, a stale copy stays visible to every session. The Controller prefers the inline blocks when names clash.
 
 ## Create the Controller (manual step)
 
@@ -22,8 +20,8 @@ Fyrd doesn't create the Controller. Sessions Fyrd creates through the API get no
 2. Copy its session id (the `session_…` part of its URL).
 3. In the Fyrd console open Sessions, paste the id into the **Adopt Controller** panel and choose Adopt.
 
-Fyrd sends the Controller its instructions, settings and memory as the first message.
+Fyrd sends the Controller its instructions, skills, settings and memory as the first message.
 
 ## After edits
 
-Skills load when a session starts. After uploading changed skills or editing a persona, open Sessions in the Fyrd console and choose **Replace Controller** next to Open Controller. That archives the current Controller. Then create a fresh session on claude.ai and adopt it as above, so the new Controller picks up the changes.
+Skill and persona edits reach a live Controller by themselves. Choose **Replace Controller** next to Open Controller only if you want a fresh conversation: that archives the current Controller. Then create a fresh session on claude.ai and adopt it as above.

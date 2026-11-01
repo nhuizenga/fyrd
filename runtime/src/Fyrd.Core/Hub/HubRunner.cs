@@ -109,12 +109,13 @@ public sealed partial class HubRunner(
 
         try
         {
+            await PostInstructionsRefreshAsync(sessions, ct);
             await PostMemoryUpdateAsync(sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal), ct);
         }
         catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
                                   && (e is not OperationCanceledException || !ct.IsCancellationRequested))
         {
-            lastError ??= $"memory update: {e.Message}";
+            lastError ??= $"controller update: {e.Message}";
         }
 
         state.SignedOut = false;
@@ -195,6 +196,23 @@ public sealed partial class HubRunner(
                 SaveCursors();
             }
         }
+    }
+
+    /// <summary>
+    /// Re-sends the full Controller message when its instructions (definition, settings, personas, skills) changed, so
+    /// edits to skills and personas reach the live Controller. Only while it is live and idle; otherwise a later pass
+    /// does it. The message carries memory too, so both hashes advance. Never posts to an archived or replaced Controller.
+    /// </summary>
+    private async Task PostInstructionsRefreshAsync(IReadOnlyList<CloudSession> sessions, CancellationToken ct)
+    {
+        if (_controllerId is not { } controllerId) return;
+        var session = sessions.FirstOrDefault(s => s.Id == controllerId);
+        if (session is null || session.SessionStatus is "running" or RequiresAction) return;
+        var (prompt, instructionsHash, memoryHash) = controller.BuildPrompt();
+        if (controller.CurrentId != controllerId || instructionsHash == controller.PostedInstructionsHash) return;
+        await cloud.SendMessageAsync(controllerId, prompt, ct);
+        controller.PostedInstructionsHash = instructionsHash;
+        controller.PostedMemoryHash = memoryHash;
     }
 
     /// <summary>Posts only to the Controller this pass read as live; an archived or unreadable one is never written to.</summary>
