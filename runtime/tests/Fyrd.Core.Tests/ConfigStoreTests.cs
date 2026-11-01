@@ -63,4 +63,35 @@ public class ConfigStoreTests
     { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{\"leadModel\": \"\", \"peerModel\": null}");
       var c = new ConfigStore(h.Paths).Load();
       Assert.Equal("claude-opus-5-5", c.LeadModel); Assert.Equal("claude-sonnet-5-5", c.PeerModel); }
+
+    [Fact] public void Load_DailyLimitDefaults_50And500()
+    { using var home = new TempHome(); var c = new ConfigStore(home.Paths).Load();
+      Assert.Equal(50m, c.SessionDailyLimitUsd); Assert.Equal(500m, c.FyrdDailyLimitUsd); Assert.Null(c.TimeZone); }
+
+    [Fact] public void Load_OutOfRangeDailyLimits_Clamped()
+    { using var home = new TempHome(); File.WriteAllText(home.Paths.ConfigFile, "{\"sessionDailyLimitUsd\":0,\"fyrdDailyLimitUsd\":99999}");
+      var c = new ConfigStore(home.Paths).Load(); Assert.Equal(1m, c.SessionDailyLimitUsd); Assert.Equal(10000m, c.FyrdDailyLimitUsd); }
+
+    [Theory] [InlineData(0.5)] [InlineData(10001)]
+    public void Save_SessionDailyLimitOutOfRange_Throws(double v)
+    { using var home = new TempHome();
+      Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(home.Paths).Save(new FyrdConfig(SessionDailyLimitUsd: (decimal)v))); }
+
+    [Theory] [InlineData(0)] [InlineData(10001)]
+    public void Save_FyrdDailyLimitOutOfRange_Throws(double v)
+    { using var home = new TempHome();
+      Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(home.Paths).Save(new FyrdConfig(FyrdDailyLimitUsd: (decimal)v))); }
+
+    [Fact] public void Save_UnknownTimeZone_Throws()
+    { using var home = new TempHome();
+      Assert.Throws<ArgumentException>(() => new ConfigStore(home.Paths).Save(new FyrdConfig(TimeZone: "Mars/Olympus"))); }
+
+    [Fact] public void Save_KnownTimeZone_RoundTrips()
+    { using var home = new TempHome(); var s = new ConfigStore(home.Paths);
+      s.Save(new FyrdConfig(TimeZone: "America/Los_Angeles", SessionDailyLimitUsd: 12.5m));
+      var c = s.Load(); Assert.Equal("America/Los_Angeles", c.TimeZone); Assert.Equal(12.5m, c.SessionDailyLimitUsd); }
+
+    [Fact] public void Load_UnknownTimeZone_Ignored()
+    { using var home = new TempHome(); File.WriteAllText(home.Paths.ConfigFile, "{\"timeZone\":\"Mars/Olympus\"}");
+      Assert.Null(new ConfigStore(home.Paths).Load().TimeZone); }
 }

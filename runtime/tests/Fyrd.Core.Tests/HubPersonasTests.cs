@@ -96,6 +96,31 @@ public sealed class HubPersonasTests : IDisposable
     }
 
     [Fact]
+    public void CrlfSeed_HashesLikeLf()
+    {
+        Make().List();
+        File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\r\nname: Builder\r\nmodel: claude-sonnet-5-5\r\nlocked: false\r\n---\r\nBuild\r\nthings.");
+        var p = Make().Get("builder")!;
+        Assert.Equal("Build\nthings.", p.Definition);
+    }
+
+    [Fact]
+    public void LockedPersona_WithDifferentStoredName_StillUpdates()
+    {
+        Make().List();
+        var file = Path.Combine(_home.Paths.HubPersonasDir, "controller.json");
+        var stored = System.Text.Json.JsonSerializer.Deserialize<HubPersona>(File.ReadAllText(file), Json.Options)!;
+        var renamed = stored with { Name = "Boss", SeedHash = null };
+        renamed = renamed with { SeedHash = HubPersonas.Hash(renamed) };
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(renamed, Json.Options));
+        Seed("controller", "Controller", "Control better.", locked: true);
+        var c = Make().Get("controller")!;
+        Assert.Equal("Boss", c.Name);
+        Assert.Equal("Control better.", c.Definition);
+        Assert.False(c.UpdateAvailable);
+    }
+
+    [Fact]
     public void DeletedPersona_StaysDeleted()
     {
         var store = Make();
@@ -120,7 +145,7 @@ public sealed class HubPersonasTests : IDisposable
     {
         var store = Make();
         store.Save(new HubPersona("", "Scout", "claude-haiku-5-5", "d", false));
-        Assert.Throws<InvalidOperationException>(() => store.Reset("scout"));
+        Assert.Throws<KeyNotFoundException>(() => store.Reset("scout"));
     }
 
     [Fact]

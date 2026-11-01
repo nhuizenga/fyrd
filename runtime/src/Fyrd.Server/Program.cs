@@ -26,9 +26,7 @@ builder.Services.AddSingleton<DecisionMemory>();
 builder.Services.AddSingleton<OwnerProxy>();
 builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
-builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>(),
-    // TEMPORARY: sample raw ephemeral payloads to <data>/ephemeral-events.jsonl; remove after collecting.
-    Path.Combine(_.GetRequiredService<FyrdPaths>().Root, "ephemeral-events.jsonl")));
+builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<IGitHub, GhCli>();
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
@@ -43,6 +41,8 @@ builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Config
 builder.Services.AddSingleton<HubMemory>();
 builder.Services.AddSingleton<ControllerManager>();
 builder.Services.AddSingleton<HubState>();
+builder.Services.AddSingleton<CostLedger>();
+builder.Services.AddSingleton<CostGuard>();
 builder.Services.AddSingleton<HubRunner>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
     builder.Services.AddHostedService<HubRunnerService>();

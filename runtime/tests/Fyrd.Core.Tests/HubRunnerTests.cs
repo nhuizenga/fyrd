@@ -15,6 +15,8 @@ public sealed class HubRunnerTests : IDisposable
     private readonly HubPersonas _personas;
     private ControllerManager _controller;
     private readonly HubState _state = new();
+    private readonly CostLedger _ledger;
+    private CostGuard _guard;
 
     public HubRunnerTests()
     {
@@ -26,6 +28,8 @@ public sealed class HubRunnerTests : IDisposable
         var config = new ConfigStore(_home.Paths);
         config.Save(new FyrdConfig(EnvironmentId: "env_abc123"));
         _controller = new ControllerManager(_cloud, _personas, _memory, config, _home.Paths);
+        _ledger = new CostLedger(_home.Paths, config, _time);
+        _guard = new CostGuard(_ledger, config, _cloud, _controller);
     }
 
     public void Dispose()
@@ -42,10 +46,11 @@ public sealed class HubRunnerTests : IDisposable
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv1");
         var config = new ConfigStore(_home.Paths);
         _controller = new ControllerManager(_cloud, _personas, _memory, config, _home.Paths, null, new HubSkills(Path.Combine(_seeds, "skills")));
+        _guard = new CostGuard(_ledger, config, _cloud, _controller);
         return _controller;
     }
 
-    private HubRunner Make() => new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time);
+    private HubRunner Make() => new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard);
 
     private static CloudSession Hub(string id, string title, string status = "idle", string? role = null,
         string raw = "{}")
@@ -551,5 +556,54 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Null(p.LastActivity);
         Assert.Equal(_time.GetUtcNow(), _state.LastPollAt);
         Assert.Null(_state.LastError);
+    }
+
+    [Fact]
+    public async Task Poll_AttachesCostAndBudget_FromResultEventsAndSessionUsage()
+    {
+        var turn = JsonDocument.Parse("{\"model_usage_since_last_result\":{\"m\":{\"costUSD\":2.0}}}").RootElement.Clone();
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder",
+            raw: "{\"external_metadata\":{\"usage\":{\"cost_usd\":2.5}}}"));
+        _cloud.AddEvent("s1", new SessionEvent("r1", "result", _time.GetUtcNow(), null, turn));
+
+        await Make().PollOnceAsync(default);
+
+        var v = Assert.Single(_state.Sessions);
+        Assert.NotNull(v.Cost);
+        Assert.Equal(2.5m, v.Cost!.CostToday);
+        Assert.True(v.Cost.Estimated);
+        Assert.Equal(50m, v.Cost.LimitUsd);
+        Assert.Equal(2.5m, _state.Budget!.FyrdCostToday);
+        Assert.Equal(500m, _state.Budget.FyrdLimitUsd);
+    }
+
+    [Fact]
+    public async Task Poll_OverLimit_InterruptsOnce_AcrossPasses()
+    {
+        var turn = JsonDocument.Parse("{\"model_usage_since_last_result\":{\"m\":{\"costUSD\":75}}}").RootElement.Clone();
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddEvent("s1", new SessionEvent("r1", "result", _time.GetUtcNow(), null, turn));
+        var runner = Make();
+
+        await runner.PollOnceAsync(default);
+        await runner.PollOnceAsync(default);
+
+        Assert.Equal(["s1"], _cloud.Interrupted);
+        Assert.Equal("session", _state.Sessions[0].Cost!.Blocked);
+    }
+
+    [Fact]
+    public async Task Poll_GuardFailure_ReportedInLastError_ViewsStillPublished()
+    {
+        var turn = JsonDocument.Parse("{\"model_usage_since_last_result\":{\"m\":{\"costUSD\":75}}}").RootElement.Clone();
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddEvent("s1", new SessionEvent("r1", "result", _time.GetUtcNow(), null, turn));
+        _cloud.SkipCalls(2); // list by tag, list events; then the interrupt fails
+        _cloud.ThrowOnNextCall(new HttpRequestException("interrupt down"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Single(_state.Sessions);
+        Assert.Contains("interrupt down", _state.LastError);
     }
 }

@@ -198,7 +198,7 @@ The console follows the owner's mockup: the "fyrd" Design canvas at https://clau
 2. **Sessions.** A searchable list of `fyrd-hub` sessions, with the Controller pinned first. Each row shows status, repo, branch, PR state (draft, ready, merged or closed), check counts and age. The detail pane has:
    - the transcript, and a "Message this session" box that posts a real user turn
    - pause and resume
-   - persona, model, estimated cost and budget, with "+$5 / +$25 / +$100" (**placeholders for now**; cost tracking and budgets are deferred, owner's decision)
+   - persona, model, estimated cost and budget, with "+$25 / +$100" raises (estimated spend today against a daily limit; see the cost estimation and limits plan)
    - tags, pull requests with checks, repository, start time, last activity and role
 3. **Settings.**
    - **Environment:** the cloud environment new sessions start in.

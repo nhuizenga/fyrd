@@ -10,7 +10,10 @@ export const session = (o: Partial<HubSessionView>): HubSessionView => ({
 
 export const SESSIONS: HubSessionView[] = [
   session({ id: "session_ctl", title: "Controller role", role: "controller", tags: [] }),
-  session({ id: "session_b1", title: "builder-prime-sieve", status: "running", repo: "acme/sieve" }),
+  session({
+    id: "session_b1", title: "builder-prime-sieve", status: "running", repo: "acme/sieve",
+    cost: { costToday: 47.5, limitUsd: 50, ratio: 0.95, estimated: true, blocked: null, canExtend: true, exempt: false },
+  }),
   session({ id: "session_b2", title: "builder-docs", status: "requires_action" }),
   session({ id: "session_b3", title: "reviewer-api", role: "reviewer" }),
   session({ id: "session_b4", title: "validator-web", role: "validator", status: "archived" }),
@@ -65,6 +68,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
   const state: HubState = {
     sessions: SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
+    budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     controller: { sessionId: "session_ctl", url: "https://claude.ai/code/session_ctl" },
   };
   await page.route("**/api/**", async (route) => {
@@ -79,10 +83,13 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       });
     }
     if (path === "/api/hub/state") return route.fulfill({ json: state });
+    if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
+      return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
+    }
     if (path === "/api/hub/personas") return route.fulfill({ json: PERSONAS });
     if (path === "/api/hub/memory") return route.fulfill({ json: { scopes: [{ scope: "shared", label: "Shared", entries: opts.memory ?? [] }] } });
     if (path === "/api/config") {
-      return route.fulfill({ json: { squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5" } });
+      return route.fulfill({ json: { squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5", sessionDailyLimitUsd: 50, fyrdDailyLimitUsd: 500, timeZone: "UTC" } });
     }
     if (req.method() !== "GET") return route.fulfill({ status: 204 });
     return route.fulfill({ status: 404, json: { detail: "not mocked" } });

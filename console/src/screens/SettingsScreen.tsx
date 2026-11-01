@@ -4,7 +4,7 @@ import DeleteIcon from "@servicetitan/anvil2/assets/icons/material/round/delete.
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import * as api from "../api";
 import { navigate } from "../route";
-import type { HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
+import type { HubBudgetView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
 const MODELS = [
@@ -18,7 +18,15 @@ const APPLY_NOTE = "Changes apply to sessions created from now on.";
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function EnvironmentCard() {
+/** A whole number from `min` to `max` typed in a field, or null. */
+const parseWholeNumber = (v: string, min: number, max: number) => {
+  const t = v.trim();
+  const n = Number(t);
+  return /^\d+$/.test(t) && n >= min && n <= max ? n : null;
+};
+const rangeMessage = (min: number, max: number) => `Enter a whole number from ${min} to ${max}.`;
+
+function EnvironmentCard(_: CardProps) {
   const [env, setEnv] = useState("");
   const [cap, setCap] = useState("20");
   const [capError, setCapError] = useState<string | null>(null);
@@ -45,12 +53,13 @@ function EnvironmentCard() {
   };
 
   const saveCap = () => {
-    const n = Number(cap);
-    if (!/^\d+$/.test(cap.trim()) || n < 1 || n > 100) {
-      setCapError("Enter a whole number from 1 to 100.");
+    const n = parseWholeNumber(cap, 1, 100);
+    if (n === null) {
+      setCapError(rangeMessage(1, 100));
       return;
     }
     setCapError(null);
+    setCap(String(n));
     void save({ sessionCap: n }, "Session cap");
   };
 
@@ -86,7 +95,122 @@ function EnvironmentCard() {
   );
 }
 
-function PersonasCard() {
+/** What the Settings screen hands every section card. */
+type CardProps = { budget?: HubBudgetView | null };
+
+const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Today's estimated spend across the whole fyrd (the same total the Fyrd-wide limit is checked against). */
+function TotalSpend({ budget }: { budget: HubBudgetView | null | undefined }) {
+  return (
+    <div className="spend-total" role="status" aria-label="Total spend today">
+      {!budget ? (
+        <Text subdued>No spend data yet.</Text>
+      ) : (
+        <>
+          <Text size="large">
+            <strong>{usd(budget.fyrdCostToday)}</strong> of {usd(budget.fyrdLimitUsd).replace(/\.00$/, "")}
+          </Text>
+          <Text size="small" subdued>
+            {budget.fyrdLimitUsd > 0 ? `${Math.round((budget.fyrdCostToday / budget.fyrdLimitUsd) * 100)}% of today's limit` : ""}
+            {" · "}{budget.date} ({budget.timeZone})
+          </Text>
+          {budget.fyrdBlocked && <Chip label="Limit reached" size="small" />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SpendLimitsCard({ budget }: CardProps) {
+  const [sessionLimit, setSessionLimit] = useState("50");
+  const [fyrdLimit, setFyrdLimit] = useState("500");
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [fyrdError, setFyrdError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [timeZone, setTimeZone] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => {
+      if (!c) return;
+      setTimeZone(c.timeZone);
+      setSessionLimit(String(c.sessionDailyLimitUsd));
+      setFyrdLimit(String(c.fyrdDailyLimitUsd));
+    }).catch((e) => setError(errText(e)));
+  }, []);
+
+  const save = async (patch: Parameters<typeof api.updateConfig>[0], what: string) => {
+    setError(null);
+    setSaved(null);
+    try {
+      await api.updateConfig(patch);
+      setSaved(`${what} saved.`);
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+
+  return (
+    <section className="card" aria-labelledby="limits-h">
+      <Text variant="headline" el="h3" size="medium" id="limits-h">Spend limits</Text>
+      <Text variant="headline" el="h4" size="small">Total spend today</Text>
+      <TotalSpend budget={budget} />
+      <Text subdued>Daily limits on estimated (list-price) spend. A day runs from midnight in {timeZone ?? "your browser's time zone"}; the last browser to load the console sets it.</Text>
+      {error && <Alert status="danger" title={error} role="alert" />}
+      {saved && <Text role="status">{saved}</Text>}
+      <TextField
+        label="Per-session daily limit (USD)"
+        description="Whole dollars, 1 to 10000."
+        inputMode="numeric"
+        value={sessionLimit}
+        error={sessionError ?? undefined}
+        onChange={(e) => setSessionLimit(e.target.value)}
+      />
+      <div>
+        <Button
+          appearance="primary"
+          aria-label="Save session limit"
+          onClick={() => {
+            const n = parseWholeNumber(sessionLimit, 1, 10000);
+            if (n === null) return setSessionError(rangeMessage(1, 10000));
+            setSessionError(null);
+            setSessionLimit(String(n));
+            void save({ sessionDailyLimitUsd: n }, "Session limit");
+          }}
+        >
+          Save
+        </Button>
+      </div>
+      <TextField
+        label="Fyrd-wide daily limit (USD)"
+        description="Whole dollars, 1 to 10000."
+        inputMode="numeric"
+        value={fyrdLimit}
+        error={fyrdError ?? undefined}
+        onChange={(e) => setFyrdLimit(e.target.value)}
+      />
+      <div>
+        <Button
+          appearance="primary"
+          aria-label="Save fyrd limit"
+          onClick={() => {
+            const n = parseWholeNumber(fyrdLimit, 1, 10000);
+            if (n === null) return setFyrdError(rangeMessage(1, 10000));
+            setFyrdError(null);
+            setFyrdLimit(String(n));
+            void save({ fyrdDailyLimitUsd: n }, "Fyrd limit");
+          }}
+        >
+          Save
+        </Button>
+      </div>
+      <Text size="small" subdued>The Controller is never interrupted or blocked by these limits.</Text>
+    </section>
+  );
+}
+
+function PersonasCard(_: CardProps) {
   const [personas, setPersonas] = useState<HubPersona[]>([]);
   const [editing, setEditing] = useState<{ draft: HubPersona; isNew: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -273,7 +397,7 @@ function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; on
   );
 }
 
-function MemoryCard() {
+function MemoryCard(_: CardProps) {
   const [memory, setMemory] = useState<HubMemory>({ scopes: [] });
   const [scope, setScope] = useState("shared");
   const [text, setText] = useState("");
@@ -332,11 +456,12 @@ function MemoryCard() {
 
 const SECTIONS = [
   { id: "environment", label: "Environment", Card: EnvironmentCard },
+  { id: "limits", label: "Spend limits", Card: SpendLimitsCard },
   { id: "personas", label: "Personas", Card: PersonasCard },
   { id: "memory", label: "Agent memory", Card: MemoryCard },
 ] as const;
 
-export default function SettingsScreen({ routeId }: ScreenProps) {
+export default function SettingsScreen({ state, routeId }: ScreenProps) {
   const { id: section, Card } = SECTIONS.find((s) => s.id === routeId) ?? SECTIONS[0];
   return (
     <>
@@ -356,7 +481,7 @@ export default function SettingsScreen({ routeId }: ScreenProps) {
             </button>
           ))}
         </nav>
-        <div className="settings-body"><Card /></div>
+        <div className="settings-body"><Card budget={state?.budget} /></div>
       </div>
     </>
   );

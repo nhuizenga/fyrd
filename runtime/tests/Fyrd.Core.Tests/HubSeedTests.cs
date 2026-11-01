@@ -71,6 +71,16 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void SeedHistory_ContainsTheHashOfEveryCurrentSeed()
+    {
+        var history = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, List<string>>>(
+            File.ReadAllText(Path.Combine(SeedDir(), "seed-history.json")))!;
+        foreach (var p in Load())
+            Assert.True(history.TryGetValue(p.Id, out var hashes) && hashes.Contains(HubPersonas.Hash(p.Name, p.Model, p.Definition)),
+                $"{p.Id}: seed-history.json is stale; run node scripts/seed-history.mjs and commit it");
+    }
+
+    [Fact]
     public void Controller_MayCloneOnlyToRead()
     {
         var d = Get("controller").Definition;
@@ -93,11 +103,13 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
-    public void EveryPersona_HasTheDraftPullRequestBullet()
+    public void EveryPersona_HasTheSameDraftPullRequestBullet()
     {
-        foreach (var p in Load())
-            Assert.True(p.Definition.Contains("- **Pull requests.** You may open a pull request, but only when the owner or a Fyrd session explicitly asks for one", StringComparison.Ordinal)
-                && p.Definition.Contains("`draft: true`", StringComparison.Ordinal), $"{p.Id} lacks the Pull requests bullet");
+        static string Bullet(string d) => d.Split('\n').SingleOrDefault(l => l.StartsWith("- **Pull requests.**", StringComparison.Ordinal)) ?? "";
+        var all = Load();
+        var expected = Bullet(all[0].Definition);
+        Assert.Contains("`draft: true`", expected, StringComparison.Ordinal);
+        foreach (var p in all) Assert.Equal(expected, Bullet(p.Definition));
     }
 
     [Fact]
