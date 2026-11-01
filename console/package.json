@@ -6,14 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@servicetitan/anvil2": "^3.17.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.1",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.1",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
@@ -23,6 +27,7 @@
     "jsdom": "^25.0.1",
     "typescript": "~5.7.2",
     "vite": "^6.0.5",
+    "vite-plugin-svgr": "^4.3.0",
     "vitest": "^3.2.7"
   }
 }

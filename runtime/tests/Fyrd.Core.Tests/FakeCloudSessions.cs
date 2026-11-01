@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Fyrd.Core.CloudSessions;
 
@@ -39,6 +40,12 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     public void AddAssistantEvent(string sessionId, string uuid, string text) =>
         AddEvent(sessionId, new SessionEvent(uuid, "assistant", DateTimeOffset.UnixEpoch, text, Empty));
+
+    /// <summary>Events each <see cref="StreamEventsAsync"/> call replays (those after its resume point), then the stream ends.</summary>
+    public Dictionary<string, List<StreamedEvent>> Streams { get; } = new();
+
+    /// <summary>The resume point of each <see cref="StreamEventsAsync"/> call, in order.</summary>
+    public List<long?> StreamAfter { get; } = [];
 
     public void SetSession(CloudSession s) => _sessions[s.Id] = s;
     public void SetByTag(string tag, params CloudSession[] sessions) => _byTag[tag] = [.. sessions];
@@ -142,5 +149,25 @@ public sealed class FakeCloudSessions : ICloudSessions
         MaybeThrow();
         Answered.Add((sessionId, question, answers));
         return Task.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<StreamedEvent> StreamEventsAsync(
+        string sessionId, long? afterSequence, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await Task.Yield();
+        StreamedEvent[] events;
+        lock (Streams)
+        {
+            MaybeThrow();
+            StreamAfter.Add(afterSequence);
+            events = Streams.TryGetValue(sessionId, out var l)
+                ? l.Where(e => afterSequence is not { } a || e.Sequence > a).ToArray()
+                : [];
+        }
+        foreach (var e in events)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return e;
+        }
     }
 }

@@ -62,6 +62,9 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
             var existing = string.IsNullOrEmpty(p.Id) ? null : Read(FileFor(Validate(p.Id)));
             if (existing is not null)
             {
+                // Locked personas (the Controller) keep their name; Fyrd and the skills refer to them by it.
+                if (existing.Locked && !string.Equals(existing.Name, p.Name.Trim(), StringComparison.Ordinal))
+                    throw new InvalidOperationException($"The {existing.Name} persona can't be renamed.");
                 saved = existing with { Name = p.Name.Trim(), Model = p.Model, Definition = p.Definition ?? "" };
             }
             else

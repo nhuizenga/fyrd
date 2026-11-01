@@ -1,5 +1,5 @@
 import type {
-  AnswerBody, ControllerInfo, FyrdConfig, HubMemory, HubMessage, HubPersona, HubState, MemoryEntry, MemoryScope, WithRelay,
+  AnswerBody, ControllerInfo, FyrdConfig, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, WithRelay,
 } from "./types";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -32,8 +32,6 @@ export const adoptController = (sessionId: string) =>
   call<ControllerInfo>("POST", "/api/hub/controller/adopt", { sessionId });
 /** Archives the current Controller; the owner then adopts a new one. */
 export const retireController = () => call<void>("POST", "/api/hub/controller/retire");
-export const getMessages = (sessionId: string) =>
-  call<HubMessage[]>("GET", `/api/hub/sessions/${enc(sessionId)}/messages`);
 export const sendMessage = (sessionId: string, text: string) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/message`, { text });
 export const pause = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pause`);

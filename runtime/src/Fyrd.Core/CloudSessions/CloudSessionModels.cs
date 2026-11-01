@@ -29,6 +29,9 @@ public sealed record CloudSession(
 /// <summary><c>Text</c> is the joined text blocks of <c>user</c> and <c>assistant</c> events; null otherwise.</summary>
 public sealed record SessionEvent(string Uuid, string Type, DateTimeOffset CreatedAt, string? Text, JsonElement Raw);
 
+/// <summary>A saved event read from the live stream; <c>Sequence</c> is its <c>sequence_num</c> (resume after it).</summary>
+public sealed record StreamedEvent(long Sequence, SessionEvent Event);
+
 public sealed record EventPage(IReadOnlyList<SessionEvent> Events, bool HasMore, string? FirstId, string? LastId);
 
 public sealed class CloudSessionAuthException(int status)

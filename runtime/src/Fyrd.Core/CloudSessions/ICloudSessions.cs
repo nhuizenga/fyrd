@@ -20,4 +20,11 @@ public interface ICloudSessions
     /// </summary>
     Task AnswerQuestionAsync(
         string sessionId, Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default);
+
+    /// <summary>
+    /// Opens one connection to the session's live event stream and yields its saved (<c>client_event</c>) events,
+    /// starting after <paramref name="afterSequence"/> (or from the first event). Completes when the server closes the
+    /// stream, which it may do on purpose; the caller reopens from the last sequence it saw.
+    /// </summary>
+    IAsyncEnumerable<StreamedEvent> StreamEventsAsync(string sessionId, long? afterSequence, CancellationToken ct = default);
 }

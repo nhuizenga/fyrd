@@ -71,10 +71,30 @@ public sealed class HubPersonasTests : IDisposable
     {
         var store = Make();
         store.List();
-        var saved = store.Save(new HubPersona("controller", "Boss", "claude-opus-5-5", "x", false));
+        var saved = store.Save(new HubPersona("controller", "Controller", "claude-opus-5-5", "x", false));
         Assert.Equal("controller", saved.Id);
         Assert.True(saved.Locked);
-        Assert.Equal("Boss", store.Get("controller")!.Name);
+        Assert.Equal("claude-opus-5-5", store.Get("controller")!.Model);
+    }
+
+    [Fact]
+    public void Save_Existing_RenamesUnlockedPersona_KeepsId()
+    {
+        var store = Make();
+        store.List();
+        var saved = store.Save(new HubPersona("builder", "Smith", "claude-sonnet-5-5", "x", false));
+        Assert.Equal("builder", saved.Id);
+        Assert.Equal("Smith", store.Get("builder")!.Name);
+    }
+
+    [Fact]
+    public void Save_Existing_RenamingLockedPersona_Throws()
+    {
+        var store = Make();
+        store.List();
+        Assert.Throws<InvalidOperationException>(() =>
+            store.Save(new HubPersona("controller", "Boss", "claude-sonnet-5-5", "x", false)));
+        Assert.Equal("Controller", store.Get("controller")!.Name);
     }
 
     [Fact]

@@ -313,4 +313,82 @@ public sealed class CloudSessionClientTests : IDisposable
     [Fact]
     public void Client_ImplementsICloudSessions() =>
         Assert.IsAssignableFrom<ICloudSessions>(Client(new FakeHandler()));
+
+    private static async Task<List<StreamedEvent>> Drain(IAsyncEnumerable<StreamedEvent> stream)
+    {
+        var list = new List<StreamedEvent>();
+        await foreach (var e in stream) list.Add(e);
+        return list;
+    }
+
+    [Fact]
+    public async Task StreamEvents_ParsesClientEventsOnly_NoBetaHeader()
+    {
+        const string sse = """
+            event: session_update
+            data: {"connection_status":"connected"}
+
+            : comment
+
+            event: client_event
+            id: 5
+            data: {"event_id":"ev_5","event_type":"user","sequence_num":5,"created_at":"2026-11-01T10:00:00Z","payload":{"type":"user","message":{"content":"hi"}}}
+
+            event: ephemeral_event
+            data: {"event_type":"stream_event","payload":{"type":"stream_event"}}
+
+            event: client_event
+            id: 6
+            data: {"event_id":"ev_6","created_at":"2026-11-01T10:00:01Z",
+            data: "payload":{"type":"assistant","uuid":"a6","message":{"content":[{"type":"text","text":"yo"}]}}}
+
+            event: client_event
+            id: 7
+            data: not json
+            """;
+        var h = new FakeHandler(HttpStatusCode.OK, sse);
+        var events = await Drain(Client(h).StreamEventsAsync("session_01abc", null));
+
+        Assert.Equal([5L, 6L], events.Select(e => e.Sequence));
+        Assert.Equal(("user", "hi", "ev_5"), (events[0].Event.Type, events[0].Event.Text, events[0].Event.Uuid));
+        Assert.Equal(DateTimeOffset.Parse("2026-11-01T10:00:00Z"), events[0].Event.CreatedAt);
+        Assert.Equal(("assistant", "yo", "a6"), (events[1].Event.Type, events[1].Event.Text, events[1].Event.Uuid));
+
+        var r = Assert.Single(h.Requests).Request;
+        Assert.Equal("https://api.anthropic.com/v1/code/sessions/cse_01abc/events/stream", r.RequestUri!.ToString());
+        Assert.Equal("text/event-stream", r.Headers.Accept.Single().MediaType);
+        Assert.Equal("Bearer tok", r.Headers.Authorization!.ToString());
+        Assert.Equal("org-123", r.Headers.GetValues("x-organization-uuid").Single());
+        Assert.False(r.Headers.Contains("anthropic-beta"));
+    }
+
+    [Fact]
+    public async Task StreamEvents_AfterSequence_SendsFromSequenceNum()
+    {
+        var h = new FakeHandler(HttpStatusCode.OK, "");
+        Assert.Empty(await Drain(Client(h).StreamEventsAsync("session_01abc", 42)));
+        var r = Assert.Single(h.Requests).Request;
+        Assert.Equal("https://api.anthropic.com/v1/code/sessions/cse_01abc/events/stream?from_sequence_num=42", r.RequestUri!.ToString());
+        Assert.Equal("42", r.Headers.GetValues("Last-Event-ID").Single());
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task StreamEvents_AuthFailure_Throws(HttpStatusCode status) =>
+        await Assert.ThrowsAsync<CloudSessionAuthException>(() =>
+            Drain(Client(new FakeHandler(status, "{}")).StreamEventsAsync("session_01abc", null)));
+
+    [Fact]
+    public async Task StreamEvents_ServerError_ThrowsApiException()
+    {
+        var e = await Assert.ThrowsAsync<CloudSessionApiException>(() =>
+            Drain(Client(new FakeHandler(HttpStatusCode.BadGateway, "boom")).StreamEventsAsync("session_01abc", null)));
+        Assert.Equal(502, e.Status);
+    }
+
+    [Fact]
+    public async Task StreamEvents_BadSessionId_Throws() =>
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            Drain(Client(new FakeHandler()).StreamEventsAsync("../x", null)));
 }

@@ -3,7 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
 import { config, hubState } from "../test/fixtures";
+import { useRoute } from "../route";
 import type { HubMemory, HubPersona } from "../types";
+import type { ScreenProps } from "./ScreenProps";
 import SettingsScreen from "./SettingsScreen";
 
 vi.mock("../api");
@@ -19,7 +21,14 @@ const memory: HubMemory = {
   ],
 };
 
+/** SettingsScreen as the app mounts it: the section comes from the `#/settings/{section}` route. */
+function Routed(props: ScreenProps) {
+  const { screen: current, id } = useRoute();
+  return <SettingsScreen {...props} routeId={current === "settings" ? id : null} />;
+}
+
 beforeEach(() => {
+  window.location.hash = "";
   vi.resetAllMocks();
   vi.mocked(api.getConfig).mockResolvedValue(config());
   vi.mocked(api.getPersonas).mockResolvedValue(personas);
@@ -32,13 +41,26 @@ beforeEach(() => {
   vi.mocked(api.deletePersona).mockResolvedValue(undefined);
 });
 
-const renderSettings = async () => {
-  render(<SettingsScreen state={hubState()} onChanged={vi.fn()} />);
-  await screen.findByRole("button", { name: /^Builder/ });
+const renderSettings = async (section: "Environment" | "Personas" | "Agent memory" = "Personas") => {
+  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: section }));
+  if (section === "Personas") await screen.findByRole("button", { name: /^Builder/ });
+  else if (section === "Agent memory") await screen.findByText("Shared note");
 };
 
+it("settings sections are a left nav showing one section at a time", async () => {
+  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+  const nav = screen.getByRole("navigation", { name: "Settings sections" });
+  expect(nav).toHaveTextContent("EnvironmentPersonasAgent memory");
+  expect(screen.getByRole("heading", { name: "Environment" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Personas" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
+  expect(screen.getByRole("heading", { name: "Agent memory" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Environment" })).not.toBeInTheDocument();
+});
+
 it("environment save calls updateConfig", async () => {
-  await renderSettings();
+  await renderSettings("Environment");
   const field = screen.getByLabelText("Cloud environment id");
   await userEvent.type(field, "env_123");
   await userEvent.click(screen.getByRole("button", { name: "Save environment" }));
@@ -46,7 +68,7 @@ it("environment save calls updateConfig", async () => {
 });
 
 it("session cap rejects 0 and saves 20", async () => {
-  await renderSettings();
+  await renderSettings("Environment");
   const field = screen.getByLabelText("Session cap");
   await userEvent.clear(field);
   await userEvent.type(field, "0");
@@ -102,7 +124,7 @@ it("add persona", async () => {
 });
 
 it("memory groups shared first; add, edit, delete entry", async () => {
-  await renderSettings();
+  await renderSettings("Agent memory");
   const headings = (await screen.findAllByRole("heading", { level: 4 })).map((h) => h.textContent);
   expect(headings.indexOf("Shared")).toBeLessThan(headings.indexOf("Builder"));
 
@@ -117,9 +139,8 @@ it("memory groups shared first; add, edit, delete entry", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(api.editMemory).toHaveBeenCalledWith("shared", "e1", "Changed");
 
+  // No confirmation step: the trash icon deletes at once.
   await userEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
-  expect(screen.getByText("Delete this entry? Agents will stop seeing it.")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
   expect(api.deleteMemory).toHaveBeenCalledWith("shared", "e1");
 });
 
@@ -127,7 +148,7 @@ it("memory scope picker hides the Controller (its memory is Shared)", async () =
   vi.mocked(api.getHubMemory).mockResolvedValue({
     scopes: [...memory.scopes, { scope: "controller", label: "Controller", entries: [] }],
   });
-  await renderSettings();
+  await renderSettings("Agent memory");
   await userEvent.click(screen.getByRole("combobox", { name: "Memory scope" }));
   expect(await screen.findByRole("option", { name: "Builder" })).toBeInTheDocument();
   expect(screen.queryByRole("option", { name: "Controller" })).not.toBeInTheDocument();
@@ -140,7 +161,7 @@ it("definition helper text appears once", async () => {
 });
 
 it("changes apply note", async () => {
-  await renderSettings();
+  await renderSettings("Agent memory");
   expect(screen.getAllByText("Changes apply to sessions created from now on.").length).toBeGreaterThan(0);
 });
 
@@ -152,5 +173,36 @@ it("add persona rejects a name that collides with an existing persona or shared"
     await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
     expect(await screen.findByText(name === "!!!" ? "Give the persona a name." : "A persona with this name already exists.")).toBeInTheDocument();
   }
+  expect(api.savePersona).not.toHaveBeenCalled();
+});
+
+it("a section has its own deep link", async () => {
+  window.location.hash = "#/settings/memory";
+  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+  expect(screen.getByRole("heading", { name: "Agent memory" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Personas" }));
+  expect(window.location.hash).toBe("#/settings/personas");
+});
+
+it("personas can be renamed, except the Controller", async () => {
+  await renderSettings();
+  await userEvent.click(screen.getByRole("button", { name: /^Controller/ }));
+  expect(screen.getByLabelText("Name")).toBeDisabled();
+  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
+  const name = screen.getByLabelText("Name");
+  expect(name).toBeEnabled();
+  await userEvent.clear(name);
+  await userEvent.type(name, "Smith");
+  await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
+  expect(api.savePersona).toHaveBeenCalledWith(expect.objectContaining({ id: "builder", name: "Smith" }));
+});
+
+it("renaming a persona to another persona's name is rejected", async () => {
+  await renderSettings();
+  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
+  await userEvent.clear(screen.getByLabelText("Name"));
+  await userEvent.type(screen.getByLabelText("Name"), "controller");
+  await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
+  expect(await screen.findByText("A persona with this name already exists.")).toBeInTheDocument();
   expect(api.savePersona).not.toHaveBeenCalled();
 });

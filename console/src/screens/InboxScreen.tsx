@@ -1,116 +1,45 @@
-import { useState } from "react";
-import { Alert, Button, Checkbox, Text, Textarea } from "@servicetitan/anvil2";
-import * as api from "../api";
-import type { HubMessage, HubQuestion, HubSessionView } from "../types";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Alert, Button, Text } from "@servicetitan/anvil2";
+import QuestionGroup from "../components/QuestionGroup";
+import ThreadItem from "../components/ThreadItem";
+import { relativeTime } from "../time";
+import type { HubQuestion, HubSessionView } from "../types";
+import { useTranscript } from "../useTranscript";
 import type { ScreenProps } from "./ScreenProps";
 
-interface QuestionProps {
-  q: HubQuestion;
-  onAnswered: (waitingFor: number | null) => void;
-  onChanged: ScreenProps["onChanged"];
-}
-
-function QuestionBlock({ q, onAnswered, onChanged }: QuestionProps) {
-  const [text, setText] = useState("");
-  const [picked, setPicked] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const send = async (body: { choice?: string; text?: string }) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await api.answerQuestion(q.id, body);
-      onAnswered(res?.waitingFor ?? null);
-      await onChanged();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stale = error !== null && /no longer waiting/i.test(error);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Text variant="headline" el="h3" size="small">{q.question}</Text>
-      {q.multiSelect ? (
-        <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend style={{ position: "absolute", left: -9999 }}>Options</legend>
-          {q.options.map((o) => (
-            <Checkbox
-              key={o}
-              label={o}
-              checked={picked.includes(o)}
-              onChange={(e) => setPicked(e.target.checked ? [...picked, o] : picked.filter((p) => p !== o))}
-            />
-          ))}
-          <Button appearance="primary" disabled={busy || picked.length === 0} onClick={() => send({ text: picked.join(", ") })}>
-            Send
-          </Button>
-        </fieldset>
-      ) : (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {q.options.map((o) => (
-            <Button key={o} appearance="secondary" disabled={busy} onClick={() => send({ choice: o })}>{o}</Button>
-          ))}
-        </div>
-      )}
-      <Textarea label="Your reply" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
-      <div>
-        <Button appearance="primary" disabled={busy || text.trim() === ""} onClick={() => send({ text: text.trim() })}>
-          Send reply
-        </Button>
-      </div>
-      {error && (
-        <Alert status="danger" title={error} role="alert">
-          {stale && <a href={`https://claude.ai/code/${q.sessionId}`} target="_blank" rel="noreferrer">Open in claude.ai</a>}
-        </Alert>
-      )}
-    </div>
-  );
-}
-
-/** "just now", "5m ago", "3h ago", "2d ago". */
-function age(iso: string, now = Date.now()): string {
-  const ms = now - new Date(iso).getTime();
-  if (!Number.isFinite(ms)) return "";
-  const m = Math.floor(ms / 60_000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
-}
-
-/** Collapsed by default; loads the session's recent messages each time it is expanded. */
-function Conversation({ sessionId }: { sessionId: string }) {
+/**
+ * The session's live conversation. Collapsed it shows only the last few lines; expanded it scrolls on its own,
+ * so the response below stays in view. The pending question itself is left out: the answer buttons show it.
+ */
+function Conversation({ sessionId, pendingToolUseIds }: { sessionId: string; pendingToolUseIds: Set<string> }) {
   const [expanded, setExpanded] = useState(false);
-  const [messages, setMessages] = useState<HubMessage[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { items, connected, fault } = useTranscript(sessionId);
+  const logRef = useRef<HTMLDivElement>(null);
+  const shown = items.filter((i) => !(i.kind === "question" && pendingToolUseIds.has(i.toolUseId ?? "")));
 
-  const toggle = async () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (!next) return;
-    setError(null);
-    try {
-      setMessages((await api.getMessages(sessionId)) ?? []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  // Always show the newest lines, including after late layout (fonts, markdown) changes the height.
+  useLayoutEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    const toEnd = () => { el.scrollTop = el.scrollHeight; };
+    toEnd();
+    const observer = new ResizeObserver(toEnd);
+    for (const child of el.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [shown.length, expanded]);
 
   return (
-    <div>
-      <Button appearance="ghost" aria-expanded={expanded} onClick={toggle}>Conversation so far</Button>
-      {expanded && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }} role="log" aria-label="Conversation">
-          {error && <Alert status="danger" title={error} role="alert" />}
-          {messages === null && !error && <Text subdued>Loading…</Text>}
-          {messages?.length === 0 && <Text subdued>No messages yet.</Text>}
-          {messages?.map((m, i) => (
-            <div key={i} className={m.role === "user" ? "msg-user" : "msg-agent"}>{m.text}</div>
-          ))}
+    <div className="inbox-convo">
+      {fault && <Alert status="warning" title={fault} role="alert" />}
+      <div ref={logRef} className={expanded ? "inbox-log inbox-log-expanded" : "inbox-log"} role="log" aria-label="Conversation">
+        {shown.length === 0 && <Text subdued size="small">{connected ? "No messages yet." : "Loading…"}</Text>}
+        {shown.map((item) => <ThreadItem key={item.key} item={item} pending={[]} onChanged={() => {}} />)}
+      </div>
+      {shown.length > 0 && (
+        <div>
+          <Button appearance="ghost" size="small" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            {expanded ? "Show less" : "Show whole conversation"}
+          </Button>
         </div>
       )}
     </div>
@@ -120,29 +49,13 @@ function Conversation({ sessionId }: { sessionId: string }) {
 function RequestCard({ group, session, onChanged }: {
   group: HubQuestion[]; session: HubSessionView | undefined; onChanged: ScreenProps["onChanged"];
 }) {
-  const [answered, setAnswered] = useState<string[]>([]);
-  const [waitingFor, setWaitingFor] = useState<number | null>(null);
-  const open = group.filter((q) => !answered.includes(q.id));
   const first = group[0];
-  const meta = [first.sessionTitle, session?.repo, `asked ${age(first.askedAt)}`].filter(Boolean).join(" · ");
+  const meta = [first.sessionTitle, session?.repo, `asked ${relativeTime(first.askedAt)}`].filter(Boolean).join(" · ");
   return (
     <section className="card" aria-label={`Question from ${first.sessionTitle}`}>
       <Text variant="body" size="small" subdued>{meta}</Text>
-      {open.map((q) => (
-        <QuestionBlock
-          key={q.id}
-          q={q}
-          onChanged={onChanged}
-          onAnswered={(w) => {
-            setAnswered((a) => [...a, q.id]);
-            setWaitingFor(w);
-          }}
-        />
-      ))}
-      {waitingFor !== null && open.length > 0 && (
-        <Text subdued>Answer the remaining {waitingFor} question(s) to send.</Text>
-      )}
-      <Conversation sessionId={first.sessionId} />
+      <Conversation sessionId={first.sessionId} pendingToolUseIds={new Set(group.map((q) => q.toolUseId))} />
+      <QuestionGroup group={group} onChanged={onChanged} />
     </section>
   );
 }

@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -186,6 +187,85 @@ public sealed partial class CloudSessionClient : ICloudSessions
         using var _ = await SendAsync(HttpMethod.Post, $"/v1/code/sessions/{cseId}/events", body, ct);
     }
 
+    public async IAsyncEnumerable<StreamedEvent> StreamEventsAsync(
+        string sessionId, long? afterSequence, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ValidateSessionId(sessionId);
+        // The /v1/code route takes the cse_ form of the id. from_sequence_num is exclusive: the stream starts after it.
+        var cseId = "cse_" + sessionId["session_".Length..];
+        var path = $"/v1/code/sessions/{cseId}/events/stream";
+        if (afterSequence is { } after) path += $"?from_sequence_num={after}";
+
+        using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(BaseAddress, path));
+        AddAuth(req);
+        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        if (afterSequence is { } last) req.Headers.Add("Last-Event-ID", last.ToString());
+
+        using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        var status = (int)resp.StatusCode;
+        if (status is 401 or 403) throw new CloudSessionAuthException(status);
+        if (status is < 200 or >= 300)
+            throw new CloudSessionApiException(status, await resp.Content.ReadAsStringAsync(ct));
+
+        await using var body = await resp.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(body, Encoding.UTF8);
+        string? name = null, id = null;
+        var data = new StringBuilder();
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null || line.Length == 0)
+            {
+                if (name == "client_event" && data.Length > 0 && ParseStreamFrame(data.ToString(), id) is { } ev)
+                    yield return ev;
+                if (line is null) yield break;
+                name = id = null;
+                data.Clear();
+                continue;
+            }
+            if (line[0] == ':') continue;
+            var colon = line.IndexOf(':');
+            var field = colon < 0 ? line : line[..colon];
+            var value = colon < 0 ? "" : line[(colon + 1)..];
+            if (value.StartsWith(' ')) value = value[1..];
+            switch (field)
+            {
+                case "event": name = value; break;
+                case "id": id = value; break;
+                case "data":
+                    if (data.Length > 0) data.Append('\n');
+                    data.Append(value);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>A <c>client_event</c> frame's data, or null when it is not JSON or has no sequence number.</summary>
+    private static StreamedEvent? ParseStreamFrame(string data, string? id)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return null;
+            long seq;
+            if (root.TryGetProperty("sequence_num", out var sn) && sn.ValueKind == JsonValueKind.Number && sn.TryGetInt64(out var n))
+                seq = n;
+            else if (!long.TryParse(id, out seq))
+                return null;
+
+            if (!root.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object) return null;
+            var ev = ParseEvent(payload);
+            if (DateTimeOffset.TryParse(Str(root, "created_at"), out var created)) ev = ev with { CreatedAt = created };
+            if (ev.Uuid.Length == 0 && Str(root, "event_id") is { } eventId) ev = ev with { Uuid = eventId };
+            return new StreamedEvent(seq, ev);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static void ValidateSessionId(string sessionId)
     {
         if (sessionId is null || !SessionIdPattern().IsMatch(sessionId))
@@ -203,11 +283,8 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     private async Task<JsonDocument> SendAsync(HttpMethod method, string pathAndQuery, JsonNode? body, CancellationToken ct)
     {
-        var auth = _credentials.Read();
         using var req = new HttpRequestMessage(method, new Uri(BaseAddress, pathAndQuery));
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
-        req.Headers.Add("x-organization-uuid", auth.OrganizationUuid);
-        req.Headers.Add("anthropic-version", "2023-06-01");
+        AddAuth(req);
         req.Headers.Add("anthropic-beta", "ccr-byoc-2025-07-29");
         if (body is not null)
             req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
@@ -226,6 +303,15 @@ public sealed partial class CloudSessionClient : ICloudSessions
         {
             throw new CloudSessionApiException(status, "<non-JSON body>");
         }
+    }
+
+    /// <summary>The auth headers every call sends; the beta header is added only where the route needs it.</summary>
+    private void AddAuth(HttpRequestMessage req)
+    {
+        var auth = _credentials.Read();
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
+        req.Headers.Add("x-organization-uuid", auth.OrganizationUuid);
+        req.Headers.Add("anthropic-version", "2023-06-01");
     }
 
     private static string? Str(JsonElement el, string name) =>
