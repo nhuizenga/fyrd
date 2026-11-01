@@ -598,6 +598,7 @@ public class HubApiTests
     public async Task Budget_BelowNinetyPercent_409()
     {
         using var f = new FyrdFactory();
+        SpendOnLedger(f, 44);
         SeedCost(f, Cost(44));
         var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/budget", new { amountUsd = 25 });
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
@@ -608,6 +609,7 @@ public class HubApiTests
     public async Task Budget_Controller_409()
     {
         using var f = new FyrdFactory();
+        await Adopt(f, f.CreateClient());
         SeedCost(f, Cost(60, exempt: true), "session_ctl1");
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_ctl1/budget", new { amountUsd = 25 });
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
@@ -619,7 +621,7 @@ public class HubApiTests
         using var f = new FyrdFactory();
         // The endpoint raises the ledger; the cost it reports comes from the ledger's own figure for the session.
         var ledger = f.Services.GetRequiredService<CostLedger>();
-        ledger.Record(SessionId, "builder-abc", 45);
+        SpendOnLedger(f, 45);
         SeedCost(f, Cost(45));
         var state = f.Services.GetRequiredService<HubState>();
         Assert.False(state.PollRequested.IsCompleted);
@@ -632,5 +634,74 @@ public class HubApiTests
         Assert.Equal(45m, body.GetProperty("costToday").GetDecimal());
         Assert.True(state.PollRequested.IsCompleted);
         Assert.Equal(amount, ledger.ExtraUsd(SessionId));
+    }
+
+    [Fact]
+    public async Task Budget_TwoSimultaneousRaises_OnlyOneApplies()
+    {
+        using var f = new FyrdFactory();
+        var ledger = f.Services.GetRequiredService<CostLedger>();
+        SpendOnLedger(f, 46);
+        SeedCost(f, Cost(46));
+        var c = f.CreateClient();
+        var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ =>
+            c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/budget", new { amountUsd = 100 })));
+        Assert.Equal(1, results.Count(r => r.StatusCode == HttpStatusCode.OK));
+        Assert.Equal(3, results.Count(r => r.StatusCode == HttpStatusCode.Conflict));
+        Assert.Equal(100m, ledger.ExtraUsd(SessionId));
+    }
+
+    [Fact]
+    public async Task Budget_NonNumericAmount_400()
+    {
+        using var f = new FyrdFactory();
+        SeedCost(f, Cost(46));
+        var r = await f.CreateClient().PostAsync($"/api/hub/sessions/{SessionId}/budget",
+            new StringContent("{\"amountUsd\":\"lots\"}", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Answer_BlockedSession_409()
+    {
+        using var f = new FyrdFactory();
+        f.Services.GetRequiredService<HubState>().Publish([View() with { Cost = Cost(60, blocked: "session") }], [Question()]);
+        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Apple" });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.Cloud.Answered);
+    }
+
+    [Fact]
+    public async Task ConfigPut_OmittingSpendFields_KeepsStoredValues()
+    {
+        using var f = new FyrdFactory();
+        var store = f.Services.GetRequiredService<ConfigStore>();
+        store.Save(store.Load() with { SessionDailyLimitUsd = 12, FyrdDailyLimitUsd = 340, TimeZone = "UTC" });
+        var r = await f.CreateClient().PutAsJsonAsync("/api/config", new { squadCap = 3 });
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var saved = store.Load();
+        Assert.Equal(3, saved.SquadCap);
+        Assert.Equal(12m, saved.SessionDailyLimitUsd);
+        Assert.Equal(340m, saved.FyrdDailyLimitUsd);
+        Assert.Equal("UTC", saved.TimeZone);
+    }
+
+    [Fact]
+    public async Task ConfigPut_SendingSpendFields_Applies()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PutAsJsonAsync("/api/config",
+            new { squadCap = 4, sessionDailyLimitUsd = 20, fyrdDailyLimitUsd = 200, timeZone = "America/Los_Angeles" });
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var saved = f.Services.GetRequiredService<ConfigStore>().Load();
+        Assert.Equal(20m, saved.SessionDailyLimitUsd);
+        Assert.Equal("America/Los_Angeles", saved.TimeZone);
+    }
+
+    private static void SpendOnLedger(FyrdFactory f, decimal cost)
+    {
+        var raw = JsonDocument.Parse($"{{\"model_usage_since_last_result\":{{\"m\":{{\"costUSD\":{cost}}}}}}}").RootElement.Clone();
+        f.Services.GetRequiredService<CostLedger>().Feed(SessionId,
+            [new SessionEvent("r1", "result", DateTimeOffset.UtcNow, null, raw)]);
     }
 }

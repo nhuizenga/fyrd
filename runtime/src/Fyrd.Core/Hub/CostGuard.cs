@@ -4,8 +4,8 @@ using Fyrd.Core.Config;
 
 namespace Fyrd.Core.Hub;
 
-/// <summary>What <see cref="CostGuard.RunAsync"/> found: a cost view per live session, the fyrd budget, and the first failed action.</summary>
-public sealed record CostPass(IReadOnlyDictionary<string, HubCostView> Views, HubBudgetView Budget, string? Error);
+/// <summary>The cost view of every live session that has cost data, and the fyrd budget.</summary>
+public sealed record CostPass(IReadOnlyDictionary<string, HubCostView> Views, HubBudgetView Budget);
 
 /// <summary>
 /// Applies the daily spend limits on each hub poll. A session at its limit is blocked, interrupted once and the
@@ -18,7 +18,7 @@ public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessi
     public static readonly IReadOnlyList<decimal> ExtendAmounts = [25m, 100m];
 
     /// <summary>Computes the views only (no interrupts, no messages, nothing saved).</summary>
-    public (Dictionary<string, HubCostView> Views, HubBudgetView Budget) Build(IReadOnlyCollection<string> liveIds)
+    public CostPass Build(IReadOnlyCollection<string> liveIds)
     {
         var cfg = config.Load();
         var controllerId = controller.CurrentId;
@@ -38,17 +38,45 @@ public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessi
                 : c.Cost >= limit ? "session"
                 : fyrdBlocked ? "fyrd"
                 : null;
-            views[id] = new HubCostView(c.Cost, limit, ratio, c.Estimated, blocked, !exempt && c.Cost >= limit * ExtendThreshold, exempt);
+            // Raising one session's limit cannot lift a fyrd-wide block, so no raise is offered then.
+            views[id] = new HubCostView(c.Cost, limit, ratio, c.Estimated, blocked,
+                !exempt && !fyrdBlocked && c.Cost >= limit * ExtendThreshold, exempt);
         }
-        return (views, new HubBudgetView(
+        return new CostPass(views, new HubBudgetView(
             ledger.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ledger.TimeZone.Id, total, cfg.FyrdDailyLimitUsd, fyrdBlocked));
     }
 
+    public enum ExtendStatus { Ok, NoData, Exempt, TooEarly, FyrdBlocked }
+
+    /// <summary>
+    /// Raises a session's limit for today. The check runs against freshly built views and the raise happens under the
+    /// same ledger lock, so two quick requests cannot both pass the 90% check.
+    /// </summary>
+    public (ExtendStatus Status, HubCostView? View) TryExtend(string id, decimal amountUsd, IReadOnlyCollection<string> liveIds) =>
+        ledger.Atomically(() =>
+        {
+            var (views, budget) = Build(liveIds);
+            if (!views.TryGetValue(id, out var v)) return (ExtendStatus.NoData, (HubCostView?)null);
+            if (v.Exempt) return (ExtendStatus.Exempt, v);
+            if (budget.FyrdBlocked) return (ExtendStatus.FyrdBlocked, v);
+            if (!v.CanExtend) return (ExtendStatus.TooEarly, v);
+            ledger.AddExtra(id, amountUsd);
+            return (ExtendStatus.Ok, Build(liveIds).Views[id]);
+        });
+
+    /// <summary>
+    /// Records today's figures, then interrupts and notifies for anything newly over a limit. Runs after the poll's
+    /// views are published, so slow HTTP calls never delay them. The endpoints' 409 checks use the published views, so
+    /// a session can still be messaged for up to one poll after it crosses its limit.
+    /// </summary>
     /// <param name="live">Every session the poll lists, with its title.</param>
     /// <param name="controllerLive">Whether the Controller was read as live this pass, so a message can reach it.</param>
-    public async Task<CostPass> RunAsync(IReadOnlyList<(string Id, string Title)> live, bool controllerLive, CancellationToken ct)
+    /// <returns>The first failure to report (retried next pass), or null.</returns>
+    public async Task<string?> EnforceAsync(
+        IReadOnlyList<(string Id, string Title)> live, CostPass pass, bool controllerLive, CancellationToken ct)
     {
-        var (views, budget) = Build(live.Select(l => l.Id).ToList());
+        var views = pass.Views;
+        var budget = pass.Budget;
         foreach (var (id, title) in live)
             if (views.TryGetValue(id, out var v)) ledger.Record(id, title, v.CostToday);
 
@@ -59,14 +87,21 @@ public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessi
         foreach (var (id, title) in live)
         {
             if (!views.TryGetValue(id, out var v) || v.Exempt || v.Blocked != "session") continue;
-            if (ledger.NotifiedAtLimit(id) == v.LimitUsd) continue;
             try
             {
-                await cloud.InterruptAsync(id, ct);
-                if (controllerLive && controllerId is not null)
-                    await cloud.SendMessageAsync(controllerId,
-                        $"Fyrd budget: session {title} ({id}) reached its {Usd(v.LimitUsd)} USD daily limit ({Usd(v.CostToday)} USD spent) " +
-                        "and was interrupted. Don't send it work today unless the owner raises its limit.", ct);
+                // Interrupt and notify are separate steps with their own markers, so a Controller that is briefly
+                // unreadable gets told later without interrupting the session again.
+                if (ledger.InterruptedAtLimit(id) != v.LimitUsd)
+                {
+                    await cloud.InterruptAsync(id, ct);
+                    ledger.SetInterrupted(id, v.LimitUsd);
+                }
+                if (ledger.NotifiedAtLimit(id) == v.LimitUsd) continue;
+                if (controllerId is null) { ledger.SetNotified(id, v.LimitUsd); continue; } // nobody to tell
+                if (!controllerLive) continue; // a Controller exists but could not be read: tell it next pass
+                await cloud.SendMessageAsync(controllerId,
+                    $"Fyrd budget: session {title} ({id}) reached its {Usd(v.LimitUsd)} USD daily limit ({Usd(v.CostToday)} USD spent) " +
+                    "and was interrupted. Don't send it work today unless the owner raises its limit.", ct);
                 ledger.SetNotified(id, v.LimitUsd);
             }
             catch (Exception e) when (IsRetryable(e, ct))
@@ -92,7 +127,8 @@ public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessi
         }
 
         ledger.Flush();
-        return new CostPass(views, budget, error);
+        if (ledger.SaveError is { } save) error ??= $"budget: could not save costs.json: {save}";
+        return error;
     }
 
     private static string Usd(decimal v) => v.ToString("0.00", CultureInfo.InvariantCulture);

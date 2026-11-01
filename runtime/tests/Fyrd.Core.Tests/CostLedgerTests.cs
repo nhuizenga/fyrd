@@ -161,4 +161,51 @@ public sealed class CostLedgerTests : IDisposable
         var ledger = new CostLedger(_home.Paths, new ConfigStore(_home.Paths), _time);
         Assert.Equal(TimeZoneInfo.Local.Id, ledger.TimeZone.Id);
     }
+
+    [Fact]
+    public void CostlessResults_WithLargeCumulative_ChargeNothingToday()
+    {
+        var ledger = Make();
+        ledger.Feed("s1", [Result("a", "2026-11-01T01:00:00Z", "{\"type\":\"result\"}"),
+                           Result("b", "2026-11-01T02:00:00Z", "{\"type\":\"result\"}")]);
+        ledger.Observe("s1", Usage(180m)); // lifetime spend, none of it attributable to today
+        Assert.Equal(0m, ledger.TodayCost("s1").Cost);
+
+        ledger.Observe("s1", Usage(181.5m)); // a turn in progress still shows
+        Assert.Equal(1.5m, ledger.TodayCost("s1").Cost);
+
+        _time.Advance(TimeSpan.FromDays(1)); // and the old gap is not charged again tomorrow
+        Assert.Equal(1.5m, ledger.TodayCost("s1").Cost); // in-flight carries until its result arrives
+        ledger.Observe("s1", Usage(181.5m));
+        Assert.Equal(1.5m, ledger.TodayCost("s1").Cost);
+    }
+
+    [Fact]
+    public void LargeUnexplainedGap_AtFirstSight_IsHistory()
+    {
+        var ledger = Make();
+        ledger.Observe("s1", Usage(300m)); // no results seen at all, far more than one turn
+        Assert.Equal(0m, ledger.TodayCost("s1").Cost);
+        ledger.Observe("s1", Usage(302m));
+        Assert.Equal(2m, ledger.TodayCost("s1").Cost);
+    }
+
+    [Fact]
+    public void NewSession_FirstTurnInFlight_IsCounted()
+    {
+        var ledger = Make();
+        ledger.Observe("s1", Usage(0.8m));
+        var c = ledger.TodayCost("s1");
+        Assert.Equal(0.8m, c.Cost);
+        Assert.True(c.Estimated);
+    }
+
+    [Fact]
+    public void CorruptCostsFile_IsKeptAsBak_AndStartsEmpty()
+    {
+        File.WriteAllText(Path.Combine(_home.Paths.HubDir, "costs.json"), "{not json");
+        var ledger = Make();
+        Assert.Equal(0m, ledger.ExtraUsd("s1"));
+        Assert.Equal("{not json", File.ReadAllText(Path.Combine(_home.Paths.HubDir, "costs.json.bak")));
+    }
 }
