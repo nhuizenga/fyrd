@@ -7,11 +7,12 @@ namespace Fyrd.Core.Hub;
 /// <summary>
 /// One hub poll pass: captures <c>fyrd-remember</c> blocks from hub sessions, finds pending <c>AskUserQuestion</c>
 /// items, publishes the session list to <see cref="HubState"/>, and posts memory updates to the Controller.
+/// A peasant's <c>scope: shared</c> block goes to <see cref="PendingMemory"/> instead of shared memory.
 /// Passes must run sequentially (the per-session windows and the cursor file are not locked).
 /// </summary>
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
-    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard)
+    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard, PendingMemory pending)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -215,11 +216,19 @@ public sealed partial class HubRunner(
             var added = false;
             foreach (var d in RememberBlock.Parse(e.Text))
             {
+                var at = e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt;
+                if (d.Scope == "shared" && !isController)
+                {
+                    // A peasant's shared memory reaches every session, so it waits for the owner's approval.
+                    pending.Add(d.Text, source, s.Id, at);
+                    added = true;
+                    continue;
+                }
                 string? scope = d.Scope == "shared" || isController ? HubMemory.Shared
                     : role is not null && role != HubMemory.Shared && ScopeRegex().IsMatch(role) ? role
                     : null;
                 if (scope is null) continue;
-                memory.Add(scope, d.Text, source, e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt);
+                memory.Add(scope, d.Text, source, at);
                 added = true;
             }
             if (added && e.Uuid.Length > 0)
