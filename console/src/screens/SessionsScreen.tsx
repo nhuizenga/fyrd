@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Button, Chip, Link, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
+import { Alert, Button, Chip, Icon, Link, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
+import EnterIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_return.svg?react";
+import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_upward.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
@@ -13,13 +15,47 @@ import { fullTime, relativeTime } from "../time";
 import { useTranscript } from "../useTranscript";
 import type { ScreenProps } from "./ScreenProps";
 
+const DRAFT_KEY = (id: string) => `fyrd.draft.${id}`;
+const COMPOSER_KEY = "fyrd.composerHeight";
+const COMPOSER_MIN = 72;
+const COMPOSER_MAX = 480;
+const COMPOSER_DEFAULT = 96;
+
+const readStored = (key: string): string | null => {
+  try { return localStorage.getItem(key); } catch { return null; }
+};
+const writeStored = (key: string, value: string) => {
+  try {
+    if (value === "") localStorage.removeItem(key); else localStorage.setItem(key, value);
+  } catch { /* storage unavailable: the draft just won't outlive the page */ }
+};
+
+const repoName = (repo: string) => repo.split("/").pop() || repo;
+const prLabel = (url: string) => (/\/pull\/(\d+)/.exec(url)?.[1] ? `#${/\/pull\/(\d+)/.exec(url)![1]}` : url);
+
 /** How close to the bottom (px) still counts as "following" the thread. */
 const FOLLOW_SLACK = 48;
 
 export default function SessionsScreen({ state, onChanged, routeId }: ScreenProps) {
   const [search, setSearch] = useState("");
   const selectedId = routeId ?? null;
-  const [draft, setDraft] = useState("");
+  // Unsent text is kept per session (and in localStorage), so each session's box is its own.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draft = selectedId ? drafts[selectedId] ?? readStored(DRAFT_KEY(selectedId)) ?? "" : "";
+  const setDraft = (value: string) => {
+    if (!selectedId) return;
+    setDrafts((d) => ({ ...d, [selectedId]: value }));
+    writeStored(DRAFT_KEY(selectedId), value);
+  };
+  const [composerHeight, setComposerHeight] = useState(() => {
+    const n = Number(readStored(COMPOSER_KEY));
+    return n >= COMPOSER_MIN && n <= COMPOSER_MAX ? n : COMPOSER_DEFAULT;
+  });
+  const resizeComposer = (h: number) => {
+    const next = Math.min(COMPOSER_MAX, Math.max(COMPOSER_MIN, Math.round(h)));
+    setComposerHeight(next);
+    writeStored(COMPOSER_KEY, String(next));
+  };
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
@@ -132,12 +168,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const send = () => {
     if (!selected || sending || draft.trim() === "") return;
     const text = draft.trim();
+    const sentTo = selected.id;
     following.current = true;
     setSending(true);
     void run(async () => {
       try {
-        await api.sendMessage(selected.id, text);
-        setDraft("");
+        await api.sendMessage(sentTo, text);
+        setDrafts((d) => ({ ...d, [sentTo]: "" }));
+        writeStored(DRAFT_KEY(sentTo), "");
       } finally {
         setSending(false);
       }
@@ -158,6 +196,12 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
           <Text size="small" subdued>{isController(s) ? "Controller" : s.role}</Text>
+          {(s.repo || s.pullRequests.length > 0) && (
+            <span className="session-row-chips">
+              {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
+              {s.pullRequests.map((u) => <Chip key={u} label={prLabel(u)} size="small" title={u} />)}
+            </span>
+          )}
         </span>
       </button>
       {actions && <span className="session-item-actions">{actions}</span>}
@@ -270,21 +314,58 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 )}
                 </div>
               </div>
+              <div
+                className="composer-divider"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize message box"
+                aria-valuemin={COMPOSER_MIN}
+                aria-valuemax={COMPOSER_MAX}
+                aria-valuenow={composerHeight}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowUp") { e.preventDefault(); resizeComposer(composerHeight + 24); }
+                  if (e.key === "ArrowDown") { e.preventDefault(); resizeComposer(composerHeight - 24); }
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  const startY = e.clientY;
+                  const startH = composerHeight;
+                  const move = (ev: PointerEvent) => resizeComposer(startH + (startY - ev.clientY));
+                  const up = () => {
+                    window.removeEventListener("pointermove", move);
+                    window.removeEventListener("pointerup", up);
+                  };
+                  window.addEventListener("pointermove", move);
+                  window.addEventListener("pointerup", up);
+                }}
+              />
               <div className="composer">
-                <Textarea
-                  label="Message this session"
-                  hint="Enter to send, Shift+Enter for a new line"
-                  rows={2}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      send();
-                    }
-                  }}
-                />
-                <Button appearance="primary" disabled={sending || draft.trim() === ""} onClick={send}>Send</Button>
+                <div className="composer-input" style={{ height: composerHeight }}>
+                  <Textarea
+                    label="Message this session"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        send();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="composer-actions">
+                  <span className="composer-hints">
+                    <span className="composer-hint" role="img" aria-label="Enter to send" title="Enter to send">
+                      <Icon svg={EnterIcon} size="small" color="var(--a2-foreground-color-subdued)" />
+                    </span>
+                    <span className="composer-hint" role="img" aria-label="Shift+Enter for a new line" title="Shift+Enter for a new line">
+                      <Icon svg={ShiftIcon} size="small" color="var(--a2-foreground-color-subdued)" />
+                      <Icon svg={EnterIcon} size="small" color="var(--a2-foreground-color-subdued)" />
+                    </span>
+                  </span>
+                  <Button appearance="primary" disabled={sending || draft.trim() === ""} onClick={send}>Send</Button>
+                </div>
               </div>
             </>
           )}
@@ -312,7 +393,13 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 {selected.tags.length === 0 ? <Text subdued size="small">None</Text> : selected.tags.map((t) => <Chip key={t} label={t} size="small" />)}
               </div>
               <Text variant="headline" el="h4" size="small">Pull requests</Text>
-              <Text subdued>—</Text>
+              {selected.pullRequests.length === 0 ? <Text subdued>—</Text> : (
+                <ul className="pr-list">
+                  {selected.pullRequests.map((u) => (
+                    <li key={u}><Link href={u} target="_blank" rel="noopener noreferrer">{prLabel(u)}</Link></li>
+                  ))}
+                </ul>
+              )}
             </>
           )}
         </aside>

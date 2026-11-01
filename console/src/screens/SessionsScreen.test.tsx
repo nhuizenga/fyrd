@@ -368,3 +368,89 @@ it("hovering a message offers copy to clipboard", async () => {
   expect(writeText).toHaveBeenCalledWith("Copy **me**");
   expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
 });
+
+const PR12 = "https://github.com/acme/widgets/pull/12";
+const withRepo = () =>
+  hubState({
+    sessions: [
+      session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12] }),
+      session({ id: "b", title: "beta-2" }),
+    ],
+  });
+
+it("an ephemeral progress bubble is still there after switching sessions and coming back", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Running the tests" }));
+  await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
+  expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  expect(screen.getByText("Running the tests")).toBeInTheDocument();
+});
+
+it("session rows show a repo chip and PR chips", () => {
+  renderScreen(withRepo());
+  const row = screen.getByRole("button", { name: /alpha-1/ });
+  expect(within(row).getByText("widgets")).toBeInTheDocument();
+  expect(within(row).getByText("#12")).toBeInTheDocument();
+  const bare = screen.getByRole("button", { name: /beta-2/ });
+  expect(within(bare).queryByText("widgets")).not.toBeInTheDocument();
+});
+
+it("session details list the pull requests as links", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  expect(within(details).getByRole("link", { name: "#12" })).toHaveAttribute("href", PR12);
+});
+
+it("the message draft belongs to each session and survives switching and remounting", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.type(screen.getByLabelText("Message this session"), "for alpha");
+  await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
+  expect(screen.getByLabelText("Message this session")).toHaveValue("");
+  await userEvent.type(screen.getByLabelText("Message this session"), "for beta");
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  expect(screen.getByLabelText("Message this session")).toHaveValue("for alpha");
+
+  cleanup();
+  renderScreen(withRepo());
+  expect(screen.getByLabelText("Message this session")).toHaveValue("for alpha");
+});
+
+it("a sent message clears only that session's saved draft", async () => {
+  vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.type(screen.getByLabelText("Message this session"), "go{Enter}");
+  await vi.waitFor(() => expect(screen.getByLabelText("Message this session")).toHaveValue(""));
+  cleanup();
+  renderScreen(withRepo());
+  expect(screen.getByLabelText("Message this session")).toHaveValue("");
+});
+
+it("a sliding divider resizes the message box", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  const divider = screen.getByRole("separator", { name: "Resize message box" });
+  const before = Number(divider.getAttribute("aria-valuenow"));
+  divider.focus();
+  await userEvent.keyboard("{ArrowUp}");
+  expect(Number(divider.getAttribute("aria-valuenow"))).toBeGreaterThan(before);
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+  expect(Number(divider.getAttribute("aria-valuenow"))).toBeLessThan(before);
+});
+
+it("the key hints are icons and Send sits below the message box", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "Enter to send" })).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "Shift+Enter for a new line" })).toBeInTheDocument();
+  const box = screen.getByLabelText("Message this session");
+  const send = screen.getByRole("button", { name: "Send" });
+  expect(box.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(send.closest(".composer-actions")).not.toBeNull();
+  expect(send.closest(".composer-actions")?.contains(box)).toBe(false);
+});

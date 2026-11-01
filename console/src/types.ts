@@ -21,6 +21,8 @@ export interface HubSessionView {
   createdAt: string | null;
   lastActivity: string | null;
   tags: string[];
+  /** URLs of the pull requests the session opened. */
+  pullRequests: string[];
 }
 
 export interface HubQuestion {

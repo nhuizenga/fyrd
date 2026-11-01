@@ -10,7 +10,11 @@ public sealed record HubQuestion(
 
 public sealed record HubSessionView(
     string Id, string Title, string Role, string Status, string? Repo, string? Branch,
-    DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags);
+    DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags)
+{
+    /// <summary>URLs of the pull requests the session opened.</summary>
+    public IReadOnlyList<string> PullRequests { get; init; } = [];
+}
 
 /// <summary>Result of recording one answer: the question is gone, siblings are still unanswered, or the request is complete.</summary>
 public sealed record AnswerProgress(bool Pending, int WaitingFor, HubQuestion? Question, IReadOnlyDictionary<string, string>? Answers)
