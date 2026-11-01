@@ -86,7 +86,8 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 
 /* Message bubbles: agent on the left (room on the right), owner on the right (room on the left). */
 .msg { position: relative; border-radius: 6px; padding: 3px 6px; box-sizing: border-box; overflow-wrap: anywhere; }
-.msg-progress { display: flex; align-items: center; gap: 8px; color: var(--a2-foreground-color-subdued); }
+.msg-progress { display: flex; flex-direction: column; gap: 6px; }
+.msg-progress-head { display: flex; align-items: center; gap: 8px; color: var(--a2-foreground-color-subdued); }
 .msg-agent { align-self: stretch; margin-right: 4%; background: var(--a2-background-color-secondary); }
 .msg-user { align-self: stretch; margin-left: 4%; background: var(--a2-background-color-primary-subdued); }
 /* Copy shows on hover (and keyboard focus) in the bubble's top-right corner. */

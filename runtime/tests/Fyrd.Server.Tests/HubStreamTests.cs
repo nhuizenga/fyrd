@@ -78,23 +78,36 @@ public class HubStreamTests
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
+    private static StreamedEvent Ephemeral(string payload)
+    {
+        var raw = JsonDocument.Parse(payload).RootElement.Clone();
+        return new StreamedEvent(0, new SessionEvent("", raw.GetProperty("type").GetString()!, DateTimeOffset.UnixEpoch, null, raw), Ephemeral: true);
+    }
+
     [Fact]
-    public async Task Stream_RelaysEphemeralEventsAsProgressFrames_WithoutId()
+    public async Task Stream_RelaysEphemeralEventsAsProgressFrames_WithoutId_AndClearsThemOnSavedEvents()
     {
         using var f = Hub();
-        var raw = JsonDocument.Parse("""{"type":"system","subtype":"task_summary","summary":"Running the tests"}""").RootElement.Clone();
         f.Cloud.Streams[SessionId] =
         [
+            Ephemeral("""{"type":"system","subtype":"task_summary","detail":"Running the tests"}"""),
+            Ephemeral("""{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}}"""),
             Event(1, """{"type":"user","message":{"content":"Build it"}}"""),
-            new StreamedEvent(0, new SessionEvent("", "system", DateTimeOffset.UnixEpoch, null, raw), Ephemeral: true),
+            Event(2, """{"type":"system","subtype":"init"}"""),
         ];
-        var (frames, _, _) = await ReadFrames(f.CreateClient(), 2);
+        var (frames, _, _) = await ReadFrames(f.CreateClient(), 4);
 
-        Assert.Equal(["item", "progress"], frames.Select(fr => fr.Event));
+        Assert.Equal(["progress", "progress", "item", "progress"], frames.Select(fr => fr.Event));
+        Assert.Null(frames[0].Id);
         Assert.Null(frames[1].Id);
-        var p = JsonDocument.Parse(frames[1].Data!).RootElement;
-        Assert.Equal("progress", p.GetProperty("kind").GetString());
-        Assert.Equal("Running the tests", p.GetProperty("text").GetString());
+        var first = JsonDocument.Parse(frames[0].Data!).RootElement;
+        Assert.Equal("progress", first.GetProperty("kind").GetString());
+        Assert.Equal("Running the tests", first.GetProperty("status").GetString());
+        var second = JsonDocument.Parse(frames[1].Data!).RootElement;
+        Assert.Equal("Hello", second.GetProperty("text").GetString());
+        // The saved user message clears the live line (and is sent before the clearing frame).
+        var cleared = JsonDocument.Parse(frames[3].Data!).RootElement;
+        Assert.Equal("", cleared.GetProperty("text").GetString());
     }
 
     [Fact]

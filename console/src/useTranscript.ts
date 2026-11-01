@@ -38,8 +38,11 @@ export function useTranscript(sessionId: string | null): Transcript {
     });
     source.addEventListener("progress", (e) => {
       const progress = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
-      lastProgress.set(sessionId, progress);
-      setTranscript((t) => ({ ...t, progress }));
+      // An empty frame means the turn moved on (or ended): nothing is in progress any more.
+      const idle = !progress.status && !progress.text;
+      if (idle) lastProgress.delete(sessionId);
+      else lastProgress.set(sessionId, progress);
+      setTranscript((t) => ({ ...t, progress: idle ? null : progress }));
     });
     source.addEventListener("fault", (e) => {
       const detail = (JSON.parse((e as MessageEvent<string>).data) as { detail?: string }).detail ?? "Stream error";

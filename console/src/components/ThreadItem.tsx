@@ -11,8 +11,11 @@ export default function ThreadItem({ item, pending, onChanged }: {
   if (item.kind === "progress") {
     return (
       <div className="msg msg-agent msg-progress">
-        <Spinner size="small" role="status" aria-label="In progress" />
-        <span>{item.text}</span>
+        <div className="msg-progress-head">
+          <Spinner size="small" role="status" aria-label="In progress" />
+          <span>{item.status || "Working…"}</span>
+        </div>
+        {item.text && <Markdown text={item.text} />}
       </div>
     );
   }

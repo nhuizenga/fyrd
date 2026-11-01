@@ -403,25 +403,30 @@ public sealed class CloudSessionClientTests : IDisposable
     }
 
     [Fact]
-    public async Task StreamEvents_YieldsProgressEphemeralEvents_FlaggedAndUnsequenced()
+    public async Task StreamEvents_YieldsOnlyTheEphemeralEventsThatShowProgress()
     {
-        const string sse = """
-            event: ephemeral_event
-            data: {"event_type":"system","payload":{"type":"system","subtype":"task_summary","summary":"Running the tests"},"timestamp":"2026-11-01T10:00:02Z"}
-
-            event: ephemeral_event
-            data: {"event_type":"system","payload":{"type":"system","subtype":"hook_started"}}
-
-            event: ephemeral_event
-            data: {"event_type":"stream_event","payload":{"type":"stream_event"}}
-            """;
+        static string Frame(string payload) => $"event: ephemeral_event\ndata: {{\"event_type\":\"x\",\"payload\":{payload},\"timestamp\":\"2026-11-01T10:00:02Z\"}}\n\n";
+        var sse = string.Concat(
+            Frame("""{"type":"system","subtype":"task_summary","detail":"Running grep"}"""),
+            Frame("""{"type":"stream_event","event":{"type":"message_start","message":{"content":[]}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Read"}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}"""),
+            Frame("""{"type":"system","subtype":"post_turn_summary","status_detail":"done"}"""),
+            // Noise, all dropped:
+            Frame("""{"type":"system","subtype":"status","status":"requesting"}"""),
+            Frame("""{"type":"system","subtype":"thinking_tokens","estimated_tokens":5}"""),
+            Frame("""{"type":"system","subtype":"hook_started"}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{"}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"x"}}}"""),
+            Frame("""{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"""),
+            Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_sub","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"from a subagent"}}}"""));
         var events = await Drain(Client(new FakeHandler(HttpStatusCode.OK, sse)).StreamEventsAsync("session_01abc", null));
 
-        var e = Assert.Single(events);
-        Assert.True(e.Ephemeral);
-        Assert.Equal(0, e.Sequence);
-        Assert.Equal("system", e.Event.Type);
-        Assert.Equal("Running the tests", e.Event.Raw.GetProperty("summary").GetString());
+        Assert.Equal(5, events.Count);
+        Assert.All(events, e => { Assert.True(e.Ephemeral); Assert.Equal(0, e.Sequence); });
+        Assert.Equal(DateTimeOffset.Parse("2026-11-01T10:00:02Z"), events[0].Event.CreatedAt);
+        Assert.Equal("Running grep", events[0].Event.Raw.GetProperty("detail").GetString());
+        Assert.Equal("Hello", events[3].Event.Raw.GetProperty("event").GetProperty("delta").GetProperty("text").GetString());
     }
 
     [Fact]
