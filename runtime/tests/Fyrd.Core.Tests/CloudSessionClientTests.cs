@@ -322,6 +322,57 @@ public sealed class CloudSessionClientTests : IDisposable
     }
 
     [Fact]
+    public async Task StreamEvents_LogsEveryRawEphemeralPayload_ToTheLogFile()
+    {
+        const string sse = """
+            event: ephemeral_event
+            data: {"event_type":"stream_event","payload":{"type":"stream_event","n":1}}
+
+            event: client_event
+            id: 5
+            data: {"event_id":"ev_5","sequence_num":5,"payload":{"type":"user","message":{"content":"hi"}}}
+
+            event: ephemeral_event
+            data: {"event_type":"system","payload":{"type":"system","subtype":"hook_started"}}
+            """;
+        var log = Path.Combine(Path.GetTempPath(), $"fyrd-eph-{Guid.NewGuid():N}", "ephemeral.jsonl");
+        try
+        {
+            var client = new CloudSessionClient(new HttpClient(new FakeHandler(HttpStatusCode.OK, sse)), new ClaudeCredentials(_home), log);
+            await Drain(client.StreamEventsAsync("session_01abc", null));
+
+            var lines = File.ReadAllLines(log).Select(l => System.Text.Json.JsonDocument.Parse(l).RootElement).ToList();
+            Assert.Equal(2, lines.Count);
+            Assert.All(lines, l => Assert.Equal("session_01abc", l.GetProperty("session").GetString()));
+            Assert.All(lines, l => Assert.True(l.TryGetProperty("at", out _)));
+            Assert.Equal(1, lines[0].GetProperty("data").GetProperty("payload").GetProperty("n").GetInt32());
+            Assert.Equal("hook_started", lines[1].GetProperty("data").GetProperty("payload").GetProperty("subtype").GetString());
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(log)!, true); }
+    }
+
+    [Fact]
+    public async Task StreamEvents_UnwritableEphemeralLog_DoesNotBreakTheStream()
+    {
+        const string sse = """
+            event: ephemeral_event
+            data: {"payload":{"type":"stream_event"}}
+
+            event: client_event
+            id: 5
+            data: {"event_id":"ev_5","sequence_num":5,"payload":{"type":"user","message":{"content":"hi"}}}
+            """;
+        var blocked = Path.Combine(Path.GetTempPath(), $"fyrd-eph-{Guid.NewGuid():N}");
+        File.WriteAllText(blocked, "a file, not a directory");
+        try
+        {
+            var client = new CloudSessionClient(new HttpClient(new FakeHandler(HttpStatusCode.OK, sse)), new ClaudeCredentials(_home), Path.Combine(blocked, "x.jsonl"));
+            Assert.Single(await Drain(client.StreamEventsAsync("session_01abc", null)));
+        }
+        finally { File.Delete(blocked); }
+    }
+
+    [Fact]
     public async Task StreamEvents_YieldsProgressEphemeralEvents_FlaggedAndUnsequenced()
     {
         const string sse = """

@@ -20,10 +20,40 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     private const int MaxListPages = 20;
 
-    public CloudSessionClient(HttpClient http, ClaudeCredentials credentials)
+    // TEMPORARY: raw ephemeral_event payload sampling (JSON lines), to learn what they carry. Remove once collected.
+    private readonly string? _ephemeralLog;
+    private readonly object _ephemeralLogLock = new();
+
+    public CloudSessionClient(HttpClient http, ClaudeCredentials credentials, string? ephemeralLogPath = null)
     {
         _http = http;
         _credentials = credentials;
+        _ephemeralLog = ephemeralLogPath;
+    }
+
+    /// <summary>TEMPORARY. Appends one raw ephemeral frame as <c>{at, session, data}</c>; logging never breaks the stream.</summary>
+    private void LogEphemeral(string sessionId, string data)
+    {
+        if (_ephemeralLog is null) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            var line = new JsonObject
+            {
+                ["at"] = DateTimeOffset.UtcNow.ToString("o"),
+                ["session"] = sessionId,
+                ["data"] = JsonNode.Parse(doc.RootElement.GetRawText()),
+            }.ToJsonString();
+            lock (_ephemeralLogLock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_ephemeralLog))!);
+                File.AppendAllText(_ephemeralLog, line + "\n");
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
+        {
+            // Sampling is best effort.
+        }
     }
 
     [GeneratedRegex("^session_[A-Za-z0-9]+$")]
@@ -216,6 +246,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
             var line = await reader.ReadLineAsync(ct);
             if (line is null || line.Length == 0)
             {
+                if (data.Length > 0 && name == "ephemeral_event") LogEphemeral(sessionId, data.ToString());
                 if (data.Length > 0 && name == "client_event" && ParseStreamFrame(data.ToString(), id) is { } ev)
                     yield return ev;
                 else if (data.Length > 0 && name == "ephemeral_event" && ParseEphemeralFrame(data.ToString()) is { } progress)
