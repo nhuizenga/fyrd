@@ -206,3 +206,17 @@ it("renaming a persona to another persona's name is rejected", async () => {
   expect(await screen.findByText("A persona with this name already exists.")).toBeInTheDocument();
   expect(api.savePersona).not.toHaveBeenCalled();
 });
+
+it("a persona with a newer default shows a chip and can be reset to default", async () => {
+  vi.mocked(api.getPersonas).mockResolvedValue([
+    personas[0],
+    { ...personas[1], definition: "Mine", updateAvailable: true },
+  ]);
+  vi.mocked(api.resetPersona).mockResolvedValue({ ...personas[1], definition: "Build better things." });
+  await renderSettings();
+  expect(screen.getByText("Update available")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
+  await userEvent.click(screen.getByRole("button", { name: "Reset to default" }));
+  expect(api.resetPersona).toHaveBeenCalledWith("builder");
+  expect(await screen.findByDisplayValue("Build better things.")).toBeInTheDocument();
+});

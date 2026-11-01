@@ -95,6 +95,8 @@ export interface HubPersona {
   model: string;
   definition: string;
   locked: boolean;
+  seedHash?: string | null;
+  updateAvailable?: boolean;
 }
 
 export interface MemoryEntry {

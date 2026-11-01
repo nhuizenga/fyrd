@@ -35,6 +35,94 @@ public sealed class HubPersonasTests : IDisposable
         Assert.Equal("Edited", Make().List().Single(p => p.Id == "builder").Definition);
     }
 
+    private void Seed(string id, string name, string body, bool locked = false) =>
+        File.WriteAllText(Path.Combine(_seeds, id + ".md"), $"---\nname: {name}\nmodel: claude-sonnet-5-5\nlocked: {(locked ? "true" : "false")}\n---\n{body}");
+
+    [Fact]
+    public void Hash_IsSha256OfNameModelDefinition() =>
+        Assert.Equal("22319754cb8179c5f39718c645c51fbf82767867aedf0db954c8d94497577495", HubPersonas.Hash("A", "m", "d"));
+
+    [Fact]
+    public void UneditedPersona_UpdatesToNewSeed_AndSeedHashAdvances()
+    {
+        var first = Make().Get("builder")!;
+        Assert.Equal(HubPersonas.Hash(first), first.SeedHash);
+        Seed("builder", "Builder", "Build better things.");
+        var after = Make().Get("builder")!;
+        Assert.Equal("Build better things.", after.Definition);
+        Assert.Equal(HubPersonas.Hash(after), after.SeedHash);
+        Assert.False(after.UpdateAvailable);
+    }
+
+    [Fact]
+    public void EditedPersona_IsLeftAlone_AndFlagged_ThenResetClearsIt()
+    {
+        var store = Make();
+        store.Save(store.Get("builder")! with { Definition = "Mine" });
+        Seed("builder", "Builder", "Build better things.");
+        var again = Make();
+        var p = again.Get("builder")!;
+        Assert.Equal("Mine", p.Definition);
+        Assert.True(p.UpdateAvailable);
+        var reset = again.Reset("builder");
+        Assert.Equal("Build better things.", reset.Definition);
+        Assert.False(again.Get("builder")!.UpdateAvailable);
+    }
+
+    [Fact]
+    public void EditedPersona_WithUnchangedSeed_IsNotFlagged()
+    {
+        var store = Make();
+        store.Save(store.Get("builder")! with { Definition = "Mine" });
+        Assert.False(Make().Get("builder")!.UpdateAvailable);
+    }
+
+    [Fact]
+    public void LegacyPersona_InHistory_IsUpdated_NotInHistory_IsFlagged()
+    {
+        Directory.CreateDirectory(_home.Paths.HubPersonasDir);
+        var oldBuilder = new HubPersona("builder", "Builder", "claude-sonnet-5-5", "Old text.", false);
+        var oldScout = new HubPersona("scout", "Scout", "claude-sonnet-5-5", "Custom scout.", false);
+        foreach (var p in new[] { oldBuilder, oldScout })
+            File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, p.Id + ".json"), System.Text.Json.JsonSerializer.Serialize(p, Json.Options));
+        File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, ".seeded"), "builder\ncontroller\nscout\n");
+        Seed("scout", "Scout", "New scout.");
+        File.WriteAllText(Path.Combine(_seeds, "seed-history.json"), $"{{\"builder\":[\"{HubPersonas.Hash(oldBuilder)}\"]}}");
+        var store = Make();
+        Assert.Equal("Build things.", store.Get("builder")!.Definition);
+        var scout = store.Get("scout")!;
+        Assert.Equal("Custom scout.", scout.Definition);
+        Assert.True(scout.UpdateAvailable);
+    }
+
+    [Fact]
+    public void DeletedPersona_StaysDeleted()
+    {
+        var store = Make();
+        store.List();
+        store.Delete("builder");
+        Assert.Null(Make().Get("builder"));
+    }
+
+    [Fact]
+    public void LockedPersona_KeepsItsName_WhenUpdated()
+    {
+        Make().List();
+        Seed("controller", "Controller", "Control better.", locked: true);
+        var c = Make().Get("controller")!;
+        Assert.Equal("Controller", c.Name);
+        Assert.Equal("Control better.", c.Definition);
+        Assert.True(c.Locked);
+    }
+
+    [Fact]
+    public void Reset_WithoutSeed_Throws()
+    {
+        var store = Make();
+        store.Save(new HubPersona("", "Scout", "claude-haiku-5-5", "d", false));
+        Assert.Throws<InvalidOperationException>(() => store.Reset("scout"));
+    }
+
     [Fact]
     public void Delete_Locked_Throws()
     {

@@ -430,6 +430,23 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task Persona_Reset_RestoresSeed_AndUnknownIs404()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var seed = (await ReadJson(await c.GetAsync("/api/hub/personas/builder"))).GetProperty("definition").GetString();
+        await c.PutAsJsonAsync("/api/hub/personas/builder",
+            new { id = "builder", name = "Builder", model = "claude-sonnet-5-5", definition = "Mine", locked = false });
+        Assert.Equal("Mine", (await ReadJson(await c.GetAsync("/api/hub/personas/builder"))).GetProperty("definition").GetString());
+        var reset = await c.PostAsync("/api/hub/personas/builder/reset", null);
+        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
+        var body = await ReadJson(reset);
+        Assert.Equal(seed, body.GetProperty("definition").GetString());
+        Assert.False(body.GetProperty("updateAvailable").GetBoolean());
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/hub/personas/nope/reset", null)).StatusCode);
+    }
+
+    [Fact]
     public async Task Persona_PutGetDelete()
     {
         using var f = new FyrdFactory();
