@@ -288,6 +288,25 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task Archive_HubSession_ArchivesIt_204()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var r = await f.CreateClient().PostAsync($"/api/hub/sessions/{SessionId}/archive", null);
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([SessionId], f.Cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Archive_NotHubSession_404_NothingArchived()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PostAsync("/api/hub/sessions/session_other/archive", null);
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+        Assert.Empty(f.Cloud.Archived);
+    }
+
+    [Fact]
     public async Task Persona_DeleteController_409()
     {
         using var f = new FyrdFactory();

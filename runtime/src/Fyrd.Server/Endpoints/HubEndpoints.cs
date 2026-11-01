@@ -100,6 +100,15 @@ internal static class HubEndpoints
                 return Results.NoContent();
             })));
 
+        // The console's trash button: archives the session; the next poll drops it from the list.
+        group.MapPost("/sessions/{id}/archive", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+            InHub(id, state, () => Cloud(async () =>
+            {
+                await cloud.ArchiveAsync(id, ct);
+                state.RequestPoll();
+                return Results.NoContent();
+            })));
+
         group.MapPost("/sessions/{id}/resume", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
             InHub(id, state, () => Cloud(async () =>
             {

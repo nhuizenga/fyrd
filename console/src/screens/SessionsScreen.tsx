@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { Alert, Button, Chip, Icon, Link, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import EnterIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_return.svg?react";
 import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_upward.svg?react";
+import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
@@ -60,6 +61,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState<HubSessionView | null>(null);
   const [adoptId, setAdoptId] = useState("");
   const transcript = useTranscript(selectedId);
   const logRef = useRef<HTMLDivElement>(null);
@@ -158,6 +160,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     });
 
+  const archiveSession = (s: HubSessionView) =>
+    run(async () => {
+      setConfirmArchive(null);
+      await api.archiveSession(s.id);
+      if (s.id === selectedId) navigate("sessions");
+      await onChanged();
+    });
+
   const replaceController = () =>
     run(async () => {
       setConfirmReplace(false);
@@ -253,7 +263,20 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
           )}
           <SearchField aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(e) => setSearch(e.target.value)} onClear={() => setSearch("")} />
           {sessions.length === 0 && <Text subdued size="small">{q ? "No sessions match that search." : "No other sessions."}</Text>}
-          <ul className="session-list pane-scroll">{sessions.map((s) => row(s))}</ul>
+          {confirmArchive && (
+            <Alert status="warning" title={`Archive ${confirmArchive.title}?`}>
+              <Text>This archives the session on claude.ai and removes it from this list.</Text>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button appearance="primary" size="small" onClick={() => archiveSession(confirmArchive)}>Archive session</Button>
+                <Button appearance="ghost" size="small" onClick={() => setConfirmArchive(null)}>Cancel</Button>
+              </div>
+            </Alert>
+          )}
+          <ul className="session-list pane-scroll">
+            {sessions.map((s) => row(s, (
+              <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
+            )))}
+          </ul>
         </aside>
         <section className="pane pane-thread" aria-label="Conversation">
           {!selected ? (
