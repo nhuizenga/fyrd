@@ -128,14 +128,14 @@ it("an ephemeral progress frame shows as an in-progress agent bubble until the n
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({ text: "Starting" }));
-  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Running the tests" }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Running the tests" }));
   const bubble = screen.getByText("Running the tests").closest(".msg");
   expect(bubble).toHaveClass("msg-agent");
   expect(bubble).toHaveClass("msg-progress");
   expect(within(bubble as HTMLElement).getByRole("status")).toBeInTheDocument();
   expect(screen.getByRole("log").lastElementChild?.lastElementChild).toBe(bubble);
 
-  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Writing the fix" }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Writing the fix" }));
   expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
   expect(screen.getByText("Writing the fix")).toBeInTheDocument();
 
@@ -487,7 +487,7 @@ const withRepo = () =>
 it("an ephemeral progress bubble is still there after switching sessions and coming back", async () => {
   renderScreen(withRepo());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
-  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Running the tests" }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Running the tests" }));
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
   expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
@@ -647,4 +647,37 @@ it("a PR action failure shows in an alert", async () => {
   const { details } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
   await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("gh failed");
+});
+
+const progress = (o: { text?: string; status?: string | null }) =>
+  item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: null, ...o });
+
+it("the progress bubble shows the streamed reply as markdown under the status line", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", progress({ status: "Using Read", text: "Looking at **the parser**" }));
+  const bubble = screen.getByText("Using Read").closest(".msg") as HTMLElement;
+  expect(bubble).toHaveClass("msg-progress");
+  expect(within(bubble).getByRole("status")).toBeInTheDocument();
+  expect(within(bubble).getByText("the parser").tagName).toBe("STRONG");
+});
+
+it("text with no status falls back to a generic working label", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", progress({ text: "Partial reply" }));
+  expect(screen.getByText("Working…")).toBeInTheDocument();
+  expect(screen.getByText("Partial reply")).toBeInTheDocument();
+});
+
+it("an empty progress frame clears the bubble, and it stays cleared after switching back", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", progress({ status: "Using Read" }));
+  FakeEventSource.latest().emit("progress", progress({}));
+  expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
 });

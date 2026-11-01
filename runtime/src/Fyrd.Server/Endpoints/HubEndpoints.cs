@@ -312,6 +312,9 @@ internal static class HubEndpoints
             finally { gate.Release(); }
         }
 
+        var progress = new ProgressTracker();
+        string Progress(TranscriptItem item) => $"event: progress\ndata: {JsonSerializer.Serialize(item, options)}\n\n";
+
         try
         {
             await Write(": connected\n\n");
@@ -335,14 +338,15 @@ internal static class HubEndpoints
                             if (e.Ephemeral)
                             {
                                 // Live-only: no id (so EventSource's resume point is untouched) and never deduplicated.
-                                foreach (var item in HubTranscript.Map(e))
-                                    await Write($"event: progress\ndata: {JsonSerializer.Serialize(item, options)}\n\n");
+                                if (progress.Apply(e) is { } live) await Write(Progress(live));
                                 continue;
                             }
                             if (last is { } seen && e.Sequence <= seen) continue;
                             last = e.Sequence;
                             foreach (var item in HubTranscript.Map(e))
                                 await Write($"id: {item.Seq}\nevent: item\ndata: {JsonSerializer.Serialize(item, options)}\n\n");
+                            // A saved event (a message, a turn result) supersedes whatever was streaming.
+                            if (progress.Reset(e.Event.CreatedAt) is { } cleared) await Write(Progress(cleared));
                         }
                         delay = ReopenDelay;
                     }
