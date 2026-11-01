@@ -424,6 +424,23 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_SessionView_ListsPullRequestsFromOutcomes()
+    {
+        const string raw = """
+            {"session_context":{"outcomes":[{"type":"git_repository","git_info":{"repo":"acme/widgets","branches":["b"],
+              "pull_requests":[{"url":"https://github.com/acme/widgets/pull/12"},"https://github.com/acme/widgets/pull/13"],
+              "pr_url":"https://github.com/acme/widgets/pull/12"}}]}}
+            """;
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", "running", role: "builder", raw: raw), Hub("s2", "plain"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/12", "https://github.com/acme/widgets/pull/13"],
+            _state.Sessions.Single(s => s.Id == "s1").PullRequests);
+        Assert.Empty(_state.Sessions.Single(s => s.Id == "s2").PullRequests);
+    }
+
+    [Fact]
     public async Task Poll_BuildsSessionView()
     {
         const string raw = """

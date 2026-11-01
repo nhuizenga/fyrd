@@ -20,10 +20,49 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     private const int MaxListPages = 20;
 
-    public CloudSessionClient(HttpClient http, ClaudeCredentials credentials)
+    // TEMPORARY: raw ephemeral_event payload sampling (JSON lines), to learn what they carry. Remove once collected.
+    private readonly string? _ephemeralLog;
+    private readonly object _ephemeralLogLock = new();
+
+    public CloudSessionClient(HttpClient http, ClaudeCredentials credentials, string? ephemeralLogPath = null)
     {
         _http = http;
         _credentials = credentials;
+        _ephemeralLog = ephemeralLogPath;
+    }
+
+    /// <summary>
+    /// TEMPORARY. Appends one raw frame as <c>{at, session, frame, data}</c> (<c>frame</c> is <c>ephemeral_event</c>, or
+    /// <c>client_event</c> for a <c>result</c>); logging never breaks the stream.
+    /// </summary>
+    private void LogFrame(string sessionId, string frame, string data)
+    {
+        if (_ephemeralLog is null) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            // Saved frames are only sampled for turn results; every ephemeral frame is.
+            if (frame == "client_event"
+                && !(doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("payload", out var p)
+                     && Str(p, "type") == "result"))
+                return;
+            var line = new JsonObject
+            {
+                ["at"] = DateTimeOffset.UtcNow.ToString("o"),
+                ["session"] = sessionId,
+                ["frame"] = frame,
+                ["data"] = JsonNode.Parse(doc.RootElement.GetRawText()),
+            }.ToJsonString();
+            lock (_ephemeralLogLock)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_ephemeralLog))!);
+                File.AppendAllText(_ephemeralLog, line + "\n");
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
+        {
+            // Sampling is best effort.
+        }
     }
 
     [GeneratedRegex("^session_[A-Za-z0-9]+$")]
@@ -216,8 +255,11 @@ public sealed partial class CloudSessionClient : ICloudSessions
             var line = await reader.ReadLineAsync(ct);
             if (line is null || line.Length == 0)
             {
-                if (name == "client_event" && data.Length > 0 && ParseStreamFrame(data.ToString(), id) is { } ev)
+                if (data.Length > 0 && name is "ephemeral_event" or "client_event") LogFrame(sessionId, name!, data.ToString());
+                if (data.Length > 0 && name == "client_event" && ParseStreamFrame(data.ToString(), id) is { } ev)
                     yield return ev;
+                else if (data.Length > 0 && name == "ephemeral_event" && ParseEphemeralFrame(data.ToString()) is { } progress)
+                    yield return progress;
                 if (line is null) yield break;
                 name = id = null;
                 data.Clear();
@@ -259,6 +301,30 @@ public sealed partial class CloudSessionClient : ICloudSessions
             if (DateTimeOffset.TryParse(Str(root, "created_at"), out var created)) ev = ev with { CreatedAt = created };
             if (ev.Uuid.Length == 0 && Str(root, "event_id") is { } eventId) ev = ev with { Uuid = eventId };
             return new StreamedEvent(seq, ev);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// An <c>ephemeral_event</c> frame as a progress event, or null for noise (partial output, hooks) and bad JSON.
+    /// Only <c>system</c> <c>task_summary</c> and <c>status</c> events say what the agent is doing.
+    /// </summary>
+    private static StreamedEvent? ParseEphemeralFrame(string data)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(data);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object
+                || Str(payload, "type") != "system" || Str(payload, "subtype") is not ("task_summary" or "status"))
+                return null;
+            var ev = ParseEvent(payload);
+            if (DateTimeOffset.TryParse(Str(root, "timestamp"), out var at)) ev = ev with { CreatedAt = at };
+            return new StreamedEvent(0, ev, Ephemeral: true);
         }
         catch (JsonException)
         {

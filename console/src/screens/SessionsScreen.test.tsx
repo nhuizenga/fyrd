@@ -1,11 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
 import { FakeEventSource, item } from "../test/fakeEventSource";
 import { hubState, question, session } from "../test/fixtures";
 import { useRoute } from "../route";
-import type { HubState } from "../types";
+import type { HubState, PullRequestStatus } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SessionsScreen from "./SessionsScreen";
 
@@ -116,7 +116,7 @@ it("Replace Controller can be cancelled", async () => {
 
 it("select session streams its transcript", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   expect(FakeEventSource.latest().url).toBe("/api/hub/sessions/a/stream");
   FakeEventSource.latest().emit("item", item({ text: "Working on it" }));
   FakeEventSource.latest().emit("item", item({ role: "user", text: "Go ahead" }));
@@ -124,18 +124,37 @@ it("select session streams its transcript", async () => {
   expect(screen.getByText("Go ahead").closest(".msg")).toHaveClass("msg-user");
 });
 
+it("an ephemeral progress frame shows as an in-progress agent bubble until the next item", async () => {
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  FakeEventSource.latest().emit("item", item({ text: "Starting" }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Running the tests" }));
+  const bubble = screen.getByText("Running the tests").closest(".msg");
+  expect(bubble).toHaveClass("msg-agent");
+  expect(bubble).toHaveClass("msg-progress");
+  expect(within(bubble as HTMLElement).getByRole("status")).toBeInTheDocument();
+  expect(screen.getByRole("log").lastElementChild?.lastElementChild).toBe(bubble);
+
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Writing the fix" }));
+  expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
+  expect(screen.getByText("Writing the fix")).toBeInTheDocument();
+
+  FakeEventSource.latest().emit("item", item({ text: "Done" }));
+  expect(screen.queryByText("Writing the fix")).not.toBeInTheDocument();
+});
+
 it("switching sessions closes the old stream", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   const first = FakeEventSource.latest();
-  await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
   expect(first.closed).toBe(true);
   expect(FakeEventSource.latest().url).toBe("/api/hub/sessions/b/stream");
 });
 
 it("duplicate items are shown once", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   const it1 = item({ text: "Only once" });
   FakeEventSource.latest().emit("item", it1);
   FakeEventSource.latest().emit("item", it1);
@@ -144,7 +163,7 @@ it("duplicate items are shown once", async () => {
 
 it("message text renders as markdown", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({ text: "Use **bold** and `code`" }));
   expect(screen.getByText("bold").tagName).toBe("STRONG");
   expect(screen.getByText("code").tagName).toBe("CODE");
@@ -156,7 +175,7 @@ it("a pending question shows answer buttons in the thread", async () => {
   st.sessions[0].status = "requires_action";
   st.questions = [question({ id: "q1", sessionId: "a", toolUseId: "tu1" })];
   render(<Routed state={st} onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({
     kind: "question", text: "Which DB?", toolUseId: "tu1",
     questions: [{ question: "Which DB?", multiSelect: false, options: [{ label: "Postgres" }, { label: "SQLite" }] }],
@@ -169,7 +188,7 @@ it("a pending question shows answer buttons in the thread", async () => {
 
 it("an answered question shows read-only, with the answer", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({
     kind: "question", text: "Which DB?", toolUseId: "tu1",
     questions: [{ question: "Which DB?", multiSelect: false, options: [{ label: "Postgres" }, { label: "SQLite" }] }],
@@ -183,13 +202,13 @@ it("a pending question the stream hasn't delivered still gets buttons", async ()
   const st = two();
   st.questions = [question({ sessionId: "a" })];
   render(<Routed state={st} onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   expect(screen.getByRole("button", { name: "Postgres" })).toBeInTheDocument();
 });
 
 it("a stream fault shows a warning", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   FakeEventSource.latest().emit("fault", { detail: "Signed out of Claude" });
   expect(screen.getByRole("alert")).toHaveTextContent("Signed out of Claude");
 });
@@ -197,7 +216,7 @@ it("a stream fault shows a warning", async () => {
 it("Enter sends and Shift+Enter adds a new line", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   const box = screen.getByLabelText("Message this session");
   await userEvent.type(box, "line one{Shift>}{Enter}{/Shift}line two");
   expect(api.sendMessage).not.toHaveBeenCalled();
@@ -210,7 +229,7 @@ it("Enter sends and Shift+Enter adds a new line", async () => {
 it("Message this session sends", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   await userEvent.type(screen.getByLabelText("Message this session"), "hello");
   await userEvent.click(screen.getByRole("button", { name: "Send" }));
   expect(api.sendMessage).toHaveBeenCalledWith("a", "hello");
@@ -220,20 +239,20 @@ it("pause and resume", async () => {
   vi.mocked(api.pause).mockResolvedValue(undefined);
   vi.mocked(api.resume).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   expect(screen.queryByRole("button", { name: "Resume session" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Pause session" }));
   expect(api.pause).toHaveBeenCalledWith("a");
   expect(await screen.findByRole("button", { name: "Resume session" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Pause session" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
   await userEvent.click(screen.getByRole("button", { name: "Resume session" }));
   expect(api.resume).toHaveBeenCalledWith("b");
 });
 
 it("cost and budget are placeholders", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   expect(screen.getByRole("button", { name: "+$5" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "+$100" })).toBeDisabled();
   expect(screen.getByText("Estimated cost").nextElementSibling).toHaveTextContent("—");
@@ -259,7 +278,7 @@ it("list order: Controller, its controls, search, then the other sessions", () =
   expect(ctlRow).toContainElement(screen.getByRole("button", { name: "Replace Controller" }));
   const search = screen.getByLabelText("Search sessions");
   const open = screen.getByRole("button", { name: "Open Controller" });
-  const alpha = screen.getByRole("button", { name: /alpha-1/ });
+  const alpha = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
   expect(open.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(search.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
@@ -268,20 +287,20 @@ it("search never hides the Controller", async () => {
   renderScreen(two());
   await userEvent.type(screen.getByLabelText("Search sessions"), "beta");
   expect(screen.getByRole("button", { name: /controller/ })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /alpha-1/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^(?!Archive).*alpha-1/ })).not.toBeInTheDocument();
 });
 
 it("status shows as a labelled icon", () => {
   renderScreen(two());
-  const alpha = screen.getByRole("button", { name: /alpha-1/ });
+  const alpha = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
   expect(alpha.querySelector("[role=img]")).toHaveAttribute("aria-label", "Running");
-  expect(screen.getByRole("button", { name: /beta-2/ }).querySelector("[role=img]")).toHaveAttribute("aria-label", "Idle");
+  expect(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }).querySelector("[role=img]")).toHaveAttribute("aria-label", "Idle");
 });
 
 it("Add repository asks the session to attach the repo", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   const add = screen.getByRole("button", { name: "Add repository" });
   expect(add).toBeDisabled();
   await userEvent.type(screen.getByLabelText("Add GitHub repository"), "https://github.com/acme/widgets/blob/main/README.md");
@@ -294,7 +313,7 @@ it("Add repository asks the session to attach the repo", async () => {
 
 it("selecting a session sets a deep link, and a deep link selects the session", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
   expect(window.location.hash).toBe("#/sessions/b");
   expect(screen.getByRole("heading", { name: "beta-2" })).toBeInTheDocument();
 });
@@ -311,7 +330,7 @@ it("details come first, in order, with relative times", async () => {
   st.sessions[0] = { ...st.sessions[0], repo: "acme/web", createdAt: new Date(Date.now() - 86_400_000).toISOString(),
     lastActivity: new Date(Date.now() - 5 * 60_000).toISOString() };
   render(<Routed state={st} onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   const pane = screen.getByRole("complementary", { name: "Session details" });
   const headings = [...pane.querySelectorAll("h4")].map((h) => h.textContent);
   expect(headings).toEqual(["Details", "Estimated cost", "Tags", "Pull requests"]);
@@ -323,7 +342,7 @@ it("details come first, in order, with relative times", async () => {
 
 it("#/sessions reopens the most recently viewed session", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
   cleanup();
   window.location.hash = "#/sessions";
   renderScreen(two());
@@ -343,9 +362,183 @@ it("hovering a message offers copy to clipboard", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({ text: "Copy **me**" }));
   await userEvent.click(screen.getByRole("button", { name: "Copy message" }));
   expect(writeText).toHaveBeenCalledWith("Copy **me**");
   expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+});
+
+const PR12 = "https://github.com/acme/widgets/pull/12";
+const withRepo = () =>
+  hubState({
+    sessions: [
+      session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12] }),
+      session({ id: "b", title: "beta-2" }),
+    ],
+  });
+
+it("an ephemeral progress bubble is still there after switching sessions and coming back", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "Running the tests" }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
+  expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  expect(screen.getByText("Running the tests")).toBeInTheDocument();
+});
+
+it("session rows show a repo chip and PR chips", () => {
+  renderScreen(withRepo());
+  const row = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
+  expect(within(row).getByText("widgets")).toBeInTheDocument();
+  expect(within(row).getByText("#12")).toBeInTheDocument();
+  const bare = screen.getByRole("button", { name: /^(?!Archive).*beta-2/ });
+  expect(within(bare).queryByText("widgets")).not.toBeInTheDocument();
+});
+
+it("session details list the pull requests as links", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  expect(within(details).getByRole("link", { name: "#12" })).toHaveAttribute("href", PR12);
+});
+
+it("the message draft belongs to each session and survives switching and remounting", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  await userEvent.type(screen.getByLabelText("Message this session"), "for alpha");
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
+  expect(screen.getByLabelText("Message this session")).toHaveValue("");
+  await userEvent.type(screen.getByLabelText("Message this session"), "for beta");
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  expect(screen.getByLabelText("Message this session")).toHaveValue("for alpha");
+
+  cleanup();
+  renderScreen(withRepo());
+  expect(screen.getByLabelText("Message this session")).toHaveValue("for alpha");
+});
+
+it("a sent message clears only that session's saved draft", async () => {
+  vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  await userEvent.type(screen.getByLabelText("Message this session"), "go{Enter}");
+  await vi.waitFor(() => expect(screen.getByLabelText("Message this session")).toHaveValue(""));
+  cleanup();
+  renderScreen(withRepo());
+  expect(screen.getByLabelText("Message this session")).toHaveValue("");
+});
+
+it("a sliding divider resizes the message box", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  const divider = screen.getByRole("separator", { name: "Resize message box" });
+  const before = Number(divider.getAttribute("aria-valuenow"));
+  divider.focus();
+  await userEvent.keyboard("{ArrowUp}");
+  expect(Number(divider.getAttribute("aria-valuenow"))).toBeGreaterThan(before);
+  await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+  expect(Number(divider.getAttribute("aria-valuenow"))).toBeLessThan(before);
+});
+
+it("the key hints are icons and Send sits below the message box", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "Enter to send" })).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "Shift+Enter for a new line" })).toBeInTheDocument();
+  const box = screen.getByLabelText("Message this session");
+  const send = screen.getByRole("button", { name: "Send" });
+  expect(box.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(send.closest(".composer-actions")).not.toBeNull();
+  expect(send.closest(".composer-actions")?.contains(box)).toBe(false);
+});
+
+it("each non-Controller session row has a trash button that confirms, then archives that session", async () => {
+  vi.mocked(api.archiveSession).mockResolvedValue(undefined);
+  const onChanged = renderScreen(two());
+  expect(screen.getAllByRole("button", { name: /^Archive / })).toHaveLength(2);
+  expect(screen.queryByRole("button", { name: "Archive controller" })).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: "Archive beta-2" }));
+  expect(api.archiveSession).not.toHaveBeenCalled();
+  expect(screen.getByText("Archive beta-2?")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Archive session" }));
+  expect(api.archiveSession).toHaveBeenCalledWith("b");
+  expect(onChanged).toHaveBeenCalled();
+});
+
+it("archiving can be cancelled", async () => {
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: "Archive beta-2" }));
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(api.archiveSession).not.toHaveBeenCalled();
+  expect(screen.queryByText("Archive beta-2?")).not.toBeInTheDocument();
+});
+
+it("session rows no longer show a role line", () => {
+  renderScreen(two());
+  const row = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
+  expect(within(row).queryByText("builder")).not.toBeInTheDocument();
+  const ctl = screen.getByRole("button", { name: /^(?!Archive).*controller/ });
+  expect(within(ctl).queryByText("Controller")).not.toBeInTheDocument();
+});
+
+const prStatus = (o: Partial<PullRequestStatus> = {}): PullRequestStatus => ({
+  url: PR12, number: 12, title: "Fix it", state: "open", draft: false, checks: "passing", canMerge: true, ...o,
+});
+const openAlphaWith = async (pr: PullRequestStatus) => {
+  vi.mocked(api.pullRequests).mockResolvedValue([pr]);
+  const onChanged = renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  await within(details).findByRole("link", { name: "#12" });
+  return { details, onChanged };
+};
+
+it("a draft PR gets a green check button that marks it ready, and no merge button", async () => {
+  vi.mocked(api.markPrReady).mockResolvedValue(undefined);
+  const { details, onChanged } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
+  expect(within(details).getByText("Draft")).toBeInTheDocument();
+  expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+  expect(api.markPrReady).toHaveBeenCalledWith("a", PR12);
+  expect(api.pullRequests).toHaveBeenCalledTimes(2);
+  expect(onChanged).toHaveBeenCalled();
+});
+
+it("a ready PR with passing checks gets a merge button that confirms first", async () => {
+  vi.mocked(api.mergePr).mockResolvedValue(undefined);
+  const { details } = await openAlphaWith(prStatus());
+  expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+  expect(api.mergePr).not.toHaveBeenCalled();
+  expect(within(details).getByText("Merge #12 Fix it?")).toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Merge pull request" }));
+  expect(api.mergePr).toHaveBeenCalledWith("a", PR12);
+});
+
+it("merging can be cancelled", async () => {
+  const { details } = await openAlphaWith(prStatus());
+  await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+  await userEvent.click(within(details).getByRole("button", { name: "Cancel" }));
+  expect(api.mergePr).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["checks failing", { checks: "failing", canMerge: false }],
+  ["checks pending", { checks: "pending", canMerge: false }],
+  ["already merged", { state: "merged", canMerge: false }],
+] as const)("no ready or merge button when %s", async (_n, o) => {
+  const { details } = await openAlphaWith(prStatus(o));
+  expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+  expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
+});
+
+it("a PR action failure shows in an alert", async () => {
+  vi.mocked(api.markPrReady).mockRejectedValue(new Error("gh failed"));
+  const { details } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
+  await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("gh failed");
 });

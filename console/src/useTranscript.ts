@@ -3,13 +3,18 @@ import type { TranscriptItem } from "./types";
 
 export interface Transcript {
   items: TranscriptItem[];
+  /** The latest live-only progress line ("in progress" status); replaced by each new one, cleared by the next saved item. */
+  progress: TranscriptItem | null;
   /** True once the stream has opened at least once for this session. */
   connected: boolean;
   /** The last `event: fault` detail from the server, cleared when new items arrive. */
   fault: string | null;
 }
 
-const empty: Transcript = { items: [], connected: false, fault: null };
+/** Progress is live-only (the server never replays it), so keep each session's last line for when the owner comes back. */
+const lastProgress = new Map<string, TranscriptItem>();
+
+const empty: Transcript = { items: [], progress: null, connected: false, fault: null };
 
 /**
  * Follows a session's live transcript over Server-Sent Events. The server replays the whole transcript first,
@@ -19,7 +24,7 @@ export function useTranscript(sessionId: string | null): Transcript {
   const [transcript, setTranscript] = useState<Transcript>(empty);
 
   useEffect(() => {
-    setTranscript(empty);
+    setTranscript(sessionId ? { ...empty, progress: lastProgress.get(sessionId) ?? null } : empty);
     if (!sessionId) return;
     const source = new EventSource(`/api/hub/sessions/${encodeURIComponent(sessionId)}/stream`);
     const seen = new Set<string>();
@@ -28,7 +33,13 @@ export function useTranscript(sessionId: string | null): Transcript {
       const item = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
       if (seen.has(item.key)) return;
       seen.add(item.key);
-      setTranscript((t) => ({ ...t, fault: null, items: [...t.items, item] }));
+      lastProgress.delete(sessionId);
+      setTranscript((t) => ({ ...t, fault: null, progress: null, items: [...t.items, item] }));
+    });
+    source.addEventListener("progress", (e) => {
+      const progress = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
+      lastProgress.set(sessionId, progress);
+      setTranscript((t) => ({ ...t, progress }));
     });
     source.addEventListener("fault", (e) => {
       const detail = (JSON.parse((e as MessageEvent<string>).data) as { detail?: string }).detail ?? "Stream error";

@@ -288,6 +288,140 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task Archive_HubSession_ArchivesIt_204()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var r = await f.CreateClient().PostAsync($"/api/hub/sessions/{SessionId}/archive", null);
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([SessionId], f.Cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Archive_NotHubSession_404_NothingArchived()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PostAsync("/api/hub/sessions/session_other/archive", null);
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+        Assert.Empty(f.Cloud.Archived);
+    }
+
+    private const string Pr = "https://github.com/acme/widgets/pull/12";
+    private const string OtherPr = "https://github.com/acme/widgets/pull/99";
+
+    private static void SeedWithPr(FyrdFactory f, bool draft, string checks = "passing", string state = "open")
+    {
+        f.Services.GetRequiredService<HubState>().Publish([View() with { PullRequests = [Pr] }], []);
+        f.GitHub.Statuses[Pr] = new PullRequestStatus(Pr, 12, "Fix it", state, draft, checks);
+    }
+
+    [Fact]
+    public async Task PullRequests_ListsStatusesOfTheSessionsPrs()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+        var r = await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/pull-requests");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var pr = (await ReadJson(r)).EnumerateArray().Single();
+        Assert.Equal(Pr, pr.GetProperty("url").GetString());
+        Assert.Equal(12, pr.GetProperty("number").GetInt32());
+        Assert.Equal("open", pr.GetProperty("state").GetString());
+        Assert.True(pr.GetProperty("draft").GetBoolean());
+        Assert.Equal("passing", pr.GetProperty("checks").GetString());
+        Assert.False(pr.GetProperty("canMerge").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PullRequests_GitHubFailure_ReportedPerPr_NotAnError()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false);
+        f.GitHub.Fail = new GitHubException("gh is not signed in");
+        var r = await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/pull-requests");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var pr = (await ReadJson(r)).EnumerateArray().Single();
+        Assert.Equal("unknown", pr.GetProperty("state").GetString());
+        Assert.Equal("gh is not signed in", pr.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task PullRequests_NotHubSession_404()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().GetAsync("/api/hub/sessions/session_other/pull-requests");
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ready_MarksADraftPrReady_204()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/ready", new { url = Pr });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([Pr], f.GitHub.Readied);
+    }
+
+    [Fact]
+    public async Task Ready_AlreadyReady_409_NothingDone()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/ready", new { url = Pr });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.GitHub.Readied);
+    }
+
+    [Fact]
+    public async Task Merge_ReadyGreenPr_Merges_204()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([Pr], f.GitHub.Merged);
+    }
+
+    [Theory]
+    [InlineData(true, "passing", "open")]
+    [InlineData(false, "failing", "open")]
+    [InlineData(false, "pending", "open")]
+    [InlineData(false, "passing", "merged")]
+    public async Task Merge_NotMergeable_409_NothingMerged(bool draft, string checks, string state)
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft, checks, state);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Theory]
+    [InlineData("ready", OtherPr)]
+    [InlineData("merge", OtherPr)]
+    [InlineData("ready", "--repo=evil")]
+    [InlineData("merge", "")]
+    public async Task PrActions_OnlyForPrsOfThisSession_400(string action, string url)
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/{action}", new { url });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Empty(f.GitHub.Readied);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task PrActions_GitHubFailure_502()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+        f.GitHub.Fail = new GitHubException("gh failed");
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/ready", new { url = Pr });
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+    }
+
+    [Fact]
     public async Task Persona_DeleteController_409()
     {
         using var f = new FyrdFactory();

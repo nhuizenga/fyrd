@@ -11,7 +11,11 @@ public sealed record HubQuestion(
 public sealed record HubSessionView(
     string Id, string Title, string Role, string Status, string? Repo, string? Branch,
     DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags,
-    HubCostView? Cost = null);
+    HubCostView? Cost = null)
+{
+    /// <summary>URLs of the pull requests the session opened.</summary>
+    public IReadOnlyList<string> PullRequests { get; init; } = [];
+}
 
 /// <summary>
 /// One session's spend today against its limit. <c>Blocked</c> is "session", "fyrd" or null. The Controller is

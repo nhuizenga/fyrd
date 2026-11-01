@@ -36,8 +36,19 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .thread-head > :first-child { flex: 1; min-width: 0; }
 .thread-log { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
 .thread-items { display: flex; flex-direction: column; gap: 4px; }
-.composer { flex: none; display: flex; align-items: flex-end; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--a2-border-color-subdued); }
-.composer > :first-child { flex: 1; }
+.composer-divider { flex: none; height: 8px; cursor: row-resize; border-top: 1px solid var(--a2-border-color-subdued); background: transparent; touch-action: none; }
+.composer-divider:hover, .composer-divider:focus-visible { background: var(--a2-border-color-subdued); outline: none; }
+.composer { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 12px 8px; }
+.composer-input > * { height: 100%; }
+.composer-input textarea { height: 100%; resize: none; }
+.composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.composer-hints { display: inline-flex; align-items: center; gap: 12px; }
+.composer-hint { display: inline-flex; align-items: center; }
+.session-row-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.pr-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pr-badges { display: inline-flex; gap: 4px; }
+.pr-ready { --a2-button-color: var(--a2-border-color-success); color: var(--a2-border-color-success); }
+.pr-list { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 1100px) { .sessions-grid { grid-template-columns: 240px minmax(0, 1fr); } .pane-attrs { display: none; } }
 
 .thread-status { display: inline-flex; align-items: center; gap: 4px; }
@@ -50,7 +61,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .row-btn:hover { background: var(--a2-background-color-default-hover); }
 .row-btn[aria-current="true"], .row-btn[aria-current="page"] { background: var(--a2-background-color-primary-subdued); }
 .status-icon { display: inline-flex; flex: none; }
-.session-item { display: flex; align-items: center; gap: 2px; }
+.session-item { display: flex; align-items: flex-start; gap: 2px; }
 .session-item > .row-btn { flex: 1; min-width: 0; }
 .session-item-actions { display: flex; flex: none; }
 .adopt { display: flex; flex-direction: column; gap: 6px; }
@@ -75,6 +86,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 
 /* Message bubbles: agent on the left (room on the right), owner on the right (room on the left). */
 .msg { position: relative; border-radius: 6px; padding: 3px 6px; box-sizing: border-box; overflow-wrap: anywhere; }
+.msg-progress { display: flex; align-items: center; gap: 8px; color: var(--a2-foreground-color-subdued); }
 .msg-agent { align-self: stretch; margin-right: 4%; background: var(--a2-background-color-secondary); }
 .msg-user { align-self: stretch; margin-left: 4%; background: var(--a2-background-color-primary-subdued); }
 /* Copy shows on hover (and keyboard focus) in the bubble's top-right corner. */
