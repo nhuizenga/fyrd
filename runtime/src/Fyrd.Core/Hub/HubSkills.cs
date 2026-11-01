@@ -14,7 +14,11 @@ public sealed partial class HubSkills(string dir)
     [GeneratedRegex(@"\A---[ \t]*\r?\n(?<fm>.*?)\r?\n---[ \t]*\r?\n?(?<body>.*)\z", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex FrontMatterRegex();
 
-    /// <summary>Skills ordered by name; empty when the directory is missing. A SKILL.md without front matter is skipped.</summary>
+    /// <summary>
+    /// Skills ordered by name; empty when the directory is missing. Front matter is simple single-line <c>key: value</c> pairs
+    /// (values may be wrapped in double quotes; folded <c>&gt;</c> or escaped values are not supported). Throws
+    /// <see cref="InvalidDataException"/> for a SKILL.md without front matter, and IO errors propagate.
+    /// </summary>
     public IReadOnlyList<HubSkill> List()
     {
         if (!Directory.Exists(dir)) return [];
@@ -23,12 +27,11 @@ public sealed partial class HubSkills(string dir)
         {
             var file = Path.Combine(sub, "SKILL.md");
             if (!File.Exists(file)) continue;
-            string text;
-            try { text = File.ReadAllText(file, Encoding.UTF8); }
-            catch (IOException) { continue; }
-            catch (UnauthorizedAccessException) { continue; }
+            // An existing SKILL.md that can't be read or parsed is an error, not a skill to drop: dropping it would send the
+            // Controller a message missing that skill. The error surfaces through the poll's "controller update" message.
+            var text = File.ReadAllText(file, Encoding.UTF8);
             var m = FrontMatterRegex().Match(text);
-            if (!m.Success) continue;
+            if (!m.Success) throw new InvalidDataException($"{file} has no front matter (--- name/description ---).");
             string name = Path.GetFileName(sub), description = "";
             foreach (var line in m.Groups["fm"].Value.Split('\n'))
             {
@@ -39,7 +42,7 @@ public sealed partial class HubSkills(string dir)
                 if (key == "name") name = val;
                 else if (key == "description") description = val;
             }
-            skills.Add(new HubSkill(name, description, m.Groups["body"].Value.Trim()));
+            skills.Add(new HubSkill(name, description, m.Groups["body"].Value.Replace("\r\n", "\n").Trim()));
         }
         return skills.OrderBy(s => s.Name, StringComparer.Ordinal).ToList();
     }

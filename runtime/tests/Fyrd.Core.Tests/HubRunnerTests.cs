@@ -353,6 +353,42 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_StateFromBeforeUpgrade_NoInstructionsHash_SendsOneRefresh()
+    {
+        await Adopt("session_ctl", "controller");
+        _controller.PostedInstructionsHash = null; // as in a controller.json written before this feature
+        _cloud.SetByTag("fyrd-hub");
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        await runner.PollOnceAsync(default);
+        var sent = Assert.Single(_cloud.Sent);
+        Assert.StartsWith(ControllerManager.PromptPreamble, sent.Text);
+    }
+
+    [Fact]
+    public async Task Poll_SkillsDirMissing_DoesNotStripSkills()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        Directory.Delete(Path.Combine(_seeds, "skills"), true);
+        await Make().PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_SkillFileUnparseable_ReportsErrorAndSendsNothing()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "half written, no front matter");
+        await Make().PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+        Assert.Contains("controller update", _state.LastError);
+    }
+
+    [Fact]
     public async Task Poll_PersonaEdited_RefreshesInstructions_AndCarriesMemory()
     {
         await Adopt("session_ctl", "controller");

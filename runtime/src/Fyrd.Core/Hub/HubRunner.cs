@@ -240,11 +240,12 @@ public sealed partial class HubRunner(
         if (_controllerId is not { } controllerId) return;
         var session = sessions.FirstOrDefault(s => s.Id == controllerId);
         if (session is null || session.SessionStatus is "running" or RequiresAction) return;
+        if (controller.SkillsMissing) return;
         var (prompt, instructionsHash, memoryHash) = controller.BuildPrompt();
+        // An adoption during this pass replaced the Controller: post nothing to the old one.
         if (controller.CurrentId != controllerId || instructionsHash == controller.PostedInstructionsHash) return;
         await cloud.SendMessageAsync(controllerId, prompt, ct);
-        controller.PostedInstructionsHash = instructionsHash;
-        controller.PostedMemoryHash = memoryHash;
+        controller.MarkPosted(instructionsHash, memoryHash);
     }
 
     /// <summary>Posts only to the Controller this pass read as live; an archived or unreadable one is never written to.</summary>

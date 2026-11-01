@@ -6,7 +6,7 @@ Four skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build
 
 Nothing is uploaded to claude.ai. The Fyrd service reads `skills/controller/*/SKILL.md` and embeds each skill in the Controller's message as a `<controller-skill>` block, after the peasant personas. It reads the files on every poll pass, so a `git pull` is enough.
 
-When a skill, a persona, or the Controller settings change, the service re-sends the instructions to the live Controller as soon as it is idle. Persona edits made in Settings reach the Controller the same way. The message says the latest instructions replace earlier ones.
+The first time a service that has this feature polls an already-adopted Controller, it sends the instructions once (there is no stored hash yet); that is how existing Controllers receive the inline skills. After that, when a skill, a persona, or the Controller settings change, the service re-sends the instructions to the live Controller as soon as it is idle. Persona edits made in Settings reach the Controller the same way. The message says the latest instructions replace earlier ones.
 
 ## One-time cleanup
 

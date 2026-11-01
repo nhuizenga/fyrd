@@ -68,6 +68,16 @@ public sealed partial class ControllerManager
         set { lock (_stateLock) SaveState(_state with { PostedInstructionsHash = value }); }
     }
 
+    /// <summary>True when skills are configured but none were found (a missing or wrong directory). The runner then skips
+    /// the refresh rather than strip every skill from the live Controller.</summary>
+    public bool SkillsMissing => _skills is not null && _skills.List().Count == 0;
+
+    /// <summary>Records what was just posted to the Controller, in one write.</summary>
+    public void MarkPosted(string instructionsHash, string memoryHash)
+    {
+        lock (_stateLock) SaveState(_state with { PostedInstructionsHash = instructionsHash, PostedMemoryHash = memoryHash });
+    }
+
     /// <summary>
     /// The full message that adopts a Controller or refreshes its instructions (preamble, instructions, memory), plus the
     /// hashes of its instructions part and of its memory part. All three come from one snapshot, so what is marked as
