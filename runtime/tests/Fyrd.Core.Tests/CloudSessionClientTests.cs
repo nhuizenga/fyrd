@@ -141,6 +141,8 @@ public sealed class CloudSessionClientTests : IDisposable
         var ev = JsonDocument.Parse(r.Body!).RootElement.GetProperty("events")[0];
         Assert.Equal("user", ev.GetProperty("type").GetString());
         Assert.Equal("go on", ev.GetProperty("message").GetProperty("content").GetString());
+        // An empty session_id reads as a peer message to the worker; the UI sends the target's id.
+        Assert.Equal("session_01abc", ev.GetProperty("session_id").GetString());
     }
 
     [Theory]

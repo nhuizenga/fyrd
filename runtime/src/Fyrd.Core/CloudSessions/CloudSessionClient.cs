@@ -107,7 +107,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
     public async Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default)
     {
         ValidateSessionId(sessionId);
-        var body = new JsonObject { ["events"] = new JsonArray(UserEvent(text)) };
+        var body = new JsonObject { ["events"] = new JsonArray(UserEvent(text, sessionId)) };
         using var _ = await SendAsync(HttpMethod.Post, $"/v1/sessions/{sessionId}/events", body, ct);
     }
 
@@ -309,10 +309,12 @@ public sealed partial class CloudSessionClient : ICloudSessions
             throw new ArgumentException("Session id must match ^session_[A-Za-z0-9]+$.", nameof(sessionId));
     }
 
-    private static JsonObject UserEvent(string text) => new()
+    /// <summary>A user turn. The web UI stamps the target session's id on it; an empty id makes the worker treat the text
+    /// as coming from another session (a peer message) instead of the owner. A new session has no id yet, so create passes "".</summary>
+    private static JsonObject UserEvent(string text, string sessionId = "") => new()
     {
         ["uuid"] = Guid.NewGuid().ToString(),
-        ["session_id"] = "",
+        ["session_id"] = sessionId,
         ["type"] = "user",
         ["parent_tool_use_id"] = null,
         ["message"] = new JsonObject { ["role"] = "user", ["content"] = text },
