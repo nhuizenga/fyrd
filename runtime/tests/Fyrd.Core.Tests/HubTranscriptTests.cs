@@ -115,21 +115,4 @@ public class HubTranscriptTests
     [InlineData("""null""")]
     public void OtherOrMalformedPayloads_NoItemsNoThrow(string payload) =>
         Assert.Empty(HubTranscript.Map(Event(1, payload)));
-
-    [Fact]
-    public void Ephemeral_TaskSummary_ProgressAgentItem()
-    {
-        var raw = JsonDocument.Parse("""{"type":"system","subtype":"task_summary","summary":"Running the tests"}""").RootElement.Clone();
-        var e = new StreamedEvent(0, new SessionEvent("", "system", At, null, raw), Ephemeral: true);
-        var item = Assert.Single(HubTranscript.Map(e));
-        Assert.Equal(new TranscriptItem("ephemeral", 0, "agent", "progress", "Running the tests", At), item);
-    }
-
-    [Fact]
-    public void Ephemeral_WithoutText_FallsBackToWorking()
-    {
-        var raw = JsonDocument.Parse("""{"type":"system","subtype":"status"}""").RootElement.Clone();
-        var e = new StreamedEvent(0, new SessionEvent("", "system", At, null, raw), Ephemeral: true);
-        Assert.Equal("Working…", Assert.Single(HubTranscript.Map(e)).Text);
-    }
 }

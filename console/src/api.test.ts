@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { adoptController, openController, retireController, updateConfig } from "./api";
+import { addBudget, adoptController, openController, retireController, updateConfig } from "./api";
 import { config } from "./test/fixtures";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -41,4 +41,12 @@ it("errors carry the server detail and HTTP status", async () => {
   vi.stubGlobal("fetch", vi.fn(async () =>
     new Response(JSON.stringify({ detail: "No Controller yet." }), { status: 404 })));
   await expect(openController()).rejects.toMatchObject({ message: "No Controller yet.", status: 404 });
+});
+
+it("addBudget posts the amount to the session's budget endpoint", async () => {
+  const fetchMock = vi.fn(async (_p: string, _i?: RequestInit) => new Response(JSON.stringify({ limitUsd: 75 }), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  await addBudget("s/1", 25);
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/hub/sessions/s%2F1/budget");
+  expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string)).toEqual({ amountUsd: 25 });
 });

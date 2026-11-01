@@ -10,7 +10,7 @@ public sealed record TranscriptQuestion(string Question, string? Header, bool Mu
 
 /// <summary>
 /// One line of a session's transcript as the console shows it. <c>Role</c> is <c>agent</c> or <c>user</c>; <c>Kind</c> is
-/// <c>text</c>, <c>question</c> (an <c>AskUserQuestion</c> call), <c>answer</c> (its reply) or <c>progress</c> (live-only status). <c>Key</c> is
+/// <c>text</c>, <c>question</c> (an <c>AskUserQuestion</c> call), <c>answer</c> (its reply) or <c>progress</c> (live-only: <c>Text</c> is the reply streamed so far, <c>Status</c> what the agent is doing; both empty means nothing is in progress). <c>Key</c> is
 /// <c>{Seq}:{index}</c>, unique per item.
 /// </summary>
 public sealed record TranscriptItem(
@@ -21,7 +21,8 @@ public sealed record TranscriptItem(
     string Text,
     DateTimeOffset At,
     IReadOnlyList<TranscriptQuestion>? Questions = null,
-    string? ToolUseId = null);
+    string? ToolUseId = null,
+    string? Status = null);
 
 /// <summary>Turns a streamed cloud-session event into the transcript items the console shows; pure, never throws on bad payloads.</summary>
 public static class HubTranscript
@@ -33,15 +34,6 @@ public static class HubTranscript
         var items = new List<TranscriptItem>();
         var raw = e.Event.Raw;
         if (raw.ValueKind != JsonValueKind.Object) return items;
-
-        // Live-only progress: one replaceable "in progress" line, not a saved transcript entry.
-        if (e.Ephemeral)
-        {
-            var progress = new[] { "summary", "description", "text", "status", "message" }
-                .Select(n => Str(raw, n)).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-            items.Add(new TranscriptItem("ephemeral", 0, "agent", "progress", progress ?? "Working…", e.Event.CreatedAt));
-            return items;
-        }
 
         void Add(string role, string kind, string text, IReadOnlyList<TranscriptQuestion>? questions = null, string? toolUseId = null) =>
             items.Add(new TranscriptItem($"{e.Sequence}:{items.Count}", e.Sequence, role, kind, text, e.Event.CreatedAt, questions, toolUseId));

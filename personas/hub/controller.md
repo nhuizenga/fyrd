@@ -31,6 +31,10 @@ The owner created this session on claude.ai and Fyrd adopted it, so these instru
 
 When a user message starts with `Fyrd memory update.`, replace your copy of `<shared-memory>` and every `<role-memory>` with the blocks in that message. A role missing from the message now has no memory. Use the new copy for every peasant you create from then on, and reply with a one-line acknowledgement only.
 
+# Budget messages
+
+A message that starts with `Fyrd budget:` comes from Fyrd, not the owner. It names either one session that is out of budget for today or the whole fyrd. For a single session, don't send it work today unless the owner raises its limit. For the fyrd-wide message, don't start new peer work today unless the owner raises the limit; your own work and the owner's messages to you continue. Either way, tell the owner if work is blocked.
+
 # Requests
 
 | Request | Action |

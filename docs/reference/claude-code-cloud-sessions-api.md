@@ -170,6 +170,18 @@ Each frame has `event:`, optionally `id:` (the sequence number), and `data:` (JS
   - `turn_handoff.tools`: the tool list, including the `mcp__claude-code-remote__*` tools (§8).
 - `configured_model`, `environment_id`, `environment_kind` (`anthropic_cloud`), `created_at`, `tags`, `title`.
 
+### 6.1 Cost fields (used by Fyrd's spend limits)
+
+Both are **list-price estimates** (`costBasis: "list"`), not billed amounts. Seen on a live session on 2026-11-01 through the `claude-code-remote` MCP tools; Fyrd's own REST client has **not yet captured** a raw body, so `runtime/tests/Fyrd.Core.Tests/Fixtures/result-event.json` is a trimmed reconstruction of that shape (top-level fields), not a capture. Fyrd reads the fields wherever they sit: on the event, or one level down in `internal_anthropic_catchall`, `payload`, `data` or `event`.
+
+| Where | Field | Meaning | Fyrd uses it for |
+|---|---|---|---|
+| `result` event (end of a turn) | `model_usage_since_last_result.<model>.costUSD` | Cost of that turn per model; Fyrd sums the models | Completed spend, dated by the event's `created_at` in the configured time zone |
+| `result` event | `total_cost_usd` | Running total for the container process; resets when the worker restarts | Fallback only: the delta between consecutive results when the per-turn map is missing (a drop means a restart) |
+| `GET /v1/sessions/{id}` | `external_metadata.usage.cost_usd` (plus token counts) | Cumulative session cost, including the turn in progress | In-flight estimate: `max(0, cost_usd − sum of result costs seen)` |
+
+Open: whether the `GET /v1/sessions?tags=` listing items carry `external_metadata.usage` (Fyrd reads it from the listing items and shows "—" with no enforcement when it and the result costs are both absent; if the listing lacks it, fetch with `GET /v1/sessions/{id}` per session).
+
 ## 7. CLI paths (verified)
 
 | Command | Behavior |
