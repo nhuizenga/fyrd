@@ -345,8 +345,38 @@ public sealed class CloudSessionClientTests : IDisposable
             Assert.Equal(2, lines.Count);
             Assert.All(lines, l => Assert.Equal("session_01abc", l.GetProperty("session").GetString()));
             Assert.All(lines, l => Assert.True(l.TryGetProperty("at", out _)));
+            Assert.All(lines, l => Assert.Equal("ephemeral_event", l.GetProperty("frame").GetString()));
             Assert.Equal(1, lines[0].GetProperty("data").GetProperty("payload").GetProperty("n").GetInt32());
             Assert.Equal("hook_started", lines[1].GetProperty("data").GetProperty("payload").GetProperty("subtype").GetString());
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(log)!, true); }
+    }
+
+    [Fact]
+    public async Task StreamEvents_AlsoLogsResultEvents_TaggedWithTheirFrameKind()
+    {
+        const string sse = """
+            event: client_event
+            id: 8
+            data: {"event_id":"ev_8","sequence_num":8,"payload":{"type":"result","subtype":"success","result":"done","duration_ms":1234}}
+
+            event: client_event
+            id: 9
+            data: {"event_id":"ev_9","sequence_num":9,"payload":{"type":"user","message":{"content":"hi"}}}
+
+            event: ephemeral_event
+            data: {"payload":{"type":"stream_event"}}
+            """;
+        var log = Path.Combine(Path.GetTempPath(), $"fyrd-eph-{Guid.NewGuid():N}", "ephemeral.jsonl");
+        try
+        {
+            var client = new CloudSessionClient(new HttpClient(new FakeHandler(HttpStatusCode.OK, sse)), new ClaudeCredentials(_home), log);
+            Assert.Equal(2, (await Drain(client.StreamEventsAsync("session_01abc", null))).Count);
+
+            var lines = File.ReadAllLines(log).Select(l => System.Text.Json.JsonDocument.Parse(l).RootElement).ToList();
+            Assert.Equal(["client_event", "ephemeral_event"], lines.Select(l => l.GetProperty("frame").GetString()));
+            Assert.Equal("success", lines[0].GetProperty("data").GetProperty("payload").GetProperty("subtype").GetString());
+            Assert.Equal(1234, lines[0].GetProperty("data").GetProperty("payload").GetProperty("duration_ms").GetInt32());
         }
         finally { Directory.Delete(Path.GetDirectoryName(log)!, true); }
     }
