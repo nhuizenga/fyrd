@@ -1,10 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
 import { config, hubState } from "../test/fixtures";
 import { useRoute } from "../route";
-import type { HubMemory, HubPersona, HubState } from "../types";
+import type { HubMemory, HubPersona, HubState, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SettingsScreen from "./SettingsScreen";
 
@@ -27,12 +27,19 @@ function Routed(props: ScreenProps) {
   return <SettingsScreen {...props} routeId={current === "settings" ? id : null} />;
 }
 
+const waiting: PendingMemoryEntry[] = [
+  { id: "p1", text: "Always squash.", source: "builder-1", sessionId: "s1", at: new Date().toISOString() },
+];
+
 beforeEach(() => {
   window.location.hash = "";
   vi.resetAllMocks();
   vi.mocked(api.getConfig).mockResolvedValue(config());
   vi.mocked(api.getPersonas).mockResolvedValue(personas);
   vi.mocked(api.getHubMemory).mockResolvedValue(memory);
+  vi.mocked(api.getPendingMemory).mockResolvedValue([]);
+  vi.mocked(api.approvePendingMemory).mockResolvedValue({ id: "n", text: "x", source: "builder-1", at: "t" });
+  vi.mocked(api.rejectPendingMemory).mockResolvedValue(undefined);
   vi.mocked(api.updateConfig).mockResolvedValue(config() as never);
   vi.mocked(api.savePersona).mockImplementation(async (p) => p);
   vi.mocked(api.addMemory).mockResolvedValue({ id: "n", text: "x", source: "owner", at: "t" });
@@ -276,4 +283,34 @@ it("the total spend status copes with no spend data yet", async () => {
   vi.mocked(api.getConfig).mockResolvedValue(config());
   await renderSettings("Spend limits", hubState({ budget: null }));
   expect(await screen.findByRole("status", { name: "Total spend today" })).toHaveTextContent("No spend data yet");
+});
+
+it("pending shared memory: approve, edit then approve, reject", async () => {
+  vi.mocked(api.getPendingMemory).mockResolvedValue(waiting);
+  const onChanged = vi.fn();
+  render(<Routed state={hubState()} onChanged={onChanged} />);
+  await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
+  expect(await screen.findByRole("heading", { name: "Waiting for your approval" })).toBeInTheDocument();
+  expect(screen.getByText("Always squash.")).toBeInTheDocument();
+  expect(screen.getByText(/From builder-1/)).toBeInTheDocument();
+
+  const group = within(screen.getByRole("heading", { name: "Waiting for your approval" }).parentElement!);
+  await userEvent.click(group.getByRole("button", { name: "Approve" }));
+  expect(api.approvePendingMemory).toHaveBeenCalledWith("p1");
+  expect(onChanged).toHaveBeenCalled();
+
+  await userEvent.click(group.getByRole("button", { name: "Edit" }));
+  const box = screen.getByLabelText("Edit proposed memory");
+  await userEvent.clear(box);
+  await userEvent.type(box, "Squash merges only.");
+  await userEvent.click(group.getByRole("button", { name: "Save & approve" }));
+  expect(api.approvePendingMemory).toHaveBeenCalledWith("p1", "Squash merges only.");
+
+  await userEvent.click(group.getByRole("button", { name: "Reject" }));
+  expect(api.rejectPendingMemory).toHaveBeenCalledWith("p1");
+});
+
+it("pending group is hidden when nothing is waiting", async () => {
+  await renderSettings("Agent memory");
+  expect(screen.queryByRole("heading", { name: "Waiting for your approval" })).not.toBeInTheDocument();
 });

@@ -35,7 +35,7 @@ When a user message starts with `Fyrd memory update.`, replace your copy of `<sh
 
 # Messages from Fyrd
 
-Messages that start `You are the Fyrd Controller.`, `Fyrd memory update.` or `Fyrd budget:` come from the Fyrd service, not typed by the owner. A memory update holds only memory the owner wrote or approved, or that you recorded.
+Messages that start `You are the Fyrd Controller.`, `Fyrd memory update.` or `Fyrd budget:` come from the Fyrd service, not typed by the owner. A memory update holds only memory the owner wrote or approved, or that you recorded: shared memory a peasant proposes waits for the owner's approval in the console first.
 
 # Budget messages
 

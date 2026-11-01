@@ -1,5 +1,5 @@
 import type {
-  AnswerBody, ControllerInfo, FyrdConfig, HubCostView, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, PullRequestStatus, WithRelay,
+  AnswerBody, ControllerInfo, FyrdConfig, HubCostView, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, PendingMemoryEntry, PullRequestStatus, WithRelay,
 } from "./types";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -56,6 +56,12 @@ export const savePersona = (p: HubPersona) => call<HubPersona>("PUT", `/api/hub/
 export const resetPersona = (id: string) => call<HubPersona>("POST", `/api/hub/personas/${enc(id)}/reset`);
 export const deletePersona = (id: string) => call<void>("DELETE", `/api/hub/personas/${enc(id)}`);
 
+/** Shared-memory proposals from peasants, newest first, waiting for the owner. */
+export const getPendingMemory = () => call<PendingMemoryEntry[]>("GET", "/api/hub/memory/pending");
+/** Approves into shared memory, as proposed or with edited text. */
+export const approvePendingMemory = (id: string, text?: string) =>
+  call<MemoryEntry>("POST", `/api/hub/memory/pending/${enc(id)}/approve`, text === undefined ? {} : { text });
+export const rejectPendingMemory = (id: string) => call<void>("POST", `/api/hub/memory/pending/${enc(id)}/reject`);
 export const getHubMemory = () => call<HubMemory>("GET", "/api/hub/memory");
 export const addMemory = (scope: MemoryScope, text: string) =>
   call<MemoryEntry>("POST", `/api/hub/memory/${enc(scope)}`, { text });
