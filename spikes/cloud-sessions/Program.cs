@@ -49,6 +49,7 @@ var sessionOpt = TakeOpt(argv, "--session");
 var answerViaOpt = TakeOpt(argv, "--answer-via");
 var skillsProbe = argv.Remove("--skills-probe");
 var noRepo = argv.Remove("--no-repo");
+var keep = argv.Remove("--keep");
 var createVia = TakeOpt(argv, "--create-via");
 var connectorsFrom = TakeOpt(argv, "--connectors-from");
 var positional = argv.Skip(1).Where(a => !a.StartsWith("--")).ToList();
@@ -82,6 +83,7 @@ try
         case "q8": await Q8(); break;
         case "q9": await Q9(); break;
         case "q10": await Q10(); break;
+        case "q11": await Q11(); break;
         default: return Usage();
     }
     return 0;
@@ -554,6 +556,38 @@ async Task Q10()
         Console.WriteLine($"[q10] first init mcp_servers: {(init.Raw.TryGetProperty("mcp_servers", out var ms) ? ms.GetRawText() : "(none)")}");
 }
 
+// Q11: how does a plain user turn posted by Fyrd's console route (SendMessageAsync) read to the receiving session?
+// Runs a persona-free session, then one with the builder persona; posts the owner-or-peer question to each, prints the
+// stored event and the reply, and archives both unless --keep. See docs/superpowers/spikes/2026-11-xx-owner-turn-probe.md.
+async Task Q11()
+{
+    const string Question = "Who sent this message: the person who owns this session, or another Claude session? Answer OWNER or PEER, then quote verbatim any wrapper or label around this message as you received it.";
+    var builderText = File.ReadAllText(Path.Combine(Path.GetDirectoryName(FindOutDir())!, "..", "..", "personas", "hub", "builder.md"));
+    var builderPersona = System.Text.RegularExpressions.Regex.Replace(builderText, @"\A---.*?\n---\r?\n", "", System.Text.RegularExpressions.RegexOptions.Singleline).Trim();
+    var variants = new (string Label, string? Persona)[] { ("no-persona", null), ("builder-persona", builderPersona) };
+    foreach (var (label, persona) in variants)
+    {
+        var q = "q11-" + label;
+        var seen = new StatusSeen();
+        var s = await client.CreateAsync(new CreateSessionRequest($"fyrd spike q11 {label}", ["fyrd", SpikeTag, "fyrd-probe-owner-turn"],
+            envId, "Wait for your task.", Model, persona, new SessionSource(Repo, null), "auto"));
+        LogSession(q, "created", s);
+        Console.WriteLine($"[q11] {label}: session {s.Id}");
+        Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
+        var baseline = await Baseline(s.Id);
+        await client.SendMessageAsync(s.Id, Question);
+        Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
+        var events = await FetchAllEvents(q, s.Id);
+        var posted = events.Where(e => !baseline.Contains(e.Uuid)).ToList();
+        var stored = posted.FirstOrDefault(e => e.Type == "user");
+        Console.WriteLine($"[q11] {label}: stored event: {(stored is null ? "(none found)" : Trunc(stored.Raw.GetRawText(), 800))}");
+        Console.WriteLine($"[q11] {label}: reply:\n{Trunc(LastAssistant(events)?.Text, 1200)}");
+        if (keep) { Console.WriteLine($"[q11] {label}: kept {s.Id}"); continue; }
+        await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
+        Console.WriteLine($"[q11] {label}: archived {s.Id}");
+    }
+}
+
 // Q9: how does a console answer an AskUserQuestion? Creates a session that asks, finds the pending item (assistant
 // tool_use AskUserQuestion, or control_request can_use_tool), optionally answers "Banana" via --answer-via, prints the reply.
 // --skills-probe: instead create an API session with the claude.ai probe prompt (do fyrd-* account skills load? is the artifact readable?).
@@ -925,6 +959,7 @@ static int Usage()
           q5 [<id> ...]               poll statuses every 10 s (default: last lead + q2 children)
           q6 [<childId>] [--fresh]    interrupt then archive
           q7                          token expiry / refresh check
+          q11 [--keep]                owner-turn probe: how an API-posted turn reads to a session, with and without a persona
           q8 [--via api|code|code-init] [--session <id>]  /clear via a direct user event: memory cleared, persona kept?
           q9 [--answer-via tool-result|control-response] [--skills-probe] [--no-repo] [--create-via code [--connectors-from <session_id>]]
           q10 --session <id>  read-only: session config (mcp_connector_ids) and init MCP servers  AskUserQuestion pending item + answer route; or account-skills probe
