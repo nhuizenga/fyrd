@@ -21,6 +21,7 @@ internal static class HubEndpoints
 
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
+    private sealed record PrBody(string? Url);
     private sealed record AnswerBody(string? Choice, string? Text);
 
     public static IEndpointRouteBuilder MapHub(this IEndpointRouteBuilder app)
@@ -108,6 +109,39 @@ internal static class HubEndpoints
                 state.RequestPoll();
                 return Results.NoContent();
             })));
+
+        // Pull requests the session opened: live status from GitHub, and the owner's ready / merge buttons.
+        group.MapGet("/sessions/{id}/pull-requests", (string id, HubState state, IGitHub github, CancellationToken ct) =>
+            InHub(id, state, async () =>
+            {
+                var urls = state.Sessions.First(s => s.Id == id).PullRequests;
+                var all = await Task.WhenAll(urls.Select(async url =>
+                {
+                    try { return await github.GetAsync(url, ct); }
+                    catch (GitHubException e) { return new PullRequestStatus(url, 0, "", "unknown", false, "none", e.Message); }
+                }));
+                return Results.Ok(all.Select(p => new
+                {
+                    p.Url, p.Number, p.Title, p.State, p.Draft, p.Checks, p.Error, canMerge = p.CanMerge,
+                }));
+            }));
+
+        group.MapPost("/sessions/{id}/pull-requests/ready", (string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct) =>
+            PrAction(id, body, state, github, ct, async (url, current) =>
+            {
+                if (!current.Draft || current.State != "open") return Results.Problem("That pull request is not a draft.", statusCode: StatusCodes.Status409Conflict);
+                await github.MarkReadyAsync(url, ct);
+                return Results.NoContent();
+            }));
+
+        group.MapPost("/sessions/{id}/pull-requests/merge", (string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct) =>
+            PrAction(id, body, state, github, ct, async (url, current) =>
+            {
+                // Re-checked here, not trusted from the console: the PR may have changed since it was listed.
+                if (!current.CanMerge) return Results.Problem("That pull request is not ready to merge (draft, checks not passing, or not open).", statusCode: StatusCodes.Status409Conflict);
+                await github.MergeAsync(url, ct);
+                return Results.NoContent();
+            }));
 
         group.MapPost("/sessions/{id}/resume", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
             InHub(id, state, () => Cloud(async () =>
@@ -323,6 +357,24 @@ internal static class HubEndpoints
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")
         : text.Length > MaxText ? Bad($"Text is longer than {MaxText} characters.")
         : null;
+
+    /// <summary>Runs a PR action on one of this session's own pull requests, with its freshly read status.</summary>
+    private static Task<IResult> PrAction(string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct,
+        Func<string, PullRequestStatus, Task<IResult>> action) =>
+        InHub(id, state, async () =>
+        {
+            var url = body?.Url;
+            if (!PullRequestUrl.IsValid(url) || !state.Sessions.First(s => s.Id == id).PullRequests.Contains(url!))
+                return Bad("That is not one of this session's pull requests.");
+            try
+            {
+                return await action(url!, await github.GetAsync(url!, ct));
+            }
+            catch (GitHubException e)
+            {
+                return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
+            }
+        });
 
     private static IResult Bad(string detail) => Results.Problem(detail, statusCode: StatusCodes.Status400BadRequest);
 

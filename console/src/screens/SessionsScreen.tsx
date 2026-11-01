@@ -2,6 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { Alert, Button, Chip, Icon, Link, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import EnterIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_return.svg?react";
 import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_upward.svg?react";
+import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
+import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
@@ -10,7 +12,7 @@ import AddRepo from "../components/AddRepo";
 import QuestionGroup from "../components/QuestionGroup";
 import ThreadItem from "../components/ThreadItem";
 import StatusIcon from "../components/StatusIcon";
-import type { HubSessionView } from "../types";
+import type { HubSessionView, PullRequestStatus } from "../types";
 import { lastSession, navigate, rememberSession, replaceRoute } from "../route";
 import { fullTime, relativeTime } from "../time";
 import { useTranscript } from "../useTranscript";
@@ -61,6 +63,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
+  const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
+  const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
   const [confirmArchive, setConfirmArchive] = useState<HubSessionView | null>(null);
   const [adoptId, setAdoptId] = useState("");
   const transcript = useTranscript(selectedId);
@@ -79,6 +83,21 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const sessions = q ? others.filter((s) => s.title.toLowerCase().includes(q)) : others;
   const selected = all.find((s) => s.id === selectedId) ?? null;
   const hasThread = selected !== null;
+  const prKey = selected ? `${selected.id}|${selected.pullRequests.join(",")}` : "";
+
+  const loadPrs = useCallback(async () => {
+    if (!selected || selected.pullRequests.length === 0) return setPrStatuses([]);
+    try {
+      setPrStatuses((await api.pullRequests(selected.id)) ?? []);
+    } catch {
+      setPrStatuses([]); // statuses are a nicety; the plain PR links still show
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prKey]);
+  useEffect(() => {
+    setConfirmMerge(null);
+    void loadPrs();
+  }, [loadPrs]);
 
   const run = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -168,6 +187,13 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     });
 
+  const prAction = (fn: () => Promise<unknown>) =>
+    run(async () => {
+      await fn();
+      await loadPrs();
+      await onChanged();
+    });
+
   const replaceController = () =>
     run(async () => {
       setConfirmReplace(false);
@@ -205,7 +231,6 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
-          <Text size="small" subdued>{isController(s) ? "Controller" : s.role}</Text>
           {(s.repo || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
@@ -418,10 +443,56 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               <Text variant="headline" el="h4" size="small">Pull requests</Text>
               {selected.pullRequests.length === 0 ? <Text subdued>—</Text> : (
                 <ul className="pr-list">
-                  {selected.pullRequests.map((u) => (
-                    <li key={u}><Link href={u} target="_blank" rel="noopener noreferrer">{prLabel(u)}</Link></li>
-                  ))}
+                  {selected.pullRequests.map((u) => {
+                    const st = prStatuses.find((p) => p.url === u);
+                    const label = prLabel(u);
+                    return (
+                      <li key={u} className="pr-item">
+                        <Link href={u} target="_blank" rel="noopener noreferrer">{label}</Link>
+                        {st && st.state !== "unknown" && (
+                          <span className="pr-badges">
+                            {st.draft && <Chip label="Draft" size="small" />}
+                            {st.state !== "open" && <Chip label={st.state} size="small" />}
+                            {st.state === "open" && !st.draft && st.checks !== "none" && <Chip label={`Checks ${st.checks}`} size="small" />}
+                          </span>
+                        )}
+                        {st?.state === "open" && st.draft && (
+                          <Button
+                            appearance="ghost" size="small" icon={ReadyIcon}
+                            aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
+                            className="pr-ready"
+                            onClick={() => prAction(() => api.markPrReady(selected.id, u))}
+                          />
+                        )}
+                        {st?.canMerge && (
+                          <Button
+                            appearance="ghost" size="small" icon={MergeIcon}
+                            aria-label={`Merge ${label}`} title="Merge pull request"
+                            onClick={() => setConfirmMerge(st)}
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
+              )}
+              {confirmMerge && (
+                <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
+                  <Text>This merges the pull request on GitHub.</Text>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button
+                      appearance="primary" size="small"
+                      onClick={() => {
+                        const pr = confirmMerge;
+                        setConfirmMerge(null);
+                        void prAction(() => api.mergePr(selected.id, pr.url));
+                      }}
+                    >
+                      Merge pull request
+                    </Button>
+                    <Button appearance="ghost" size="small" onClick={() => setConfirmMerge(null)}>Cancel</Button>
+                  </div>
+                </Alert>
               )}
             </>
           )}

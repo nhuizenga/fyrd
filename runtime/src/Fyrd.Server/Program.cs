@@ -29,6 +29,7 @@ builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>(),
     // TEMPORARY: sample raw ephemeral payloads to <data>/ephemeral-events.jsonl; remove after collecting.
     Path.Combine(_.GetRequiredService<FyrdPaths>().Root, "ephemeral-events.jsonl")));
+builder.Services.AddSingleton<IGitHub, GhCli>();
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
 builder.Services.AddSingleton<LeadRelay>();

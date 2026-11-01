@@ -5,7 +5,7 @@ import * as api from "../api";
 import { FakeEventSource, item } from "../test/fakeEventSource";
 import { hubState, question, session } from "../test/fixtures";
 import { useRoute } from "../route";
-import type { HubState } from "../types";
+import type { HubState, PullRequestStatus } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SessionsScreen from "./SessionsScreen";
 
@@ -475,4 +475,70 @@ it("archiving can be cancelled", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(api.archiveSession).not.toHaveBeenCalled();
   expect(screen.queryByText("Archive beta-2?")).not.toBeInTheDocument();
+});
+
+it("session rows no longer show a role line", () => {
+  renderScreen(two());
+  const row = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
+  expect(within(row).queryByText("builder")).not.toBeInTheDocument();
+  const ctl = screen.getByRole("button", { name: /^(?!Archive).*controller/ });
+  expect(within(ctl).queryByText("Controller")).not.toBeInTheDocument();
+});
+
+const prStatus = (o: Partial<PullRequestStatus> = {}): PullRequestStatus => ({
+  url: PR12, number: 12, title: "Fix it", state: "open", draft: false, checks: "passing", canMerge: true, ...o,
+});
+const openAlphaWith = async (pr: PullRequestStatus) => {
+  vi.mocked(api.pullRequests).mockResolvedValue([pr]);
+  const onChanged = renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  await within(details).findByRole("link", { name: "#12" });
+  return { details, onChanged };
+};
+
+it("a draft PR gets a green check button that marks it ready, and no merge button", async () => {
+  vi.mocked(api.markPrReady).mockResolvedValue(undefined);
+  const { details, onChanged } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
+  expect(within(details).getByText("Draft")).toBeInTheDocument();
+  expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+  expect(api.markPrReady).toHaveBeenCalledWith("a", PR12);
+  expect(api.pullRequests).toHaveBeenCalledTimes(2);
+  expect(onChanged).toHaveBeenCalled();
+});
+
+it("a ready PR with passing checks gets a merge button that confirms first", async () => {
+  vi.mocked(api.mergePr).mockResolvedValue(undefined);
+  const { details } = await openAlphaWith(prStatus());
+  expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+  expect(api.mergePr).not.toHaveBeenCalled();
+  expect(within(details).getByText("Merge #12 Fix it?")).toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Merge pull request" }));
+  expect(api.mergePr).toHaveBeenCalledWith("a", PR12);
+});
+
+it("merging can be cancelled", async () => {
+  const { details } = await openAlphaWith(prStatus());
+  await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+  await userEvent.click(within(details).getByRole("button", { name: "Cancel" }));
+  expect(api.mergePr).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["checks failing", { checks: "failing", canMerge: false }],
+  ["checks pending", { checks: "pending", canMerge: false }],
+  ["already merged", { state: "merged", canMerge: false }],
+] as const)("no ready or merge button when %s", async (_n, o) => {
+  const { details } = await openAlphaWith(prStatus(o));
+  expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+  expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
+});
+
+it("a PR action failure shows in an alert", async () => {
+  vi.mocked(api.markPrReady).mockRejectedValue(new Error("gh failed"));
+  const { details } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
+  await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("gh failed");
 });
