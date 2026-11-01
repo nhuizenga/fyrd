@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, SelectFieldSync, Text, TextField, Textarea } from "@servicetitan/anvil2";
+import { Alert, Button, Chip, SelectFieldSync, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import DeleteIcon from "@servicetitan/anvil2/assets/icons/material/round/delete.svg?react";
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import * as api from "../api";
 import { navigate } from "../route";
-import type { HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
+import type { HubBudgetView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
 const MODELS = [
@@ -26,7 +26,7 @@ const parseWholeNumber = (v: string, min: number, max: number) => {
 };
 const rangeMessage = (min: number, max: number) => `Enter a whole number from ${min} to ${max}.`;
 
-function EnvironmentCard() {
+function EnvironmentCard(_: CardProps) {
   const [env, setEnv] = useState("");
   const [cap, setCap] = useState("20");
   const [capError, setCapError] = useState<string | null>(null);
@@ -95,7 +95,34 @@ function EnvironmentCard() {
   );
 }
 
-function SpendLimitsCard() {
+/** What the Settings screen hands every section card. */
+type CardProps = { budget?: HubBudgetView | null };
+
+const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Today's estimated spend across the whole fyrd (the same total the Fyrd-wide limit is checked against). */
+function TotalSpend({ budget }: { budget: HubBudgetView | null | undefined }) {
+  return (
+    <div className="spend-total" role="status" aria-label="Total spend today">
+      {!budget ? (
+        <Text subdued>No spend data yet.</Text>
+      ) : (
+        <>
+          <Text size="large">
+            <strong>{usd(budget.fyrdCostToday)}</strong> of {usd(budget.fyrdLimitUsd).replace(/\.00$/, "")}
+          </Text>
+          <Text size="small" subdued>
+            {budget.fyrdLimitUsd > 0 ? `${Math.round((budget.fyrdCostToday / budget.fyrdLimitUsd) * 100)}% of today's limit` : ""}
+            {" · "}{budget.date} ({budget.timeZone})
+          </Text>
+          {budget.fyrdBlocked && <Chip label="Limit reached" size="small" />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function SpendLimitsCard({ budget }: CardProps) {
   const [sessionLimit, setSessionLimit] = useState("50");
   const [fyrdLimit, setFyrdLimit] = useState("500");
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -127,6 +154,8 @@ function SpendLimitsCard() {
   return (
     <section className="card" aria-labelledby="limits-h">
       <Text variant="headline" el="h3" size="medium" id="limits-h">Spend limits</Text>
+      <Text variant="headline" el="h4" size="small">Total spend today</Text>
+      <TotalSpend budget={budget} />
       <Text subdued>Daily limits on estimated (list-price) spend. A day runs from midnight in {timeZone ?? "your browser's time zone"}; the last browser to load the console sets it.</Text>
       {error && <Alert status="danger" title={error} role="alert" />}
       {saved && <Text role="status">{saved}</Text>}
@@ -181,7 +210,7 @@ function SpendLimitsCard() {
   );
 }
 
-function PersonasCard() {
+function PersonasCard(_: CardProps) {
   const [personas, setPersonas] = useState<HubPersona[]>([]);
   const [editing, setEditing] = useState<{ draft: HubPersona; isNew: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -349,7 +378,7 @@ function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; on
   );
 }
 
-function MemoryCard() {
+function MemoryCard(_: CardProps) {
   const [memory, setMemory] = useState<HubMemory>({ scopes: [] });
   const [scope, setScope] = useState("shared");
   const [text, setText] = useState("");
@@ -413,7 +442,7 @@ const SECTIONS = [
   { id: "memory", label: "Agent memory", Card: MemoryCard },
 ] as const;
 
-export default function SettingsScreen({ routeId }: ScreenProps) {
+export default function SettingsScreen({ state, routeId }: ScreenProps) {
   const { id: section, Card } = SECTIONS.find((s) => s.id === routeId) ?? SECTIONS[0];
   return (
     <>
@@ -433,7 +462,7 @@ export default function SettingsScreen({ routeId }: ScreenProps) {
             </button>
           ))}
         </nav>
-        <div className="settings-body"><Card /></div>
+        <div className="settings-body"><Card budget={state?.budget} /></div>
       </div>
     </>
   );

@@ -4,7 +4,7 @@ import { vi } from "vitest";
 import * as api from "../api";
 import { config, hubState } from "../test/fixtures";
 import { useRoute } from "../route";
-import type { HubMemory, HubPersona } from "../types";
+import type { HubMemory, HubPersona, HubState } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SettingsScreen from "./SettingsScreen";
 
@@ -41,8 +41,8 @@ beforeEach(() => {
   vi.mocked(api.deletePersona).mockResolvedValue(undefined);
 });
 
-const renderSettings = async (section: "Environment" | "Spend limits" | "Personas" | "Agent memory" = "Personas") => {
-  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+const renderSettings = async (section: "Environment" | "Spend limits" | "Personas" | "Agent memory" = "Personas", state = hubState()) => {
+  render(<Routed state={state} onChanged={vi.fn()} />);
   await userEvent.click(screen.getByRole("button", { name: section }));
   if (section === "Personas") await screen.findByRole("button", { name: /^Builder/ });
   else if (section === "Agent memory") await screen.findByText("Shared note");
@@ -234,4 +234,32 @@ it("spend limits load, validate and save both limits", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Save fyrd limit" }));
   expect(api.updateConfig).toHaveBeenCalledWith({ fyrdDailyLimitUsd: 900 });
   expect(await screen.findByText("Fyrd limit saved.")).toBeInTheDocument();
+});
+
+const budget = (o: Partial<NonNullable<HubState["budget"]>> = {}) => ({
+  date: "2026-11-01", timeZone: "America/Chicago", fyrdCostToday: 123.456, fyrdLimitUsd: 500, fyrdBlocked: false, ...o,
+});
+
+it("spend limits show today's total spend against the Fyrd-wide limit", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config());
+  await renderSettings("Spend limits", hubState({ budget: budget() }));
+  const total = await screen.findByRole("status", { name: "Total spend today" });
+  expect(total).toHaveTextContent("$123.46 of $500");
+  expect(total).toHaveTextContent("25%");
+  expect(total).toHaveTextContent("2026-11-01");
+  expect(screen.queryByText("Limit reached")).not.toBeInTheDocument();
+});
+
+it("the total spend status says when the Fyrd-wide limit is reached", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config());
+  await renderSettings("Spend limits", hubState({ budget: budget({ fyrdCostToday: 512.5, fyrdBlocked: true }) }));
+  const total = await screen.findByRole("status", { name: "Total spend today" });
+  expect(total).toHaveTextContent("$512.50 of $500");
+  expect(total).toHaveTextContent("Limit reached");
+});
+
+it("the total spend status copes with no spend data yet", async () => {
+  vi.mocked(api.getConfig).mockResolvedValue(config());
+  await renderSettings("Spend limits", hubState({ budget: null }));
+  expect(await screen.findByRole("status", { name: "Total spend today" })).toHaveTextContent("No spend data yet");
 });
