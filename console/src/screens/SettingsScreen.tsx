@@ -86,6 +86,87 @@ function EnvironmentCard() {
   );
 }
 
+const LIMIT_RANGE = "Enter a whole number from 1 to 10000.";
+const validLimit = (v: string) => /^\d+$/.test(v.trim()) && Number(v) >= 1 && Number(v) <= 10000;
+
+function SpendLimitsCard() {
+  const [sessionLimit, setSessionLimit] = useState("50");
+  const [fyrdLimit, setFyrdLimit] = useState("500");
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [fyrdError, setFyrdError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getConfig().then((c) => {
+      if (!c) return;
+      setSessionLimit(String(c.sessionDailyLimitUsd));
+      setFyrdLimit(String(c.fyrdDailyLimitUsd));
+    }).catch((e) => setError(errText(e)));
+  }, []);
+
+  const save = async (patch: Parameters<typeof api.updateConfig>[0], what: string) => {
+    setError(null);
+    setSaved(null);
+    try {
+      await api.updateConfig(patch);
+      setSaved(`${what} saved.`);
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+
+  return (
+    <section className="card" aria-labelledby="limits-h">
+      <Text variant="headline" el="h3" size="medium" id="limits-h">Spend limits</Text>
+      <Text subdued>Daily limits on estimated (list-price) spend. A day runs from midnight in your browser's time zone.</Text>
+      {error && <Alert status="danger" title={error} role="alert" />}
+      {saved && <Text role="status">{saved}</Text>}
+      <TextField
+        label="Per-session daily limit (USD)"
+        inputMode="numeric"
+        value={sessionLimit}
+        error={sessionError ?? undefined}
+        onChange={(e) => setSessionLimit(e.target.value)}
+      />
+      <div>
+        <Button
+          appearance="primary"
+          aria-label="Save session limit"
+          onClick={() => {
+            if (!validLimit(sessionLimit)) return setSessionError(LIMIT_RANGE);
+            setSessionError(null);
+            void save({ sessionDailyLimitUsd: Number(sessionLimit) }, "Session limit");
+          }}
+        >
+          Save
+        </Button>
+      </div>
+      <TextField
+        label="Fyrd-wide daily limit (USD)"
+        inputMode="numeric"
+        value={fyrdLimit}
+        error={fyrdError ?? undefined}
+        onChange={(e) => setFyrdLimit(e.target.value)}
+      />
+      <div>
+        <Button
+          appearance="primary"
+          aria-label="Save fyrd limit"
+          onClick={() => {
+            if (!validLimit(fyrdLimit)) return setFyrdError(LIMIT_RANGE);
+            setFyrdError(null);
+            void save({ fyrdDailyLimitUsd: Number(fyrdLimit) }, "Fyrd limit");
+          }}
+        >
+          Save
+        </Button>
+      </div>
+      <Text size="small" subdued>The Controller is never interrupted or blocked by these limits.</Text>
+    </section>
+  );
+}
+
 function PersonasCard() {
   const [personas, setPersonas] = useState<HubPersona[]>([]);
   const [editing, setEditing] = useState<{ draft: HubPersona; isNew: boolean } | null>(null);
@@ -313,6 +394,7 @@ function MemoryCard() {
 
 const SECTIONS = [
   { id: "environment", label: "Environment", Card: EnvironmentCard },
+  { id: "limits", label: "Spend limits", Card: SpendLimitsCard },
   { id: "personas", label: "Personas", Card: PersonasCard },
   { id: "memory", label: "Agent memory", Card: MemoryCard },
 ] as const;

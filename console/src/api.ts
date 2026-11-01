@@ -1,5 +1,5 @@
 import type {
-  AnswerBody, ControllerInfo, FyrdConfig, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, WithRelay,
+  AnswerBody, ControllerInfo, FyrdConfig, HubCostView, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, WithRelay,
 } from "./types";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -36,6 +36,9 @@ export const sendMessage = (sessionId: string, text: string) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/message`, { text });
 export const pause = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pause`);
 export const resume = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/resume`);
+/** Raise one session's limit for today; the server accepts 25 or 100 once the session is at 90% of its limit. */
+export const addBudget = (sessionId: string, amountUsd: 25 | 100) =>
+  call<HubCostView>("POST", `/api/hub/sessions/${enc(sessionId)}/budget`, { amountUsd });
 /** 202 with `{ waitingFor }` while sibling questions of the same request are unanswered; 204 (undefined) once sent. */
 export const answerQuestion = (id: string, body: AnswerBody) =>
   call<{ waitingFor: number } | undefined>("POST", `/api/hub/questions/${enc(id)}/answer`, body);

@@ -7,11 +7,35 @@ import AddRepo from "../components/AddRepo";
 import QuestionGroup from "../components/QuestionGroup";
 import ThreadItem from "../components/ThreadItem";
 import StatusIcon from "../components/StatusIcon";
-import type { HubSessionView } from "../types";
+import type { HubCostView, HubSessionView } from "../types";
 import { lastSession, navigate, rememberSession, replaceRoute } from "../route";
 import { fullTime, relativeTime } from "../time";
 import { useTranscript } from "../useTranscript";
 import type { ScreenProps } from "./ScreenProps";
+
+const usd = (n: number) => `$${n.toFixed(2)}`;
+const pct = (ratio: number) => Math.round(ratio * 100);
+
+/** The session's spend today, a bar against its daily limit, and the +$ raises. */
+function CostBlock({ cost }: { cost: HubCostView | null | undefined }) {
+  if (!cost) return <Text>—</Text>;
+  const width = Math.min(100, cost.ratio * 100);
+  return (
+    <>
+      <Text>{usd(cost.costToday)}{cost.estimated ? " (estimated)" : ""}</Text>
+      <div style={{ height: 8, borderRadius: 4, background: "#e3e8ef", overflow: "hidden" }}>
+        <div
+          role="img"
+          aria-label={`${pct(cost.ratio)} percent of today's ${usd(cost.limitUsd)} limit used`}
+          style={{ width: `${width}%`, height: "100%", background: "#0265dc" }}
+        />
+      </div>
+      <Text size="small" subdued>
+        {cost.exempt ? "Controller · limit not enforced" : `${pct(cost.ratio)}% of ${usd(cost.limitUsd)} limit today`}
+      </Text>
+    </>
+  );
+}
 
 /** How close to the bottom (px) still counts as "following" the thread. */
 const FOLLOW_SLACK = 48;
@@ -129,8 +153,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     });
 
+  const blocked = selected?.cost?.blocked ?? null;
   const send = () => {
-    if (!selected || sending || draft.trim() === "") return;
+    if (!selected || sending || blocked || draft.trim() === "") return;
     const text = draft.trim();
     following.current = true;
     setSending(true);
@@ -151,6 +176,13 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const canPause = !!selected && !pausedIds.includes(selected.id) && (selected.status === "running" || selected.status === "requires_action");
   const canResume = !!selected && (pausedIds.includes(selected.id) || selected.status === "idle");
 
+  const budget = state?.budget ?? null;
+  const addBudget = (amount: 25 | 100) =>
+    run(async () => {
+      await api.addBudget(selected!.id, amount);
+      await onChanged();
+    });
+
   const row = (s: HubSessionView, actions?: ReactNode) => (
     <li key={s.id} className="session-item">
       <button type="button" className="row-btn session-row" aria-current={s.id === selectedId} onClick={() => navigate("sessions", s.id)}>
@@ -170,6 +202,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <div className="sessions-title">
           <Text variant="headline" el="h2" size="large">Sessions</Text>
           <Text subdued>{all.length} Claude Code sessions</Text>
+          {budget && <Text subdued>Fyrd today: {usd(budget.fyrdCostToday)} of {usd(budget.fyrdLimitUsd)}</Text>}
         </div>
         {error && <Alert status="danger" title={error} role="alert" />}
       </div>
@@ -224,6 +257,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 {canResume && (
                   <Button
                     appearance="secondary"
+                    disabled={!!blocked}
                     onClick={() => run(async () => {
                       await api.resume(selected.id);
                       setPausedIds((ids) => ids.filter((id) => id !== selected.id));
@@ -246,6 +280,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                   </Button>
                 )}
               </div>
+              {blocked && (
+                <Alert status="warning" title={blocked === "session" ? "Add budget to continue" : "Sending is paused until midnight except for the Controller"} role="alert" />
+              )}
               {transcript.fault && <Alert status="warning" title={transcript.fault} role="alert" />}
               <div className="thread-log" ref={logRef} onScroll={onLogScroll} role="log" aria-label="Messages">
                 <div className="thread-items" ref={itemsRef}>
@@ -281,7 +318,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     }
                   }}
                 />
-                <Button appearance="primary" disabled={sending || draft.trim() === ""} onClick={send}>Send</Button>
+                <Button appearance="primary" disabled={sending || !!blocked || draft.trim() === ""} onClick={send}>Send</Button>
               </div>
             </>
           )}
@@ -298,11 +335,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               </dl>
               <AddRepo key={selected.id} sessionId={selected.id} />
               <Text variant="headline" el="h4" size="small">Estimated cost</Text>
-              <Text>—</Text>
+              <CostBlock cost={selected.cost} />
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} role="group" aria-label="Add budget">
-                <Button appearance="secondary" size="small" disabled>+$5</Button>
-                <Button appearance="secondary" size="small" disabled>+$25</Button>
-                <Button appearance="secondary" size="small" disabled>+$100</Button>
+                <Button appearance="secondary" size="small" disabled={!selected.cost?.canExtend} onClick={() => addBudget(25)}>+$25</Button>
+                <Button appearance="secondary" size="small" disabled={!selected.cost?.canExtend} onClick={() => addBudget(100)}>+$100</Button>
               </div>
               <Text variant="headline" el="h4" size="small">Tags</Text>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

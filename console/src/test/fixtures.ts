@@ -1,4 +1,4 @@
-import type { FyrdConfig, HubQuestion, HubSessionView, HubState } from "../types";
+import type { FyrdConfig, HubCostView, HubQuestion, HubSessionView, HubState } from "../types";
 
 export const question = (o: Partial<HubQuestion> = {}): HubQuestion => ({
   id: "s1:r1:0", sessionId: "s1", sessionTitle: "builder-ab12", question: "Which DB?", options: ["Postgres", "SQLite"],
@@ -12,5 +12,9 @@ export const hubState = (o: Partial<HubState> = {}): HubState => ({
   sessions: [], questions: [], signedOut: false, lastError: null, lastPollAt: null, controller: null, ...o,
 });
 export const config = (o: Partial<FyrdConfig> = {}): FyrdConfig => ({
-  squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5", ...o,
+  squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5",
+  sessionDailyLimitUsd: 50, fyrdDailyLimitUsd: 500, timeZone: null, ...o,
+});
+export const cost = (o: Partial<HubCostView> = {}): HubCostView => ({
+  costToday: 31, limitUsd: 50, ratio: 0.62, estimated: false, blocked: null, canExtend: false, exempt: false, ...o,
 });
