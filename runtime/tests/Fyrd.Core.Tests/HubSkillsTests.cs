@@ -69,10 +69,11 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void Readme_UploadAllFour_NoFallback_PointsToReplaceAndAdopt()
+    public void Readme_NoUpload_RemovesOldSkills_PointsToReplaceAndAdopt()
     {
         var text = File.ReadAllText(Path.Combine(SkillsDir(), "README.md"));
-        Assert.Contains("Upload all four skills together", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Upload all four skills together", text, StringComparison.Ordinal);
+        Assert.Contains("remove the uploaded fyrd-* skills", text, StringComparison.Ordinal);
         Assert.Contains("Replace Controller", text, StringComparison.Ordinal);
         Assert.Contains("Adopt Controller", text, StringComparison.Ordinal);
         Assert.Contains("https://claude.ai/code", text, StringComparison.Ordinal);
@@ -118,6 +119,46 @@ public sealed class HubSkillsTests
         var recycle = tail.IndexOf("**Recycle.**", StringComparison.Ordinal);
         Assert.True(cap > 0 && recycle > cap, "review request: session cap must come before recycling");
     }
+
+    [Fact]
+    public void HubSkills_LoadsAllFour_InNameOrder_WithDescriptions()
+    {
+        var skills = new Fyrd.Core.Hub.HubSkills(SkillsDir()).List();
+        Assert.Equal(Names, skills.Select(s => s.Name));
+        Assert.All(skills, s =>
+        {
+            Assert.StartsWith("Fyrd Controller only:", s.Description);
+            Assert.StartsWith("# " + s.Name, s.Body);
+        });
+    }
+
+    [Fact]
+    public void HubSkills_Crlf_IsNormalised_AndNoFrontMatterThrows()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "fyrd-skills-" + Guid.NewGuid());
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "a"));
+            File.WriteAllText(Path.Combine(dir, "a", "SKILL.md"), "---\r\nname: a\r\ndescription: \"A\"\r\n---\r\n# a\r\nbody");
+            var s = Assert.Single(new Fyrd.Core.Hub.HubSkills(dir).List());
+            Assert.Equal(("a", "A", "# a\nbody"), (s.Name, s.Description, s.Body));
+            Directory.CreateDirectory(Path.Combine(dir, "b"));
+            File.WriteAllText(Path.Combine(dir, "b", "SKILL.md"), "no front matter");
+            Assert.Throws<InvalidDataException>(() => new Fyrd.Core.Hub.HubSkills(dir).List());
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
+    public void RealSkills_UseSingleLineFrontMatter()
+    {
+        foreach (var n in Names)
+            Assert.Matches(new Regex(@"\A---\r?\nname: [^\r\n]+\r?\ndescription: ""[^""\\\r\n]+""\r?\n---"), Read(n));
+    }
+
+    [Fact]
+    public void HubSkills_MissingDir_IsEmpty() =>
+        Assert.Empty(new Fyrd.Core.Hub.HubSkills(Path.Combine(Path.GetTempPath(), "fyrd-no-skills-" + Guid.NewGuid())).List());
 
     [Fact]
     public void NoSkillPostsToSlack()

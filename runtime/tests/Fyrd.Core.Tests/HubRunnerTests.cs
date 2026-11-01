@@ -13,10 +13,10 @@ public sealed class HubRunnerTests : IDisposable
     private readonly FixedTime _time = new(DateTimeOffset.Parse("2026-10-31T12:00:00Z"));
     private readonly HubMemory _memory;
     private readonly HubPersonas _personas;
-    private readonly ControllerManager _controller;
+    private ControllerManager _controller;
     private readonly HubState _state = new();
     private readonly CostLedger _ledger;
-    private readonly CostGuard _guard;
+    private CostGuard _guard;
 
     public HubRunnerTests()
     {
@@ -36,6 +36,18 @@ public sealed class HubRunnerTests : IDisposable
     {
         _home.Dispose();
         if (Directory.Exists(_seeds)) Directory.Delete(_seeds, true);
+    }
+
+    private string _skillsDir = "";
+    private ControllerManager WithSkills()
+    {
+        _skillsDir = Path.Combine(_seeds, "skills", "fyrd-build");
+        Directory.CreateDirectory(_skillsDir);
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv1");
+        var config = new ConfigStore(_home.Paths);
+        _controller = new ControllerManager(_cloud, _personas, _memory, config, _home.Paths, null, new HubSkills(Path.Combine(_seeds, "skills")));
+        _guard = new CostGuard(_ledger, config, _cloud, _controller);
+        return _controller;
     }
 
     private HubRunner Make() => new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard);
@@ -285,6 +297,114 @@ public sealed class HubRunnerTests : IDisposable
         await Make().PollOnceAsync(default);
 
         Assert.Single(_state.Questions);
+    }
+
+    [Fact]
+    public async Task Poll_SkillChanged_PostsOneRefresh_ThenNothing_AndAdoptDoesNotDoublePost()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        await runner.PollOnceAsync(default);
+        await runner.PollOnceAsync(default);
+
+        var sent = Assert.Single(_cloud.Sent);
+        Assert.Equal("session_ctl", sent.SessionId);
+        Assert.StartsWith(ControllerManager.PromptPreamble, sent.Text);
+        Assert.Contains("<controller-skill name=\"fyrd-build\"", sent.Text);
+        Assert.Contains("v2", sent.Text);
+        Assert.Equal(_controller.InstructionsHash(), _controller.PostedInstructionsHash);
+    }
+
+    [Theory]
+    [InlineData("running")]
+    [InlineData("requires_action")]
+    public async Task Poll_SkillChanged_ControllerBusy_WaitsForIdle(string status)
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        _cloud.SetSession(new CloudSession("session_ctl", "controller", status, "connected", null, [], FakeCloudSessions.Empty));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+
+        _cloud.SetSession(new CloudSession("session_ctl", "controller", "idle", "connected", null, [], FakeCloudSessions.Empty));
+        await runner.PollOnceAsync(default);
+        Assert.Single(_cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_SkillChanged_ControllerArchived_NoRefresh()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
+        await Make().PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_StateFromBeforeUpgrade_NoInstructionsHash_SendsOneRefresh()
+    {
+        await Adopt("session_ctl", "controller");
+        _controller.PostedInstructionsHash = null; // as in a controller.json written before this feature
+        _cloud.SetByTag("fyrd-hub");
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        await runner.PollOnceAsync(default);
+        var sent = Assert.Single(_cloud.Sent);
+        Assert.StartsWith(ControllerManager.PromptPreamble, sent.Text);
+    }
+
+    [Fact]
+    public async Task Poll_SkillsDirMissing_DoesNotStripSkills()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        Directory.Delete(Path.Combine(_seeds, "skills"), true);
+        await Make().PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Poll_SkillFileUnparseable_ReportsErrorAndSendsNothing()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "half written, no front matter");
+        await Make().PollOnceAsync(default);
+        Assert.Empty(_cloud.Sent);
+        Assert.Contains("controller update", _state.LastError);
+    }
+
+    [Fact]
+    public async Task Poll_PersonaEdited_RefreshesInstructions_AndCarriesMemory()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        _memory.Add(HubMemory.Shared, "Remember me.", "owner", _time.GetUtcNow());
+        var runner = Make();
+        await runner.PollOnceAsync(default); // posts the memory update
+        _cloud.Sent.Clear();
+
+        _personas.Save(_personas.Get("builder")! with { Definition = "Build differently." });
+        await runner.PollOnceAsync(default);
+        var sent = Assert.Single(_cloud.Sent);
+        Assert.Contains("Build differently.", sent.Text);
+        Assert.Contains("Remember me.", sent.Text);
+        await runner.PollOnceAsync(default);
+        Assert.Single(_cloud.Sent);
     }
 
     [Fact]

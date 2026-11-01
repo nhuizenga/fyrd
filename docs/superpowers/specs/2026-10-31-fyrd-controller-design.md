@@ -167,16 +167,14 @@ Why: the console can then render the question's options as buttons.
 
 ## 10. Skills
 
-The skills ship as **claude.ai account skills** (owner's choice). Every cloud session the owner runs can see them, so they are prefixed `fyrd-` and each one says it is for the Fyrd Controller only.
+The skills are delivered **inline**: the service reads `skills/controller/*/SKILL.md` and embeds each one in the Controller message as a `<controller-skill>` block. Nothing is uploaded to claude.ai. Each skill is still named with a `fyrd-` prefix and says it is for the Fyrd Controller only. (Earlier versions shipped them as claude.ai account skills; inline delivery replaced that.)
 
 1. `fyrd-research`: start or recycle a Researcher for a uri.
 2. `fyrd-build`: one Builder per uri, in parallel.
 3. `fyrd-peasant`: create, recycle and tear down sessions, plus the naming, tags and settings rules from §6.
 4. `fyrd-watch`: PR Monitor or Slack Monitor.
 
-The source lives in this repo, for example under `skills/controller/` *(Claude's call)*, and is uploaded to claude.ai.
-
-**Fallback** *(Claude's call)*: a spike may show that account skills can't be loaded in sessions created through `/v1/sessions`. In that case the service pastes the skill text into the Controller's `append_system_prompt`, as it already does for personas, and the skill files stay the source either way.
+The source lives in this repo under `skills/controller/`. The service reads the files on every poll pass. When the Controller's instructions (definition, settings, personas or skills) change, it re-sends the full Controller message while the Controller is idle; the message says the latest instructions replace earlier ones. Hashing of the instructions part (`PostedInstructionsHash`) works like the memory hash. Inline delivery is now the primary path, not a fallback.
 
 ## 11. Hardening `controller.md`
 
@@ -213,7 +211,7 @@ These three screens **replace** the current Inbox, Board and Memory tabs (owner'
 ## 13. Open risks
 
 1. **Artifact inputs.** It is not verified that a cloud session can read a claude.ai artifact link, nor which tool it would use. Check this in the same spike as `AskUserQuestion` answers (§9).
-2. **Uploading account skills.** It's unknown whether claude.ai has an API to upload them. If not, every skill edit is a manual upload.
+2. **Uploading account skills.** Not needed: skills are delivered inline (§10). Account skills uploaded earlier should be deleted so no stale copy exists.
 3. **Cross-repo `add_repo`.** It is documented in the tool schema but not yet tried by a Fyrd peasant.
 4. **Memory poisoning.** Any session can write memory, and a Slack Monitor reads untrusted text. The console shows each entry's source session so the owner can remove bad entries. The Monitor persona forbids writing memory from content it reads.
 5. **Polling cost.** The service polls every live `fyrd-hub` session for memory blocks and pending questions. That is fine for a handful of sessions.
