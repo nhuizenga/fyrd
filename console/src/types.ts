@@ -62,12 +62,12 @@ export interface TranscriptQuestion {
   options: TranscriptOption[];
 }
 
-/** One frame of `GET /api/hub/sessions/{id}/stream` (`event: item`). */
+/** One frame of `GET /api/hub/sessions/{id}/stream` (`event: item`). Live-only `event: progress` frames reuse the shape with `kind: "progress"`. */
 export interface TranscriptItem {
   key: string;
   seq: number;
   role: "user" | "agent";
-  kind: "text" | "question" | "answer";
+  kind: "text" | "question" | "answer" | "progress";
   text: string;
   at: string;
   questions?: TranscriptQuestion[] | null;

@@ -249,7 +249,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               {transcript.fault && <Alert status="warning" title={transcript.fault} role="alert" />}
               <div className="thread-log" ref={logRef} onScroll={onLogScroll} role="log" aria-label="Messages">
                 <div className="thread-items" ref={itemsRef}>
-                {transcript.items.length === 0 && unshown.length === 0 && (
+                {transcript.items.length === 0 && !transcript.progress && unshown.length === 0 && (
                   <Text subdued>{transcript.connected ? "No messages yet." : "Loading…"}</Text>
                 )}
                 {transcript.items.map((item) => (
@@ -260,6 +260,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     onChanged={onChanged}
                   />
                 ))}
+                {transcript.progress && (
+                  <ThreadItem item={transcript.progress} pending={[]} onChanged={onChanged} />
+                )}
                 {unshown.length > 0 && (
                   <section className="msg msg-agent msg-question" aria-label="Question waiting for you">
                     <QuestionGroup group={unshown} onChanged={onChanged} />

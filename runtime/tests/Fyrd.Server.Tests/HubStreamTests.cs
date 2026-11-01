@@ -79,6 +79,25 @@ public class HubStreamTests
     }
 
     [Fact]
+    public async Task Stream_RelaysEphemeralEventsAsProgressFrames_WithoutId()
+    {
+        using var f = Hub();
+        var raw = JsonDocument.Parse("""{"type":"system","subtype":"task_summary","summary":"Running the tests"}""").RootElement.Clone();
+        f.Cloud.Streams[SessionId] =
+        [
+            Event(1, """{"type":"user","message":{"content":"Build it"}}"""),
+            new StreamedEvent(0, new SessionEvent("", "system", DateTimeOffset.UnixEpoch, null, raw), Ephemeral: true),
+        ];
+        var (frames, _, _) = await ReadFrames(f.CreateClient(), 2);
+
+        Assert.Equal(["item", "progress"], frames.Select(fr => fr.Event));
+        Assert.Null(frames[1].Id);
+        var p = JsonDocument.Parse(frames[1].Data!).RootElement;
+        Assert.Equal("progress", p.GetProperty("kind").GetString());
+        Assert.Equal("Running the tests", p.GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task Stream_RelaysTranscriptItems()
     {
         using var f = Hub();

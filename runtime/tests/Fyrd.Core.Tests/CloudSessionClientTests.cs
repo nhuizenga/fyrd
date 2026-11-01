@@ -322,6 +322,28 @@ public sealed class CloudSessionClientTests : IDisposable
     }
 
     [Fact]
+    public async Task StreamEvents_YieldsProgressEphemeralEvents_FlaggedAndUnsequenced()
+    {
+        const string sse = """
+            event: ephemeral_event
+            data: {"event_type":"system","payload":{"type":"system","subtype":"task_summary","summary":"Running the tests"},"timestamp":"2026-11-01T10:00:02Z"}
+
+            event: ephemeral_event
+            data: {"event_type":"system","payload":{"type":"system","subtype":"hook_started"}}
+
+            event: ephemeral_event
+            data: {"event_type":"stream_event","payload":{"type":"stream_event"}}
+            """;
+        var events = await Drain(Client(new FakeHandler(HttpStatusCode.OK, sse)).StreamEventsAsync("session_01abc", null));
+
+        var e = Assert.Single(events);
+        Assert.True(e.Ephemeral);
+        Assert.Equal(0, e.Sequence);
+        Assert.Equal("system", e.Event.Type);
+        Assert.Equal("Running the tests", e.Event.Raw.GetProperty("summary").GetString());
+    }
+
+    [Fact]
     public async Task StreamEvents_ParsesClientEventsOnly_NoBetaHeader()
     {
         const string sse = """

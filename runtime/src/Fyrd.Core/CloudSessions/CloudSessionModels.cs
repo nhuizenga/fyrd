@@ -29,8 +29,11 @@ public sealed record CloudSession(
 /// <summary><c>Text</c> is the joined text blocks of <c>user</c> and <c>assistant</c> events; null otherwise.</summary>
 public sealed record SessionEvent(string Uuid, string Type, DateTimeOffset CreatedAt, string? Text, JsonElement Raw);
 
-/// <summary>A saved event read from the live stream; <c>Sequence</c> is its <c>sequence_num</c> (resume after it).</summary>
-public sealed record StreamedEvent(long Sequence, SessionEvent Event);
+/// <summary>
+/// An event read from the live stream. A saved one has a <c>Sequence</c> (its <c>sequence_num</c>; resume after it). An
+/// <c>Ephemeral</c> one is live-only progress: it has no sequence (0), is never replayed, and must not move the resume point.
+/// </summary>
+public sealed record StreamedEvent(long Sequence, SessionEvent Event, bool Ephemeral = false);
 
 public sealed record EventPage(IReadOnlyList<SessionEvent> Events, bool HasMore, string? FirstId, string? LastId);
 

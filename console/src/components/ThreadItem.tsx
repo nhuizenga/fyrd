@@ -1,4 +1,4 @@
-import { Text } from "@servicetitan/anvil2";
+import { Spinner, Text } from "@servicetitan/anvil2";
 import type { HubQuestion, TranscriptItem } from "../types";
 import CopyButton from "./CopyButton";
 import Markdown from "./Markdown";
@@ -8,6 +8,14 @@ import QuestionGroup from "./QuestionGroup";
 export default function ThreadItem({ item, pending, onChanged }: {
   item: TranscriptItem; pending: HubQuestion[]; onChanged: () => void | Promise<void>;
 }) {
+  if (item.kind === "progress") {
+    return (
+      <div className="msg msg-agent msg-progress">
+        <Spinner size="small" role="status" aria-label="In progress" />
+        <span>{item.text}</span>
+      </div>
+    );
+  }
   if (item.kind === "question") {
     if (pending.length > 0) {
       return (
