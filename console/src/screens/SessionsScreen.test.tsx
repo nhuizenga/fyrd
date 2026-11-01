@@ -296,6 +296,13 @@ it("raise buttons are disabled while a raise is in flight, and the returned view
   expect(screen.getByRole("button", { name: "+$25 to today's limit" })).toBeDisabled();
 });
 
+it("raises stay disabled while the fyrd is over its limit, even if a view says canExtend", async () => {
+  renderScreen(withCost({ blocked: "fyrd", ratio: 0.95, canExtend: true }));
+  await open(/alpha-1/);
+  expect(screen.getByRole("button", { name: "+$25 to today's limit" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "+$100 to today's limit" })).toBeDisabled();
+});
+
 it("session block disables Send and Resume with an Alert", async () => {
   const st = withCost({ blocked: "session", ratio: 1, costToday: 50 });
   st.sessions[0] = { ...st.sessions[0], status: "idle" };

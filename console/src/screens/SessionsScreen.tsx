@@ -355,7 +355,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     appearance="secondary"
                     size="small"
                     aria-label={`+$${n} to today's limit`}
-                    disabled={!cost?.canExtend || raising}
+                    disabled={!cost?.canExtend || blocked === "fyrd" || raising}
                     onClick={() => addBudget(selected.id, cost!.limitUsd, n)}
                   >
                     +${n}
