@@ -21,12 +21,13 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `status_bucket` other than `working` or `blocked` (idle): mark it to recycle under the same title. Don't archive it yet.
    - Busy: try the next suffix (`-2`, `-3`, …) with the same check.
    Archive-and-recreate is the only reset; slash commands like `/clear` can't be sent.
-4. **Session cap.** Count live Fyrd sessions: you plus every live peasant (recycling doesn't change the count). If the new session would exceed `session_cap` from `<hub-settings>`, call `AskUserQuestion` with the options `Start fewer now`, `Tear down idle sessions`, `Cancel`:
+4. **Repo.** Apply the Repo rule in the Controller prompt: infer the repo, else ask with `AskUserQuestion` (likely repos plus `No repo`). This includes `Wait for your task.` starts: "Start a new builder" asks which repo. Decide it before the session-cap check.
+5. **Session cap.** Count live Fyrd sessions: you plus every live peasant (recycling doesn't change the count). If the new session would exceed `session_cap` from `<hub-settings>`, call `AskUserQuestion` with the options `Start fewer now`, `Tear down idle sessions`, `Cancel`:
    - `Start fewer now`: start only as many as fit, and say which were left out.
    - `Tear down idle sessions`: ask again with a `multiSelect: true` `AskUserQuestion` whose options are the idle peasants by title, each Monitor labeled as watching (for example `monitor-support (watching #support)`). Tear down only the ones the owner picks (Tear down below), then start what now fits. Never tear down a session the owner didn't pick.
    - `Cancel`: start none, and archive nothing.
-5. **Recycle.** Only now, and only for sessions actually being started, tear down each session marked in step 3 (Tear down below; for a Monitor, delete its trigger first).
-6. **Create.** Call `mcp__claude-code-remote__create_session` with:
+6. **Recycle.** Only now, and only for sessions actually being started, tear down each session marked in step 3 (Tear down below; for a Monitor, delete its trigger first).
+7. **Create.** Call `mcp__claude-code-remote__create_session` with:
    - `title`: from step 1.
    - `tags`: exactly `["fyrd-hub", "fyrd-role-<role>"]`.
    - `environment_id`: from `<hub-settings>` (omit when empty).
@@ -34,10 +35,21 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `model`: the `model` attribute of that role's `<peasant-persona>`.
    - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`.
    - `prompt`: `Wait for your task.`
-   - `source_url`: only when the task names the one repo to work in.
-7. Reply with the title and session id, and stop.
+   - `source_url`: from step 4 (omit only for `No repo`).
+8. Reply with the title and session id, and stop.
 
-A later task for a running peasant goes in `mcp__claude-code-remote__send_message` (`session_id`, `message`). The first task always goes in `prompt`.
+A later task for a running peasant goes in `mcp__claude-code-remote__send_message` (`session_id`, `message`). The first task always goes in `prompt`. A message that gives a Builder new work must include a `Base branch:` line (the branch the owner names, else `the repo's default branch`).
+
+## Review request from a Builder
+
+A message starting `Review request:` from a Builder names a PR, its base branch, the spec links and the Builder's title and session id. Start a Reviewer and a Validator for it.
+
+1. **Titles.** `reviewer-<builder suffix>` and `validator-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
+2. **Repo.** It comes from the PR, so ask nothing.
+3. **Session cap.** Check once for both sessions. If over, ask as in Start step 5.
+4. **Recycle.** As in Start step 6, and only for sessions actually being started.
+5. **Create.** Reviewer `prompt`: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.` followed by the spec links. Validator `prompt`: `Validate pull request <url> against the spec below. Base branch: <base>. Reply with your findings. If anything fails, also send them to the Builder with send_message (session <builder id>).` followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
+6. Reply with both titles and session ids.
 
 ## Tear down
 
