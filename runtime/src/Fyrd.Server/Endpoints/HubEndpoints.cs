@@ -23,7 +23,7 @@ internal static class HubEndpoints
 
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
-    private sealed record BudgetBody(decimal? AmountUsd);
+    private sealed record BudgetBody(JsonElement? AmountUsd);
     private sealed record AnswerBody(string? Choice, string? Text);
 
     public static IEndpointRouteBuilder MapHub(this IEndpointRouteBuilder app)
@@ -115,26 +115,33 @@ internal static class HubEndpoints
                 })));
 
         // Raises one session's limit for today. Only +$25 and +$100, and only once the session has used 90% of its limit.
-        group.MapPost("/sessions/{id}/budget", (string id, BudgetBody? body, HubState state, CostLedger ledger, CostGuard guard) =>
+        group.MapPost("/sessions/{id}/budget", (string id, BudgetBody? body, HubState state, CostGuard guard) =>
             InHub(id, state, () => Task.FromResult(ApiErrors.Run(() =>
             {
-                if (body?.AmountUsd is not { } amount || !CostGuard.ExtendAmounts.Contains(amount))
+                if (body?.AmountUsd is not { ValueKind: JsonValueKind.Number } n || !n.TryGetDecimal(out var amount)
+                    || !CostGuard.ExtendAmounts.Contains(amount))
                     return Bad("amountUsd must be 25 or 100.");
-                var cost = state.Sessions.First(s => s.Id == id).Cost;
-                if (cost is null) return Results.Problem("This session has no cost data yet.", statusCode: StatusCodes.Status409Conflict);
-                if (cost.Exempt) return Results.Problem("The Controller has no spend limit to raise.", statusCode: StatusCodes.Status409Conflict);
-                if (!cost.CanExtend)
-                    return Results.Problem("A limit can be raised once 90% of it is used.", statusCode: StatusCodes.Status409Conflict);
-                ledger.AddExtra(id, amount);
-                state.RequestPoll();
-                var (views, _) = guard.Build(state.Sessions.Select(s => s.Id).ToList());
-                return Results.Ok(views[id]);
+                // One snapshot of the session list: the poll swaps it as a whole.
+                var ids = state.Sessions.Select(s => s.Id).ToList();
+                if (!ids.Contains(id))
+                    return Results.Problem($"Session '{id}' is not a hub session.", statusCode: StatusCodes.Status404NotFound);
+                var (status, view) = guard.TryExtend(id, amount, ids);
+                return status switch
+                {
+                    CostGuard.ExtendStatus.Ok => RaisedOk(state, view),
+                    CostGuard.ExtendStatus.NoData => Results.Problem("This session has no cost data yet.", statusCode: StatusCodes.Status409Conflict),
+                    CostGuard.ExtendStatus.Exempt => Results.Problem("The Controller has no spend limit to raise.", statusCode: StatusCodes.Status409Conflict),
+                    CostGuard.ExtendStatus.FyrdBlocked => Results.Problem("Fyrd reached its daily spend limit; raising one session does not lift it.", statusCode: StatusCodes.Status409Conflict),
+                    _ => Results.Problem("A limit can be raised once 90% of it is used.", statusCode: StatusCodes.Status409Conflict),
+                };
             }))));
 
         group.MapPost("/questions/{id}/answer", (string id, AnswerBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
         {
             var q = state.Questions.FirstOrDefault(x => x.Id == id);
             if (q is null) return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
+            // Answering resumes the session, so a budget block applies here too.
+            if (BlockedError(q.SessionId, state) is { } blocked) return Task.FromResult(blocked);
 
             var hasChoice = !string.IsNullOrEmpty(body?.Choice);
             var hasText = !string.IsNullOrWhiteSpace(body?.Text);
@@ -340,6 +347,12 @@ internal static class HubEndpoints
             "fyrd" => Results.Problem(FyrdBlocked, statusCode: StatusCodes.Status409Conflict),
             _ => null,
         };
+
+    private static IResult RaisedOk(HubState state, HubCostView? view)
+    {
+        state.RequestPoll();
+        return Results.Ok(view);
+    }
 
     private static IResult Bad(string detail) => Results.Problem(detail, statusCode: StatusCodes.Status400BadRequest);
 

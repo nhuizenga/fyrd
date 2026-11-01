@@ -106,15 +106,13 @@ public sealed partial class HubRunner(
 
         Prune(sessions.Select(s => s.Id).Concat(failed).ToHashSet(StringComparer.Ordinal));
 
-        // Costs are settled before publishing so the views carry them. A guard failure keeps the previous cost.
-        HubBudgetView? budget = state.Budget;
+        // Views carry costs when published; interrupts and Controller messages come after, so slow calls never delay them.
+        CostPass? costPass = null;
+        var costLive = views.Select(v => (v.Id, v.Title)).ToList();
         try
         {
-            var controllerLive = _controllerId is { } c && sessions.Any(x => x.Id == c) && !failed.Contains(c);
-            var pass = await guard.RunAsync(views.Select(v => (v.Id, v.Title)).ToList(), controllerLive, ct);
-            budget = pass.Budget;
-            if (pass.Error is not null) lastError ??= pass.Error;
-            views = views.Select(v => pass.Views.TryGetValue(v.Id, out var cost) ? v with { Cost = cost } : v).ToList();
+            costPass = guard.Build(costLive.Select(l => l.Id).ToList());
+            views = views.Select(v => costPass.Views.TryGetValue(v.Id, out var cost) ? v with { Cost = cost } : v).ToList();
         }
         catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
                                   && (e is not OperationCanceledException || !ct.IsCancellationRequested))
@@ -123,7 +121,7 @@ public sealed partial class HubRunner(
             views = views.Select(v => v.Cost is null && previousViews.TryGetValue(v.Id, out var old) ? v with { Cost = old.Cost } : v).ToList();
         }
 
-        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, budget);
+        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, costPass?.Budget ?? state.Budget);
 
         try
         {
@@ -133,6 +131,20 @@ public sealed partial class HubRunner(
                                   && (e is not OperationCanceledException || !ct.IsCancellationRequested))
         {
             lastError ??= $"memory update: {e.Message}";
+        }
+
+        if (costPass is not null)
+        {
+            try
+            {
+                var controllerLive = _controllerId is { } c && sessions.Any(x => x.Id == c) && !failed.Contains(c);
+                lastError ??= await guard.EnforceAsync(costLive, costPass, controllerLive, ct);
+            }
+            catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
+                                      && (e is not OperationCanceledException || !ct.IsCancellationRequested))
+            {
+                lastError ??= $"budget: {e.Message}";
+            }
         }
 
         state.SignedOut = false;

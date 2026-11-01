@@ -22,6 +22,9 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
         public readonly Dictionary<DateOnly, decimal> Completed = [];
         public readonly HashSet<string> SeenResults = new(StringComparer.Ordinal);
         public decimal ResultSum;
+        public int ResultsSeen, CostlessResults;
+        /// <summary>Spend that cannot be attributed to the turn in progress (history this process did not see as results).</summary>
+        public decimal? Baseline;
         public decimal? LastTotal;
         public decimal? Cumulative;
         public bool HasData;
@@ -32,6 +35,9 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
         public string Title { get; set; } = "";
         public decimal CostToday { get; set; }
         public decimal ExtraUsd { get; set; }
+        /// <summary>The limit a session was last interrupted at.</summary>
+        public decimal? InterruptedAtLimit { get; set; }
+        /// <summary>The limit the Controller was last told about.</summary>
         public decimal? NotifiedAtLimit { get; set; }
     }
 
@@ -47,6 +53,10 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
     private readonly Dictionary<string, SessionCost> _sessions = new(StringComparer.Ordinal);
     private DayFile? _day;
     private bool _dirty;
+    private string? _saveError;
+
+    /// <summary>One turn costing more than this is not assumed to be in flight when a session is first seen (see <see cref="Observe"/>).</summary>
+    public const decimal MaxInFlightUsd = 25m;
 
     public TimeZoneInfo TimeZone => FyrdConfig.FindTimeZone(config.Load().TimeZone) ?? TimeZoneInfo.Local;
 
@@ -67,6 +77,7 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
                 var s = Get(sessionId);
                 if (e.Uuid.Length > 0 && !s.SeenResults.Add(e.Uuid)) continue;
 
+                s.ResultsSeen++;
                 var turn = TurnCost(e.Raw);
                 var total = Number(Find(e.Raw, "total_cost_usd"));
                 if (turn is null && total is { } t)
@@ -75,7 +86,13 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
                     turn = s.LastTotal is { } last && t >= last ? t - last : t;
                 }
                 if (total is { } now) s.LastTotal = now;
-                if (turn is not { } cost) continue;
+                if (turn is not { } cost)
+                {
+                    // A result with no usable cost: spend we cannot attribute. Re-derive the baseline at the next observation.
+                    s.CostlessResults++;
+                    s.Baseline = null;
+                    continue;
+                }
 
                 var at = e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt;
                 var day = LocalDate(at, tz);
@@ -97,6 +114,15 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
         lock (_gate)
         {
             var s = Get(sessionId);
+            // The first time this process sees a cumulative figure, anything it cannot explain with result costs is
+            // history, not a turn in progress: results without cost fields, or a gap larger than one plausible turn.
+            // Without this, lifetime spend would be charged to today (and again every day).
+            if (s.Baseline is null)
+            {
+                var gap = Math.Max(0, cost - s.ResultSum);
+                var unattributable = s.ResultsSeen > 0 && (s.CostlessResults > 0 || s.ResultSum == 0);
+                s.Baseline = unattributable || gap > MaxInFlightUsd ? gap : 0;
+            }
             s.Cumulative = cost;
             s.HasData = true;
         }
@@ -114,7 +140,7 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
             var today = LocalDate(time.GetUtcNow(), tz);
             if (_sessions.TryGetValue(sessionId, out var s) && s.HasData)
             {
-                var inFlight = s.Cumulative is { } c ? Math.Max(0, c - s.ResultSum) : 0;
+                var inFlight = s.Cumulative is { } c ? Math.Max(0, c - s.ResultSum - (s.Baseline ?? 0)) : 0;
                 return new DayCost(s.Completed.GetValueOrDefault(today) + inFlight, inFlight > 0, true);
             }
             return Day(today).Sessions.TryGetValue(sessionId, out var d) ? new DayCost(d.CostToday, false, true) : default;
@@ -144,6 +170,16 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
         lock (_gate) return Day(Today).Sessions.TryGetValue(sessionId, out var d) ? d.ExtraUsd : 0;
     }
 
+    public decimal? InterruptedAtLimit(string sessionId)
+    {
+        lock (_gate) return Day(Today).Sessions.TryGetValue(sessionId, out var d) ? d.InterruptedAtLimit : null;
+    }
+
+    public void SetInterrupted(string sessionId, decimal limit)
+    {
+        lock (_gate) { Entry(sessionId).InterruptedAtLimit = limit; _dirty = true; Save(); }
+    }
+
     public decimal? NotifiedAtLimit(string sessionId)
     {
         lock (_gate) return Day(Today).Sessions.TryGetValue(sessionId, out var d) ? d.NotifiedAtLimit : null;
@@ -164,6 +200,12 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
         lock (_gate) { Day(Today).FyrdNotifiedAtLimit = limit; _dirty = true; Save(); }
     }
 
+    /// <summary>Runs <paramref name="action"/> while holding the ledger's lock, so a check and a raise cannot interleave.</summary>
+    public T Atomically<T>(Func<T> action)
+    {
+        lock (_gate) return action();
+    }
+
     /// <summary>Raises one session's limit for today and saves at once.</summary>
     public void AddExtra(string sessionId, decimal amountUsd)
     {
@@ -179,6 +221,12 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
     public void Flush()
     {
         lock (_gate) Save();
+    }
+
+    /// <summary>The last save failure, if the file is still unsaved. The in-memory state stays authoritative and the next save retries.</summary>
+    public string? SaveError
+    {
+        get { lock (_gate) return _saveError; }
     }
 
     private SessionCost Get(string id) =>
@@ -210,15 +258,27 @@ public sealed class CostLedger(FyrdPaths paths, ConfigStore config, TimeProvider
             if (File.Exists(_file))
                 return JsonSerializer.Deserialize<DayFile>(File.ReadAllText(_file), Json.Options) ?? new DayFile();
         }
-        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException) { }
+        catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
+        {
+            // Keep the unreadable file so the owner can see what was lost; raises and markers restart empty.
+            try { File.Copy(_file, _file + ".bak", overwrite: true); } catch (Exception c) when (c is IOException or UnauthorizedAccessException) { }
+        }
         return new DayFile();
     }
 
     private void Save()
     {
         if (!_dirty || _day is null) return;
-        AtomicFile.Write(_file, JsonSerializer.Serialize(_day, Json.Options));
-        _dirty = false;
+        try
+        {
+            AtomicFile.Write(_file, JsonSerializer.Serialize(_day, Json.Options));
+            _dirty = false;
+            _saveError = null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _saveError = e.Message; // stays dirty: the next save retries
+        }
     }
 
     /// <summary>Sum of <c>costUSD</c> over the models in <c>model_usage_since_last_result</c>; null when the map is absent or has no costs.</summary>

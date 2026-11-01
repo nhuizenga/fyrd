@@ -50,8 +50,15 @@ public sealed class CostGuardTests : IDisposable
         _ledger.Feed(id, [new SessionEvent(uuid.Length > 0 ? uuid : Guid.NewGuid().ToString(), "result", _time.GetUtcNow(), null, raw)]);
     }
 
-    private Task<CostPass> Run(bool controllerLive = true, params string[] ids) =>
-        _guard.RunAsync(ids.Select(i => (i, i)).ToList(), controllerLive, default);
+    private sealed record Ran(IReadOnlyDictionary<string, HubCostView> Views, HubBudgetView Budget, string? Error);
+
+    private async Task<Ran> Run(bool controllerLive = true, params string[] ids)
+    {
+        var live = ids.Select(i => (i, i)).ToList();
+        var pass = _guard.Build(ids);
+        var error = await _guard.EnforceAsync(live, pass, controllerLive, default);
+        return new Ran(pass.Views, pass.Budget, error);
+    }
 
     private void Limits(decimal session = 50, decimal fyrd = 500) =>
         _config.Save(_config.Load() with { SessionDailyLimitUsd = session, FyrdDailyLimitUsd = fyrd });
@@ -117,6 +124,57 @@ public sealed class CostGuardTests : IDisposable
         await Run(true, Peasant, Ctl);
         Assert.Equal(50m, _ledger.NotifiedAtLimit(Peasant));
         Assert.Single(_cloud.Sent);
+        Assert.Equal([Peasant], _cloud.Interrupted); // the retry only sends: no second interrupt
+    }
+
+    [Fact]
+    public async Task ControllerExistsButNotLive_NotifiedLater_WithoutReInterrupt()
+    {
+        await AdoptController();
+        Spend(Peasant, 60);
+        await Run(false, Peasant); // the Controller could not be read this pass
+        Assert.Equal([Peasant], _cloud.Interrupted);
+        Assert.Empty(_cloud.Sent);
+        Assert.Null(_ledger.NotifiedAtLimit(Peasant));
+
+        await Run(true, Peasant, Ctl);
+        await Run(true, Peasant, Ctl);
+        Assert.Equal([Peasant], _cloud.Interrupted);
+        Assert.Single(_cloud.Sent);
+    }
+
+    [Fact]
+    public async Task FyrdBlocked_NoRaiseOffered()
+    {
+        Limits(fyrd: 60);
+        Spend(Peasant, 46);
+        Spend(Other, 20);
+        var pass = await Run(false, Peasant, Other);
+        Assert.False(pass.Views[Peasant].CanExtend);
+        Assert.Equal(CostGuard.ExtendStatus.FyrdBlocked, _guard.TryExtend(Peasant, 25, [Peasant, Other]).Status);
+        Assert.Equal(0m, _ledger.ExtraUsd(Peasant));
+    }
+
+    [Fact]
+    public void TryExtend_SecondRaiseWithoutNewSpend_Refused()
+    {
+        Spend(Peasant, 46);
+        Assert.Equal(CostGuard.ExtendStatus.Ok, _guard.TryExtend(Peasant, 25, [Peasant]).Status);
+        Assert.Equal(CostGuard.ExtendStatus.TooEarly, _guard.TryExtend(Peasant, 25, [Peasant]).Status);
+        Assert.Equal(25m, _ledger.ExtraUsd(Peasant));
+    }
+
+    [Fact]
+    public async Task SaveFailure_ReportedAndRetried_ViewsStillBuilt()
+    {
+        Spend(Peasant, 10);
+        Directory.CreateDirectory(Path.Combine(_home.Paths.HubDir, "costs.json")); // makes every write fail
+        var pass = await Run(false, Peasant);
+        Assert.Contains("costs.json", pass.Error);
+        Assert.Equal(10m, pass.Views[Peasant].CostToday);
+        Directory.Delete(Path.Combine(_home.Paths.HubDir, "costs.json"));
+        Assert.Null((await Run(false, Peasant)).Error);
+        Assert.Equal(10m, new CostLedger(_home.Paths, _config, _time).TodayCost(Peasant).Cost);
     }
 
     [Fact]
