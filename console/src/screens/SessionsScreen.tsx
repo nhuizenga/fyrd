@@ -586,9 +586,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                               aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
                               className="pr-ready"
                               onClick={() => prAction(() => api.markPrReady(selected.id, u))}
-                            >
-                              Mark ready
-                            </Button>
+                            />
                           )}
                           {st?.canMerge && (
                             <Button
