@@ -20,6 +20,9 @@ public sealed record PullRequestStatus(string Url, int Number, string Title, str
     /// <summary>The first failing check, or null.</summary>
     public FailingCheck? FailingCheck { get; init; }
 
+    /// <summary>Every failing check (the first is <see cref="FailingCheck"/>).</summary>
+    public IReadOnlyList<FailingCheck> FailingChecks { get; init; } = [];
+
     /// <summary><c>none</c>, <c>commented</c>, <c>approved</c> or <c>changes_requested</c>.</summary>
     public string Review { get; init; } = "none";
 

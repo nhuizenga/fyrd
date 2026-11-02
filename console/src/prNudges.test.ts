@@ -63,6 +63,19 @@ describe("nudgesFor", () => {
     expect(fix.text).toBe(`${URL} has merge conflicts with main. Merge main in (no force-push), fix, run the tests, push, and reply as before.`);
   });
 
+  it("Fix failing checks names every failing check", () => {
+    const fix = nudgesFor(st({ checks: "failing", failingCheck: { name: "lint", url: null },
+      failingChecks: [{ name: "lint", url: null }, { name: "build", url: null }] }), [ctl, builder], ctl).find((x) => x.kind === "fix")!;
+    expect(fix.text).toBe(`Checks are failing on ${URL}: lint, build. Fix them, run the tests, push, and reply as before.`);
+  });
+
+  it("an archived Builder is never the target", () => {
+    const archived = session({ id: "b0", title: "builder-0", role: "builder", status: "archived", branch: "fyrd/alpha", pullRequests: [URL] });
+    expect(owningBuilder(URL, "fyrd/alpha", [archived, builder])?.id).toBe("b1");
+    expect(owningBuilder(URL, "fyrd/alpha", [archived])).toBeNull();
+    expect(kinds(nudgesFor(st({ checks: "failing" }), [ctl, archived], ctl))).not.toContain("fix");
+  });
+
   it("Fix failing checks is hidden when the checks pass, or when no Builder owns the PR", () => {
     expect(kinds(nudgesFor(st(), [ctl, builder], ctl))).not.toContain("fix");
     expect(kinds(nudgesFor(st({ checks: "failing" }), [ctl], ctl))).not.toContain("fix");

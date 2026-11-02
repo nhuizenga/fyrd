@@ -1127,6 +1127,21 @@ describe("PR nudges", () => {
     expect(await within(details).findByText("Sent to controller")).toBeInTheDocument();
   });
 
+  it("a rapid double send of one nudge messages the session once", async () => {
+    let release: () => void = () => {};
+    const details = await openMenu(prStatus());
+    vi.mocked(api.sendMessage).mockImplementation(() => new Promise<undefined>((r) => { release = () => r(undefined); }));
+    const trigger = within(details).getByRole("button", { name: "Ask for help with #12" });
+    const menuId = trigger.getAttribute("aria-controls")!;
+    const item = () => within(document.getElementById(menuId)!).getByRole("menuitem", { name: "Request validation" });
+    await userEvent.click(item());
+    await userEvent.click(trigger);
+    await userEvent.click(item());
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    release();
+    await within(details).findByText("Sent to controller");
+  });
+
   it("Request review is not offered on a draft", async () => {
     await openMenu(prStatus({ draft: true, canMerge: false }));
     expect(await screen.findByRole("menuitem", { name: "Request validation" })).toBeInTheDocument();

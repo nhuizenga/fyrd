@@ -137,6 +137,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
         bool failing = false, pending = false, any = false;
         int passed = 0, failed = 0, running = 0;
         FailingCheck? firstFailing = null;
+        var allFailing = new List<FailingCheck>();
         if (Path(r, "commits", "nodes", out var commits) && commits.ValueKind == JsonValueKind.Array && commits.GetArrayLength() > 0
             && Path(commits[0], "commit", "statusCheckRollup", "contexts", "nodes", out var contexts) && contexts.ValueKind == JsonValueKind.Array)
             foreach (var c in contexts.EnumerateArray())
@@ -152,7 +153,9 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                 {
                     failing = true;
                     failed++;
-                    firstFailing ??= new FailingCheck(Str(c, "name") ?? Str(c, "context") ?? "check", Str(c, "detailsUrl") ?? Str(c, "targetUrl"));
+                    var fc = new FailingCheck(Str(c, "name") ?? Str(c, "context") ?? "check", Str(c, "detailsUrl") ?? Str(c, "targetUrl"));
+                    firstFailing ??= fc;
+                    allFailing.Add(fc);
                 }
                 else if (st is "PENDING" or "EXPECTED") { pending = true; running++; }
                 else passed++;
@@ -175,6 +178,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
             Head = Str(r, "headRefName") ?? "",
             ChecksPassed = passed, ChecksFailed = failed, ChecksPending = running,
             FailingCheck = firstFailing,
+            FailingChecks = allFailing,
             Review = review,
             Mergeable = mergeable,
             MergeState = Str(r, "mergeStateStatus")?.ToLowerInvariant() ?? "unknown",

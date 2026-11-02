@@ -181,7 +181,7 @@ internal static partial class HubEndpoints
                 return Results.Ok(all.Select(p => new
                 {
                     p.Url, p.Number, p.Title, p.State, p.Draft, p.Checks, p.Error, canMerge = p.CanMerge,
-                    p.Base, p.Head, p.ChecksPassed, p.ChecksFailed, p.ChecksPending, p.FailingCheck,
+                    p.Base, p.Head, p.ChecksPassed, p.ChecksFailed, p.ChecksPending, p.FailingCheck, p.FailingChecks,
                     p.Review, p.Mergeable, p.MergeState,
                 }));
             }));
