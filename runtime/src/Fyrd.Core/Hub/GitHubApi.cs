@@ -16,7 +16,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
 
     /// <summary>The fields one pull request is read with (the node's <c>id</c> is what mark-ready needs).</summary>
     internal const string PrFields = """
-        id url number title state isDraft headRefName baseRefName isCrossRepository baseRepository{defaultBranchRef{name}} reviewDecision mergeable mergeStateStatus
+        id url number title state isDraft headRefName headRefOid baseRefName isCrossRepository baseRepository{defaultBranchRef{name}} reviewDecision mergeable mergeStateStatus
         latestReviews(first:10){nodes{state}}
         commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename
           ... on CheckRun{name status conclusion detailsUrl}
@@ -108,15 +108,16 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
     }
 
     // Always squash: the owner's history is squashed, and no merge-method menu.
-    public async Task MergeAsync(string url, CancellationToken ct = default)
+    public async Task MergeAsync(string url, string? headSha = null, CancellationToken ct = default)
     {
         var (owner, repo, number) = PullRequestUrl.Parse(url);
         if (!token.Present) throw new GitHubNotConfiguredException();
         try
         {
-            var result = await octokit.PullRequest.Merge(owner, repo, number, new MergePullRequest { MergeMethod = PullRequestMergeMethod.Squash });
+            var result = await octokit.PullRequest.Merge(owner, repo, number, new MergePullRequest { MergeMethod = PullRequestMergeMethod.Squash, Sha = string.IsNullOrEmpty(headSha) ? null : headSha });
             if (!result.Merged) throw new GitHubException($"GitHub refused the merge: {result.Message}");
         }
+        catch (PullRequestMismatchException) { throw new GitHubException("GitHub refused the merge: the pull request changed after it was checked (its head moved). Check it again."); }
         catch (Exception e) when (e is ApiException or HttpRequestException) { throw Map(e, $"{owner}/{repo}", "GitHub refused the merge: "); }
     }
 
@@ -177,6 +178,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
             Review = review,
             Mergeable = mergeable,
             MergeState = Str(r, "mergeStateStatus")?.ToLowerInvariant() ?? "unknown",
+            HeadSha = Str(r, "headRefOid") ?? "",
             CrossRepository = r.TryGetProperty("isCrossRepository", out var xr) && xr.ValueKind == JsonValueKind.True,
             DefaultBranch = Path(r, "baseRepository", "defaultBranchRef", "name", out var db) && db.ValueKind == JsonValueKind.String ? db.GetString()! : "",
         };

@@ -220,6 +220,30 @@ public class GitHubApiTests
     }
 
     [Fact]
+    public async Task Merge_WithAHeadSha_PinsTheMergeToIt()
+    {
+        var (api, _, rest) = Make();
+        rest.Then("""{"sha":"abc","merged":true,"message":"ok"}""");
+        await api.MergeAsync(Url, "deadbeef");
+        using var body = JsonDocument.Parse(Assert.Single(rest.Requests).Body!);
+        Assert.Equal("deadbeef", body.RootElement.GetProperty("sha").GetString());
+        Assert.Equal("squash", body.RootElement.GetProperty("merge_method").GetString());
+    }
+
+    [Fact]
+    public async Task Merge_WhenTheHeadMoved_409_SaysSo()
+    {
+        var (api, _, rest) = Make();
+        rest.Then("""{"message":"Head branch was modified. Review and try the merge again."}""", HttpStatusCode.Conflict);
+        var e = await Assert.ThrowsAsync<GitHubException>(() => api.MergeAsync(Url, "stale"));
+        Assert.Contains("changed after it was checked", e.Message);
+    }
+
+    [Fact]
+    public void ParseStatus_ReadsTheHeadSha() =>
+        Assert.Equal("abc123", Parse(Pr().Replace("\"mergeable\"", "\"headRefOid\":\"abc123\",\"mergeable\"")).HeadSha);
+
+    [Fact]
     public async Task Merge_Refused_BecomesAGitHubException_WithoutTheToken()
     {
         var (api, _, rest) = Make();

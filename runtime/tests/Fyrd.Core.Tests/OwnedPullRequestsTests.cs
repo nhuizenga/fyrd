@@ -21,7 +21,7 @@ public sealed class StubGitHub : IGitHub
 
     public Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
     public Task MarkReadyAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
-    public Task MergeAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task MergeAsync(string url, string? headSha = null, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 public sealed class OwnedPullRequestsTests

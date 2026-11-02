@@ -236,7 +236,7 @@ internal static partial class HubEndpoints
                 if (body?.Force != true
                     && PullRequestStacks.MergeOrderWarning(StackedStatuses(state, id, current), current) is { } warning)
                     return Results.Problem(warning, statusCode: StatusCodes.Status409Conflict);
-                await github.MergeAsync(url, ct);
+                await github.MergeAsync(url, current.HeadSha, ct);
                 return Results.NoContent();
             }));
 

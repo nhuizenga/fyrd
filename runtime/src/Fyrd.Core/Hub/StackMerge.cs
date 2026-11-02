@@ -26,6 +26,11 @@ public sealed class StackMergeJobs(
 {
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(20);
     public static readonly TimeSpan StepTimeout = TimeSpan.FromMinutes(30);
+    /// <summary>
+    /// After a merge the next PR gets a new head commit and CI has not started on it yet, so its checks can read "none" or the
+    /// old result. Until its head sha changes, and for this long while its checks read "none", it is "not yet".
+    /// </summary>
+    public static readonly TimeSpan SettleWindow = TimeSpan.FromMinutes(2);
     /// <summary>Finished jobs stay in hub state this long.</summary>
     public static readonly TimeSpan KeepFinished = TimeSpan.FromMinutes(10);
 
@@ -121,6 +126,9 @@ public sealed class StackMergeJobs(
         try
         {
             var prs = e.Job.Prs;
+            // Set after each merge for the next PR: its head sha before the merge, and when "no checks yet" stops counting as not yet.
+            string settleSha = "";
+            DateTimeOffset settleUntil = DateTimeOffset.MinValue;
             for (var i = 0; i < prs.Count; i++)
             {
                 var index = i;
@@ -130,18 +138,24 @@ public sealed class StackMergeJobs(
                 while (true)
                 {
                     ct.ThrowIfCancellationRequested();
-                    var st = await github.GetAsync(url, ct);
+                    var st = await GetAsync(url, ct);
                     var n = $"#{st.Number}";
                     if (st.State == "merged") { Fail(e, $"{n} was merged by someone else."); return; }
                     if (st.State != "open") { Fail(e, $"{n} was closed."); return; }
                     if (st.Mergeable == "conflicting") { Fail(e, $"{n} has merge conflicts."); return; }
                     if (st.Checks == "failing") { Fail(e, $"Checks are failing on {n}."); return; }
                     if (st.Base != expectedBase[url]) { Fail(e, $"The base of {n} changed from {expectedBase[url]} to {st.Base}."); return; }
-                    if (st.CanMerge)
+                    var settling = i > 0
+                        && ((settleSha != "" && st.HeadSha == settleSha) || (st.Checks == "none" && time.GetUtcNow() < settleUntil));
+                    if (st.CanMerge && !settling)
                     {
+                        // The next PR's head will change when this one lands in its branch: remember where it is now.
+                        settleSha = i + 1 < prs.Count ? (await GetAsync(prs[i + 1], ct)).HeadSha : "";
                         Update(e, j => j with { Status = StackMergeStatus.Merging });
                         // Not cancellable: once a merge starts it finishes, so a cancel never leaves a half-done step.
-                        await github.MergeAsync(url, CancellationToken.None);
+                        // Pinned to the head that was just checked: a push in between makes GitHub refuse the merge.
+                        await github.MergeAsync(url, st.HeadSha, CancellationToken.None);
+                        settleUntil = time.GetUtcNow() + SettleWindow;
                         var (owner, repo, _) = PullRequestUrl.Parse(url);
                         owned.Invalidate($"{owner}/{repo}");
                         state.RequestPoll();
@@ -164,6 +178,20 @@ public sealed class StackMergeJobs(
         catch (Exception ex)
         {
             Fail(e, "Unexpected error: " + ex.Message);
+        }
+    }
+
+    /// <summary>Reads a PR, waiting out GitHub's rate limit rather than failing a half-done stack.</summary>
+    private async Task<PullRequestStatus> GetAsync(string url, CancellationToken ct)
+    {
+        while (true)
+        {
+            try { return await github.GetAsync(url, ct); }
+            catch (GitHubRateLimitException rl)
+            {
+                var wait = rl.ResetAt - time.GetUtcNow();
+                await Task.Delay(wait > PollInterval ? wait : PollInterval, time, ct);
+            }
         }
     }
 

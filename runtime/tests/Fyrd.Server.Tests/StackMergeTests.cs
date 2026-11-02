@@ -155,6 +155,79 @@ public sealed class StackMergeTests
         Assert.Equal([Url(13), Url(12), Url(11)], _gh.Merged);
     }
 
+    private static PullRequestStatus Sha(PullRequestStatus p, string sha) => p with { HeadSha = sha };
+
+    [Fact]
+    public async Task AfterAMerge_TheNextPrIsNotMergedUntilItsHeadMovedAndChecksAreSeen()
+    {
+        // #12 still shows its old sha and an old "passing" right after #13 lands; only the new sha with fresh checks may merge.
+        var old12 = Sha(St(12, "b", "a"), "old12");
+        _gh.Sequences[Url(12)] = new Queue<PullRequestStatus>([old12, old12, old12, Sha(St(12, "b", "a", "pending"), "new12"), Sha(St(12, "b", "a"), "new12")]);
+        var stack = new[] { Sha(St(11, "a", "main"), "s11"), old12, Sha(St(13, "c", "b"), "s13") };
+        _gh.OnMerge = u => { if (u == Url(12)) _gh.Statuses[Url(11)] = Sha(St(11, "a", "main"), "s11b"); };
+        var job = await Finish(Start(stack));
+
+        Assert.Equal(StackMergeStatus.Done, job.Status);
+        Assert.Equal([Url(13), Url(12), Url(11)], _gh.Merged);
+        // #12 was merged on its new head, never on the stale one.
+        Assert.Equal("new12", _gh.MergedShas[1]);
+    }
+
+    [Fact]
+    public async Task AfterAMerge_NoChecksYet_IsNotYet_ButAcceptedOnceTheSettleWindowPasses()
+    {
+        _gh.OnMerge = u => { if (u == Url(13)) _gh.Statuses[Url(12)] = St(12, "b", "a", "none"); };
+        var run = Start(Stack());
+        var task = _jobs.Completion(run.Id)!;
+        for (var i = 0; i < 100 && _gh.Merged.Count == 0; i++) await Task.Delay(5);
+        await Tick();
+        // Inside the window "none" is not yet: #12 must not be merged at once.
+        _time.Advance(StackMergeJobs.PollInterval);
+        await Tick();
+        Assert.Equal([Url(13)], _gh.Merged);
+
+        var job = await Finish(run);
+        Assert.Equal(StackMergeStatus.Done, job.Status);
+        Assert.Equal([Url(13), Url(12), Url(11)], _gh.Merged);
+    }
+
+    [Fact]
+    public async Task EachMerge_IsPinnedToTheHeadThatWasChecked()
+    {
+        var stack = new[] { Sha(St(11, "a", "main"), "s11"), Sha(St(12, "b", "a"), "s12"), Sha(St(13, "c", "b"), "s13") };
+        // Each merge moves the head of the PR below it, as it does on GitHub.
+        _gh.OnMerge = u =>
+        {
+            if (u == Url(13)) _gh.Statuses[Url(12)] = Sha(St(12, "b", "a"), "s12b");
+            if (u == Url(12)) _gh.Statuses[Url(11)] = Sha(St(11, "a", "main"), "s11b");
+        };
+        await Finish(Start(stack));
+        Assert.Equal(["s13", "s12b", "s11b"], _gh.MergedShas);
+    }
+
+    [Fact]
+    public async Task APushBetweenTheCheckAndTheMerge_FailsTheJobCleanly()
+    {
+        _gh.MergeFailure = new GitHubException("GitHub refused the merge: the pull request changed after it was checked (its head moved). Check it again.");
+        var job = await Finish(Start(Stack()));
+        Assert.Equal(StackMergeStatus.Failed, job.Status);
+        Assert.Contains("changed after it was checked", job.Message);
+        Assert.Empty(_gh.Merged);
+    }
+
+    [Fact]
+    public async Task ARateLimitMidJob_WaitsForTheResetAndResumes()
+    {
+        var first = true;
+        _gh.OnGet = u =>
+        {
+            if (u == Url(12) && first) { first = false; throw new GitHubRateLimitException(_time.GetUtcNow().AddMinutes(5)); }
+        };
+        var job = await Finish(Start(Stack()));
+        Assert.Equal(StackMergeStatus.Done, job.Status);
+        Assert.Equal([Url(13), Url(12), Url(11)], _gh.Merged);
+    }
+
     [Fact]
     public async Task Cancel_StopsBeforeTheNextMerge_AndNeverUndoesWhatIsDone()
     {

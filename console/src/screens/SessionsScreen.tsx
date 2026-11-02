@@ -10,6 +10,7 @@ import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_h
 import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
+import ScrollIntoView from "../components/ScrollIntoView";
 import PullRequestItem, { prLabel } from "../components/PullRequestItem";
 import { confirmLine, jobFor, running, stepLine } from "../stackMerge";
 import { chainLine, chainOf, childrenOf, mergeOrderWarning, parentOf, type Chain } from "../stacks";
@@ -789,16 +790,16 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 </ul>
               )}
               {confirmStack && (
-                <Alert status="warning" title="Merge the whole stack?">
+                <ScrollIntoView><Alert status="warning" title="Merge the whole stack?">
                   <Text>{confirmLine(confirmStack.top, confirmStack.rootBase)}</Text>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Button appearance="primary" size="small" onClick={() => void startStack(confirmStack.url)}>Merge stack</Button>
                     <Button appearance="ghost" size="small" onClick={() => setConfirmStack(null)}>Cancel</Button>
                   </div>
-                </Alert>
+                </Alert></ScrollIntoView>
               )}
               {confirmNudge && (
-                <Alert status="warning" title={confirmNudge.nudge.confirm ?? "Send this request?"}>
+                <ScrollIntoView><Alert status="warning" title={confirmNudge.nudge.confirm ?? "Send this request?"}>
                   <Text>This starts a paid session through the Controller.</Text>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Button appearance="primary" size="small" onClick={() => void sendNudge(confirmNudge.url, confirmNudge.nudge)}>
@@ -806,7 +807,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     </Button>
                     <Button appearance="ghost" size="small" onClick={() => setConfirmNudge(null)}>Cancel</Button>
                   </div>
-                </Alert>
+                </Alert></ScrollIntoView>
               )}
               {confirmMerge && (() => {
                 const warning = mergeOrderWarning(confirmMerge, sessionPrs);
@@ -816,7 +817,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                   void prAction(pr.url, () => api.mergePr(selected.id, pr.url, force));
                 };
                 return (
-                  <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
+                  <ScrollIntoView><Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
                     {warning
                       ? <Text role="alert">{warning}</Text>
                       : <Text>This squash-merges {prLabel(confirmMerge.url)} into <code>{confirmMerge.base || "its base"}</code> on GitHub.</Text>}
@@ -826,7 +827,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                       </Button>
                       <Button appearance="ghost" size="small" onClick={() => setConfirmMerge(null)}>Cancel</Button>
                     </div>
-                  </Alert>
+                  </Alert></ScrollIntoView>
                 );
               })()}
             </>

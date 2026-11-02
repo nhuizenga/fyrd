@@ -331,6 +331,19 @@ test.describe("Stacked PRs", () => {
     await expect(page.getByRole("menuitem", { name: "Merge stack" }).first()).toBeVisible();
   });
 
+  test("the Merge stack confirm scrolls into view in a short viewport", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 560 });
+    await mockApi(page, { stack: true });
+    await page.goto("/#/sessions/session_stack");
+    const details = page.getByRole("complementary", { name: "Session details" });
+    const trigger = details.getByRole("button", { name: "Ask for help with #12" });
+    await trigger.click();
+    const menuId = await trigger.getAttribute("aria-controls");
+    await page.locator(`[id="${menuId}"]`).getByRole("menuitem", { name: "Merge stack" }).click();
+    await expect(details.getByText("#13 → #12 → #11 into main, squash, waiting for checks between steps")).toBeInViewport();
+    await expect(details.getByRole("button", { name: "Merge stack" })).toBeInViewport();
+  });
+
   test("a running stack merge shows its step line and a Cancel button", async ({ page }) => {
     await mockApi(page, {
       stack: true,
