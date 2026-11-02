@@ -7,7 +7,7 @@ export default defineConfig({
   testDir: "e2e",
   fullyParallel: true,
   reporter: [["list"]],
-  use: { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined }, baseURL: `http://127.0.0.1:${PORT}`, trace: "retain-on-failure" },
+  use: { baseURL: `http://127.0.0.1:${PORT}`, trace: "retain-on-failure" },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
   webServer: {
     command: `npx vite --port ${PORT} --strictPort --host 127.0.0.1`,

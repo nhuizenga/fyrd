@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Button, Icon, Textarea } from "@servicetitan/anvil2";
 import EnterIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_return.svg?react";
 import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_upward.svg?react";
@@ -37,19 +37,42 @@ function Composer({ sessionId, sending, blocked, hint, height, onSend }: {
   };
   const canSend = !sending && !blocked && draft.trim() !== "";
 
+  const [failed, setFailed] = useState(false);
+  const boxRef = useRef<HTMLTextAreaElement>(null);
+  const wasSending = useRef(false);
+
+  // When the lock lifts, give the owner their cursor back unless they have moved focus somewhere deliberate
+  // (clicking Send leaves focus on a button that was just disabled, which drops it to <body>).
+  useEffect(() => {
+    if (wasSending.current && !sending) {
+      const active = document.activeElement;
+      if (!active || active === document.body || active.tagName === "BUTTON") boxRef.current?.focus();
+    }
+    wasSending.current = sending;
+  }, [sending]);
+
   const send = async () => {
     if (!canSend) return;
     const text = draft.trim();
+    setFailed(false);
     setDraft("");
-    await onSend(text);
-    // On failure the screen has put the text back in storage; on success the stored draft is empty.
-    setDraftState(readStored(DRAFT_KEY(sessionId)) ?? "");
+    const ok = await onSend(text);
+    if (!ok) {
+      // Restore from memory, not storage (which may be blocked or full), unless the owner has typed something new.
+      setFailed(true);
+      setDraftState((cur) => {
+        if (cur !== "") return cur;
+        writeStored(DRAFT_KEY(sessionId), text);
+        return text;
+      });
+    }
   };
 
   return (
     <div className="composer">
       <div className="composer-input" style={{ height }}>
         <Textarea
+          ref={boxRef}
           label="Message this session"
           hint={hint}
           value={draft}
@@ -64,6 +87,7 @@ function Composer({ sessionId, sending, blocked, hint, height, onSend }: {
           }}
         />
       </div>
+      <span className="sr-only" aria-live="polite">{sending ? "Sending…" : failed ? "Message not sent" : ""}</span>
       <div className="composer-actions">
         <span className="composer-hints">
           <span className="composer-hint" role="img" aria-label="Enter to send" title="Enter to send">

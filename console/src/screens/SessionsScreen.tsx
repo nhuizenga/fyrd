@@ -71,7 +71,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   };
   // Sessions with a message in flight (the box is read-only meanwhile), and messages shown optimistically until the transcript echoes them.
   const [sendingIds, setSendingIds] = useState<string[]>([]);
-  const [outbox, setOutbox] = useState<{ id: string; sessionId: string; text: string; seqAtSend: number }[]>([]);
+  const [outbox, setOutbox] = useState<{ id: string; sessionId: string; text: string; seqAtSend: number; sentAt: number; acked: boolean }[]>([]);
   const outboxSeq = useRef(0);
   const storedWidth = (key: string) => {
     const n = Number(readStored(key));
@@ -94,15 +94,19 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
   const [adoptId, setAdoptId] = useState("");
   const transcript = useTranscript(selectedId);
-  // Optimistic messages show until the transcript has a newer user item with the same text (whitespace-normalised);
-  // each echo answers only one message, so sending the same text twice keeps the second bubble until its own echo.
+  // Optimistic messages show until the transcript has their echo: a newer user item (seq above the newest one loaded
+  // at send time) with the same whitespace-normalised text, or, once the server has accepted the message, any such
+  // item at all (the server may wrap or rewrite the text). Each item answers one message only. When nothing was
+  // loaded at send time (the replay hasn't landed), older history can't be told apart by seq, so the item's own
+  // timestamp must also be recent.
   const outgoing = useMemo(() => {
     const norm = (t: string) => t.replace(/\s+/g, " ").trim();
     const taken = new Set<string>();
     return outbox.filter((m) => {
       if (m.sessionId !== selectedId) return false;
-      const echo = transcript.items.find((i) => i.seq > m.seqAtSend && i.role === "user" && i.kind !== "question"
-        && !taken.has(i.key) && norm(i.text) === norm(m.text));
+      const fresh = transcript.items.filter((i) => i.seq > m.seqAtSend && i.role === "user" && i.kind !== "question" && !taken.has(i.key)
+        && (m.seqAtSend >= 0 || !(Date.parse(i.at) < m.sentAt - 60_000)));
+      const echo = fresh.find((i) => norm(i.text) === norm(m.text)) ?? (m.acked ? fresh[0] : undefined);
       if (echo) taken.add(echo.key);
       return !echo;
     });
@@ -265,7 +269,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const send = async (text: string): Promise<boolean> => {
     if (!selected) return false;
     const sentTo = selected.id;
-    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text, seqAtSend: latestSeq.current };
+    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text, seqAtSend: latestSeq.current, sentAt: Date.now(), acked: false };
     following.current = true;
     setSendingIds((ids) => [...ids, sentTo]);
     setOutbox((o) => [...o, entry]);
@@ -273,7 +277,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     const drop = () => setOutbox((o) => o.filter((x) => x.id !== entry.id));
     try {
       await api.sendMessage(sentTo, text);
-      // The echoed message normally replaces the optimistic one; if it never matches, don't leave a duplicate behind.
+      // The server has the message: the next user item replaces the bubble whatever its text. Backstop in case no echo ever arrives.
+      setOutbox((o) => o.map((x) => (x.id === entry.id ? { ...x, acked: true } : x)));
       setTimeout(drop, 15_000);
       return true;
     } catch (e) {

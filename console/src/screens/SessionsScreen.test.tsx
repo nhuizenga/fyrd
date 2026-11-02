@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
@@ -855,7 +855,7 @@ describe("sending a message", () => {
     d.resolve();
     await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
     // The echoed user item replaces the optimistic one.
-    FakeEventSource.latest().emit("item", item({ role: "user", text: "hello there" }));
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "hello there", at: new Date().toISOString() }));
     expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
     expect(screen.getAllByText("hello there")).toHaveLength(1);
   });
@@ -910,10 +910,71 @@ describe("sending a message", () => {
     await userEvent.type(box, "a  b{Enter}");
     await userEvent.type(box, "a  b{Enter}");
     expect(screen.getAllByLabelText("Sending")).toHaveLength(2);
-    FakeEventSource.latest().emit("item", item({ seq: 0, key: "e0", role: "user", text: "a b" }));
+    FakeEventSource.latest().emit("item", item({ seq: 0, key: "e0", role: "user", text: "a b", at: new Date().toISOString() }));
     expect(screen.getAllByLabelText("Sending")).toHaveLength(1);
-    FakeEventSource.latest().emit("item", item({ seq: 1, key: "e1", role: "user", text: "a b" }));
+    FakeEventSource.latest().emit("item", item({ seq: 1, key: "e1", role: "user", text: "a b", at: new Date().toISOString() }));
     expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
+  it("an old identical message replayed after a cold-start send does not stand in for the echo", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const box = await open(); // the replay hasn't landed: nothing loaded at send time
+    await userEvent.type(box, "continue{Enter}");
+    FakeEventSource.latest().emit("item", item({ seq: 3, key: "old", role: "user", text: "continue", at: "2020-01-01T00:00:00Z" }));
+    expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+    FakeEventSource.latest().emit("item", item({ seq: 9, key: "new", role: "user", text: "continue", at: new Date().toISOString() }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
+  it("once the server accepted the message, the next user item replaces the bubble whatever its text", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const box = await open();
+    FakeEventSource.latest().emit("item", item({ seq: 1, text: "earlier" }));
+    await userEvent.type(box, "hello{Enter}");
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    FakeEventSource.latest().emit("item", item({ seq: 2, key: "wrapped", role: "user", text: "[from owner] hello" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
+  it("drops the bubble 15 s after acceptance when no echo ever arrives", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+      const box = await open();
+      await userEvent.type(box, "ghost{Enter}");
+      expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_100); });
+      expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restores the text on failure even when localStorage is unavailable", async () => {
+    vi.mocked(api.sendMessage).mockRejectedValue(new Error("nope"));
+    const box = await open();
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    try {
+      await userEvent.type(box, "precious{Enter}");
+      await vi.waitFor(() => expect(box).toHaveValue("precious"));
+      expect(box).not.toHaveAttribute("readonly");
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+
+  it("returns focus to the box when the lock lifts after sending with the button", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    await userEvent.type(box, "via button");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    d.resolve();
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    expect(box).toHaveFocus();
   });
 
   it("typing does not re-render the transcript", async () => {
