@@ -83,8 +83,50 @@ public sealed class PendingMemoryTests : IDisposable
         var (m, p) = Make();
         File.WriteAllText(Path.Combine(_home.Paths.HubDir, "pending-memory.json"), "{ not json");
         Assert.Equal(0, p.Count);
+        Assert.True(File.Exists(Path.Combine(_home.Paths.HubDir, "pending-memory.json.corrupt")));
         Assert.NotNull(p.Add("x", "b", "s", T0));
         Assert.DoesNotContain("pending-memory", m.All().Keys);
         Assert.DoesNotContain("pending", m.All().Keys);
+    }
+
+    [Fact]
+    public void Rejected_TextStaysGone_UntilItFallsOutOfTheLastHundred()
+    {
+        var (_, p) = Make();
+        var first = p.Add("unwanted", "b", "s", T0)!;
+        p.Reject(first.Id);
+        Assert.Null(p.Add("unwanted", "b2", "s2", T0));
+        Assert.Null(new PendingMemory(_home.Paths, new HubMemory(_home.Paths)).Add("  unwanted ", "b", "s", T0));
+
+        for (var i = 0; i < PendingMemory.MaxRejected; i++) p.Reject(p.Add($"other {i}", "b", "s", T0)!.Id);
+        Assert.NotNull(p.Add("unwanted", "b", "s", T0));
+    }
+
+    [Fact]
+    public void Approve_WhenSharedAlreadyHasTheText_AddsNothing_AndReturnsTheExisting()
+    {
+        var (m, p) = Make();
+        var proposal = p.Add("Use pnpm.", "builder-1", "s1", T0)!;
+        var existing = m.Add(HubMemory.Shared, "Use pnpm.", "owner", T0);
+        var edited = p.Add("Something else.", "builder-2", "s2", T0)!;
+
+        Assert.Equal(existing.Id, p.Approve(proposal.Id, null, T0.AddHours(1)).Id);
+        Assert.Equal(existing.Id, p.Approve(edited.Id, " Use pnpm. ", T0.AddHours(1)).Id);
+
+        Assert.Single(m.List(HubMemory.Shared));
+        Assert.Equal(0, p.Count);
+    }
+
+    [Fact]
+    public void Count_FollowsAddsApprovalsAndRejections()
+    {
+        var (_, p) = Make();
+        var a = p.Add("a", "b", "s", T0)!;
+        var b = p.Add("b", "b", "s", T0)!;
+        Assert.Equal(2, p.Count);
+        p.Approve(a.Id, null, T0);
+        Assert.Equal(1, p.Count);
+        p.Reject(b.Id);
+        Assert.Equal(0, p.Count);
     }
 }

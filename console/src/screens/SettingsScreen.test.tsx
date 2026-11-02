@@ -314,3 +314,32 @@ it("pending group is hidden when nothing is waiting", async () => {
   await renderSettings("Agent memory");
   expect(screen.queryByRole("heading", { name: "Waiting for your approval" })).not.toBeInTheDocument();
 });
+
+it("pending list reloads when the polled count changes while Settings is open", async () => {
+  const { rerender } = render(<Routed state={hubState({ pendingMemory: 0 })} onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
+  await screen.findByText("Shared note");
+  expect(screen.queryByText("Always squash.")).not.toBeInTheDocument();
+
+  vi.mocked(api.getPendingMemory).mockResolvedValue(waiting);
+  rerender(<Routed state={hubState({ pendingMemory: 1 })} onChanged={vi.fn()} />);
+  expect(await screen.findByText("Always squash.")).toBeInTheDocument();
+});
+
+it("pending buttons are disabled while a request is in flight", async () => {
+  vi.mocked(api.getPendingMemory).mockResolvedValue(waiting);
+  let finish: () => void = () => {};
+  vi.mocked(api.approvePendingMemory).mockReturnValue(new Promise((resolve) => {
+    finish = () => resolve({ id: "n", text: "x", source: "builder-1", at: "t" });
+  }));
+  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
+  const group = within((await screen.findByRole("heading", { name: "Waiting for your approval" })).parentElement!);
+
+  await userEvent.click(group.getByRole("button", { name: "Approve" }));
+  expect(group.getByRole("button", { name: "Approve" })).toBeDisabled();
+  expect(group.getByRole("button", { name: "Reject" })).toBeDisabled();
+  await userEvent.click(group.getByRole("button", { name: "Reject" }));
+  expect(api.rejectPendingMemory).not.toHaveBeenCalled();
+  finish();
+});

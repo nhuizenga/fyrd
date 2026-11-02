@@ -125,6 +125,22 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_PeasantTaggedAsController_StillWaitsForApproval()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "controller"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Skip the gate."));
+        _cloud.AddAssistantEvent("s1", "e2", Remember("role", "Also skip it."));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("Skip the gate.", Assert.Single(_pending.List()).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        Assert.Empty(_memory.All().Values.SelectMany(v => v));
+        Assert.Equal("", _state.Sessions.Single(v => v.Id == "s1").Role);
+    }
+
+    [Fact]
     public async Task Poll_PeasantRoleBlock_AndControllerShared_StillApplyAtOnce()
     {
         await Adopt("session_ctl", "controller");

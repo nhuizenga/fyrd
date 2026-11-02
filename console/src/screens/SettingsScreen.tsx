@@ -97,7 +97,7 @@ function EnvironmentCard(_: CardProps) {
 }
 
 /** What the Settings screen hands every section card. */
-type CardProps = { budget?: HubBudgetView | null; onChanged?: () => void | Promise<void> };
+type CardProps = { budget?: HubBudgetView | null; pendingMemory?: number; onChanged?: () => void | Promise<void> };
 
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -401,8 +401,12 @@ function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; on
 function PendingMemoryGroup({ entries, onChanged, setError }: { entries: PendingMemoryEntry[]; onChanged: () => Promise<void>; setError: (s: string | null) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [busy, setBusy] = useState(false);
 
+  // One request at a time: a second click would hit an entry that is already gone and show a 404.
   const attempt = async (fn: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     try {
       await fn();
@@ -410,6 +414,8 @@ function PendingMemoryGroup({ entries, onChanged, setError }: { entries: Pending
       await onChanged();
     } catch (e) {
       setError(errText(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -429,14 +435,14 @@ function PendingMemoryGroup({ entries, onChanged, setError }: { entries: Pending
             <div style={{ display: "flex", gap: 8 }}>
               {editingId === e.id ? (
                 <>
-                  <Button appearance="primary" size="small" onClick={() => attempt(() => api.approvePendingMemory(e.id, editText.trim()))}>Save &amp; approve</Button>
-                  <Button appearance="ghost" size="small" onClick={() => setEditingId(null)}>Cancel</Button>
+                  <Button appearance="primary" size="small" disabled={busy} onClick={() => attempt(() => api.approvePendingMemory(e.id, editText.trim()))}>Save &amp; approve</Button>
+                  <Button appearance="ghost" size="small" disabled={busy} onClick={() => setEditingId(null)}>Cancel</Button>
                 </>
               ) : (
                 <>
-                  <Button appearance="primary" size="small" onClick={() => attempt(() => api.approvePendingMemory(e.id))}>Approve</Button>
-                  <Button appearance="secondary" size="small" onClick={() => { setEditingId(e.id); setEditText(e.text); }}>Edit</Button>
-                  <Button appearance="ghost" size="small" onClick={() => attempt(() => api.rejectPendingMemory(e.id))}>Reject</Button>
+                  <Button appearance="primary" size="small" disabled={busy} onClick={() => attempt(() => api.approvePendingMemory(e.id))}>Approve</Button>
+                  <Button appearance="secondary" size="small" disabled={busy} onClick={() => { setEditingId(e.id); setEditText(e.text); }}>Edit</Button>
+                  <Button appearance="ghost" size="small" disabled={busy} onClick={() => attempt(() => api.rejectPendingMemory(e.id))}>Reject</Button>
                 </>
               )}
             </div>
@@ -447,7 +453,7 @@ function PendingMemoryGroup({ entries, onChanged, setError }: { entries: Pending
   );
 }
 
-function MemoryCard({ onChanged }: CardProps) {
+function MemoryCard({ onChanged, pendingMemory }: CardProps) {
   const [memory, setMemory] = useState<HubMemory>({ scopes: [] });
   const [pending, setPending] = useState<PendingMemoryEntry[]>([]);
   const [scope, setScope] = useState("shared");
@@ -464,7 +470,8 @@ function MemoryCard({ onChanged }: CardProps) {
   }, []);
   // Approving or rejecting changes the count on the nav badge, so refresh the hub state too.
   const loadAll = useCallback(async () => { await load(); await onChanged?.(); }, [load, onChanged]);
-  useEffect(() => { void load(); }, [load]);
+  // The nav badge follows the polled count, so reload when it changes: a proposal that arrives while this card is open shows up.
+  useEffect(() => { void load(); }, [load, pendingMemory]);
 
   const scopes = [...memory.scopes].sort((a, b) => Number(b.scope === "shared") - Number(a.scope === "shared"));
   // The Controller's memory is Shared memory, so it is not offered as a scope of its own.
@@ -536,7 +543,7 @@ export default function SettingsScreen({ state, onChanged, routeId }: ScreenProp
             </button>
           ))}
         </nav>
-        <div className="settings-body"><Card budget={state?.budget} onChanged={onChanged} /></div>
+        <div className="settings-body"><Card budget={state?.budget} pendingMemory={state?.pendingMemory} onChanged={onChanged} /></div>
       </div>
     </>
   );

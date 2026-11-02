@@ -204,16 +204,16 @@ public sealed partial class HubRunner(
         return events;
     }
 
-    /// <summary>Persists the cursor after each event that added memory, so a later failure never re-adds it.</summary>
+    /// <summary>Persists the cursor after each event that added memory or queued a proposal, so a later failure never re-adds it.</summary>
     private void Capture(CloudSession s, IEnumerable<SessionEvent> events, Dictionary<string, string> cursors)
     {
         var role = Role(s);
-        var isController = role == ControllerRole;
+        var isController = IsController(s);
         var source = Title(s);
         foreach (var e in events)
         {
             if (e.Type != "assistant" || string.IsNullOrEmpty(e.Text)) continue;
-            var added = false;
+            var consumed = false;
             foreach (var d in RememberBlock.Parse(e.Text))
             {
                 var at = e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt;
@@ -221,7 +221,7 @@ public sealed partial class HubRunner(
                 {
                     // A peasant's shared memory reaches every session, so it waits for the owner's approval.
                     pending.Add(d.Text, source, s.Id, at);
-                    added = true;
+                    consumed = true;
                     continue;
                 }
                 string? scope = d.Scope == "shared" || isController ? HubMemory.Shared
@@ -229,9 +229,9 @@ public sealed partial class HubRunner(
                     : null;
                 if (scope is null) continue;
                 memory.Add(scope, d.Text, source, at);
-                added = true;
+                consumed = true;
             }
-            if (added && e.Uuid.Length > 0)
+            if (consumed && e.Uuid.Length > 0)
             {
                 cursors[s.Id] = e.Uuid;
                 SaveCursors();
@@ -289,10 +289,11 @@ public sealed partial class HubRunner(
     private string Title(CloudSession s) =>
         !string.IsNullOrEmpty(s.Title) ? s.Title : IsController(s) ? ControllerRole : s.Id;
 
-    /// <summary>The Controller is identified by its stored id (an adopted one has no role tag); others by their role tag.</summary>
+    /// <summary>The Controller is identified by its stored id only (an adopted one has no role tag); others by their role tag, which can never be <c>controller</c>.</summary>
     private string? Role(CloudSession s) =>
         IsController(s) ? ControllerRole
-        : s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..];
+        : s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..] is { } tagged
+          && tagged != ControllerRole ? tagged : null; // a role tag never makes another session the Controller
 
     private static DateTimeOffset? CreatedAt(JsonElement raw) =>
         Str(raw, "created_at") is { } v && DateTimeOffset.TryParse(v, out var at) ? at : null;
