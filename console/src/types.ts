@@ -29,8 +29,6 @@ export interface HubSessionView {
   tags: string[];
   /** URLs of the pull requests the session owns (head is its branch). Only these accept PR actions. */
   pullRequests: string[];
-  /** Other pull request URLs that appear in the session's events. Links only. */
-  mentionedPullRequests: string[];
   cost?: HubCostView | null;
 }
 
@@ -120,6 +118,8 @@ export interface TranscriptItem {
   toolUseId?: string | null;
   /** Progress frames only: what the agent is doing now (a tool, "Thinking…"); `text` is the reply streamed so far. Both empty = nothing in progress. */
   status?: string | null;
+  /** Progress frames only: the running tool's main argument, such as the Bash command. */
+  detail?: string | null;
 }
 
 export interface HubPersona {

@@ -21,7 +21,6 @@ public sealed partial class HubRunner(
     private const string RequiresAction = "requires_action";
     private const int RecentEvents = 200;
     private const int PageLimit = 100;
-    private const int MaxMentions = 20;
 
     /// <summary>In-memory per-session tail used for question scanning; rebuilt from the start after a restart.</summary>
     private sealed class Window
@@ -29,8 +28,6 @@ public sealed partial class HubRunner(
         public string? After;
         public List<SessionEvent> Recent = [];
         public DateTimeOffset? LastActivity;
-        /// <summary>Pull request URLs seen anywhere in the session's events, in order of first sight.</summary>
-        public List<string> Mentions = [];
     }
 
     private readonly Dictionary<string, Window> _windows = new(StringComparer.Ordinal);
@@ -94,7 +91,7 @@ public sealed partial class HubRunner(
             {
                 var w = await PollSessionAsync(s, ct);
                 var owned = ownedPrs is null ? [] : await ownedPrs.FindAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
-                views.Add(View(s, w.LastActivity, owned, w.Mentions));
+                views.Add(View(s, w.LastActivity, owned));
                 // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
                 // waiting on the owner has a live question.
                 if (s.SessionStatus == RequiresAction)
@@ -189,8 +186,6 @@ public sealed partial class HubRunner(
             w.Recent.AddRange(fetched);
             if (w.Recent.Count > RecentEvents) w.Recent.RemoveRange(0, w.Recent.Count - RecentEvents);
             w.After = fetched[^1].Uuid;
-            foreach (var url in fetched.SelectMany(PrUrls))
-                if (w.Mentions.Count < MaxMentions && !w.Mentions.Contains(url)) w.Mentions.Add(url);
             var newest = fetched.Max(e => e.CreatedAt);
             if (newest != default && (w.LastActivity is null || newest > w.LastActivity)) w.LastActivity = newest;
         }
@@ -284,12 +279,8 @@ public sealed partial class HubRunner(
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
     }
 
-    /// <summary>
-    /// Owned PRs are the ones listed in the session's outcomes plus those found on its repo and branch; mentioned PRs
-    /// are any other PR URLs in its events (links only: the console offers no actions on them).
-    /// </summary>
-    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity,
-        IReadOnlyList<string>? owned = null, IReadOnlyList<string>? mentions = null)
+    /// <summary>A session's pull requests are the ones listed in its outcomes plus those found on its repo and branch.</summary>
+    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity, IReadOnlyList<string>? owned = null)
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
         var prs = PullRequests(s.Raw).Concat(owned ?? []).Distinct(StringComparer.Ordinal).ToList();
@@ -297,26 +288,7 @@ public sealed partial class HubRunner(
             CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
         {
             PullRequests = prs,
-            MentionedPullRequests = (mentions ?? []).Where(u => !prs.Contains(u)).ToList(),
         };
-    }
-
-    /// <summary>Pull request URLs in every string of an event (message text, tool input, tool results).</summary>
-    private static IEnumerable<string> PrUrls(SessionEvent e)
-    {
-        var found = new List<string>();
-        void Walk(JsonElement j)
-        {
-            switch (j.ValueKind)
-            {
-                case JsonValueKind.String: found.AddRange(PullRequestUrl.FindIn(j.GetString()!)); break;
-                case JsonValueKind.Array: foreach (var x in j.EnumerateArray()) Walk(x); break;
-                case JsonValueKind.Object: foreach (var p in j.EnumerateObject()) Walk(p.Value); break;
-            }
-        }
-        if (e.Text is { } text) found.AddRange(PullRequestUrl.FindIn(text));
-        Walk(e.Raw);
-        return found;
     }
 
     private bool IsController(CloudSession s) => s.Id == _controllerId;

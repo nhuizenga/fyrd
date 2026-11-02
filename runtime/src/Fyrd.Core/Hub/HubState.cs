@@ -15,9 +15,6 @@ public sealed record HubSessionView(
 {
     /// <summary>URLs of the pull requests the session owns (head is its branch). Only these accept PR actions.</summary>
     public IReadOnlyList<string> PullRequests { get; init; } = [];
-
-    /// <summary>Other pull request URLs that appear in the session's events. Links only.</summary>
-    public IReadOnlyList<string> MentionedPullRequests { get; init; } = [];
 }
 
 /// <summary>

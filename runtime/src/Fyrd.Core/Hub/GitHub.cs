@@ -36,13 +36,6 @@ public static partial class PullRequestUrl
 
     /// <summary>Plain <c>https://github.com/{owner}/{repo}/pull/{n}</c> only, so a URL can never act as a CLI option.</summary>
     public static bool IsValid(string? url) => url is not null && Pattern().IsMatch(url);
-
-    [GeneratedRegex(@"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+")]
-    private static partial Regex Embedded();
-
-    /// <summary>Every plain pull request URL inside free text, in order.</summary>
-    public static IEnumerable<string> FindIn(string text) =>
-        Embedded().Matches(text).Select(m => m.Value).Where(IsValid);
 }
 
 public static partial class GitHubRepo
@@ -122,7 +115,12 @@ public sealed class GhCli : IGitHub
 
     private static async Task<string> RunAsync(IEnumerable<string> args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo("gh") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
+        var psi = new ProcessStartInfo("gh")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
+            // Fyrd's server may run without a console (a GUI-less background process): gh must not open one that steals focus.
+            UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+        };
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["GH_PROMPT_DISABLED"] = "1";
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

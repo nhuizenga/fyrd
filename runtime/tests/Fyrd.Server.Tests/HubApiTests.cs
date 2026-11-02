@@ -306,6 +306,38 @@ public class HubApiTests
         Assert.Empty(f.Cloud.Archived);
     }
 
+    [Fact]
+    public async Task Rename_HubSession_RenamesIt_204()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  New name " });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal((SessionId, "New name"), Assert.Single(f.Cloud.Renamed));
+    }
+
+    [Fact]
+    public async Task Rename_BlankTitle_400_NotHubSession_404()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  " })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/hub/sessions/session_other/rename", new { title = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = new string('x', 201) })).StatusCode);
+        Assert.Empty(f.Cloud.Renamed);
+    }
+
+    [Fact]
+    public async Task Rename_Controller_409()
+    {
+        using var f = new FyrdFactory();
+        f.Services.GetRequiredService<HubState>().Publish([View() with { Role = "controller" }], []);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "New" });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.Cloud.Renamed);
+    }
+
     private const string Pr = "https://github.com/acme/widgets/pull/12";
     private const string OtherPr = "https://github.com/acme/widgets/pull/99";
 
@@ -316,7 +348,7 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task State_SessionsCarryOwnedAndMentionedPrs_FromTheWiredPoll()
+    public async Task State_SessionsCarryTheirBranchPrs_FromTheWiredPoll()
     {
         using var f = new FyrdFactory();
         var raw = System.Text.Json.JsonDocument.Parse("""
@@ -332,14 +364,14 @@ public class HubApiTests
         var s = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("sessions").EnumerateArray().Single();
         Assert.Equal("fyrd/fix", s.GetProperty("branch").GetString());
         Assert.Equal([Pr], s.GetProperty("pullRequests").EnumerateArray().Select(e => e.GetString()));
-        Assert.Equal([OtherPr], s.GetProperty("mentionedPullRequests").EnumerateArray().Select(e => e.GetString()));
+        Assert.False(s.TryGetProperty("mentionedPullRequests", out _));
     }
 
     [Fact]
-    public async Task PullRequests_MentionedPr_CannotBeMerged()
+    public async Task PullRequests_UnownedPr_CannotBeMerged()
     {
         using var f = new FyrdFactory();
-        f.Services.GetRequiredService<HubState>().Publish([View() with { MentionedPullRequests = [OtherPr] }], []);
+        SeedWithPr(f, draft: false);
         var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = OtherPr });
         Assert.NotEqual(HttpStatusCode.OK, r.StatusCode);
         Assert.Empty(f.GitHub.Merged);

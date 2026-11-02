@@ -5,9 +5,11 @@ import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_up
 import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
+import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
+import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
 import QuestionGroup from "../components/QuestionGroup";
 import ThreadItem from "../components/ThreadItem";
@@ -23,6 +25,11 @@ const COMPOSER_KEY = "fyrd.composerHeight";
 const COMPOSER_MIN = 72;
 const COMPOSER_MAX = 480;
 const COMPOSER_DEFAULT = 96;
+const LIST_KEY = "fyrd.listWidth";
+const ATTRS_KEY = "fyrd.attrsWidth";
+const SIDE_MIN = 200;
+const SIDE_MAX = 560;
+const SIDE_DEFAULT = 280;
 
 const readStored = (key: string): string | null => {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -81,6 +88,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     setComposerHeight(next);
     writeStored(COMPOSER_KEY, String(next));
   };
+  const storedWidth = (key: string) => {
+    const n = Number(readStored(key));
+    return n >= SIDE_MIN && n <= SIDE_MAX ? n : SIDE_DEFAULT;
+  };
+  const [listWidth, setListWidth] = useState(() => storedWidth(LIST_KEY));
+  const [attrsWidth, setAttrsWidth] = useState(() => storedWidth(ATTRS_KEY));
+  const resizeList = (w: number) => { setListWidth(w); writeStored(LIST_KEY, String(w)); };
+  const resizeAttrs = (w: number) => { setAttrsWidth(w); writeStored(ATTRS_KEY, String(w)); };
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
@@ -88,6 +103,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
   const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
   const [confirmArchive, setConfirmArchive] = useState<HubSessionView | null>(null);
+  const [renaming, setRenaming] = useState<{ session: HubSessionView; title: string } | null>(null);
   const [raising, setRaising] = useState(false);
   // A raise's response, shown until the poll catches up (the server only requests a poll, so the next state can be stale).
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
@@ -103,7 +119,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const isController = (s: HubSessionView) => s.id === controllerId;
   const all = state?.sessions ?? [];
   const controller = all.find(isController) ?? null;
-  const others = all.filter((s) => !isController(s));
+  // Grouped by role, then by name (numeric-aware, so builder-2 comes before builder-10).
+  const byRoleThenName = (a: HubSessionView, b: HubSessionView) =>
+    a.role.localeCompare(b.role, undefined, { sensitivity: "base" }) ||
+    a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
+  const others = all.filter((s) => !isController(s)).sort(byRoleThenName);
   const q = search.trim().toLowerCase();
   const sessions = q ? others.filter((s) => s.title.toLowerCase().includes(q)) : others;
   const selected = all.find((s) => s.id === selectedId) ?? null;
@@ -212,6 +232,17 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     });
 
+  const renameSession = () =>
+    run(async () => {
+      if (!renaming) return;
+      const title = renaming.title.trim();
+      if (title === "" || title === renaming.session.title) return setRenaming(null);
+      // The form stays open if the call fails, so the typed name isn't lost.
+      await api.renameSession(renaming.session.id, title);
+      setRenaming(null);
+      await onChanged();
+    });
+
   const prAction = (fn: () => Promise<unknown>) =>
     run(async () => {
       await fn();
@@ -273,13 +304,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
-          {(s.repo || s.pullRequests.length > 0 || s.mentionedPullRequests.length > 0) && (
+          {(s.repo || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
-              {s.pullRequests.map((u) => <Chip key={u} label={prLabel(u)} size="small" title={u} />)}
-              {s.mentionedPullRequests.map((u) => (
-                <Chip key={u} label={prLabel(u)} size="small" title={`Mentioned: ${u}`} className="pr-mention" />
-              ))}
+              {s.pullRequests.length === 1 && <Chip label={prLabel(s.pullRequests[0])} size="small" title={s.pullRequests[0]} />}
+              {s.pullRequests.length > 1 && <Chip label={`${s.pullRequests.length} PRs`} size="small" title={s.pullRequests.map(prLabel).join(", ")} />}
             </span>
           )}
         </span>
@@ -298,7 +327,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         </div>
         {error && <Alert status="danger" title={error} role="alert" />}
       </div>
-      <div className="sessions-grid">
+      <div className="sessions-grid" style={{ "--list-w": `${listWidth}px`, "--attrs-w": `${attrsWidth}px` } as React.CSSProperties}>
         <aside className="pane pane-list" aria-label="Session list">
           {controller && (
             <ul className="session-list">
@@ -343,12 +372,35 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               </div>
             </Alert>
           )}
+          {renaming && (
+            <form
+              className="rename-form"
+              aria-label={`Rename ${renaming.session.title}`}
+              onSubmit={(e) => { e.preventDefault(); void renameSession(); }}
+            >
+              <TextField
+                label="Session name"
+                autoFocus
+                value={renaming.title}
+                onChange={(e) => setRenaming({ ...renaming, title: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button type="submit" appearance="primary" size="small" disabled={renaming.title.trim() === ""}>Save name</Button>
+                <Button appearance="ghost" size="small" onClick={() => setRenaming(null)}>Cancel</Button>
+              </div>
+            </form>
+          )}
           <ul className="session-list pane-scroll">
             {sessions.map((s) => row(s, (
-              <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
+              <>
+                <Button appearance="ghost" size="small" icon={EditIcon} aria-label={`Rename ${s.title}`} title="Rename session" onClick={() => setRenaming({ session: s, title: s.title })} />
+                <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
+              </>
             )))}
           </ul>
         </aside>
+        <ColumnDivider label="Resize session list" width={listWidth} min={SIDE_MIN} max={SIDE_MAX} direction={1} onChange={resizeList} />
         <section className="pane pane-thread" aria-label="Conversation">
           {!selected ? (
             <Text subdued>Select a session to see its details.</Text>
@@ -471,6 +523,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
             </>
           )}
         </section>
+        <ColumnDivider className="column-divider-attrs" label="Resize session details" width={attrsWidth} min={SIDE_MIN} max={SIDE_MAX} direction={-1} onChange={resizeAttrs} />
         <aside className="pane pane-attrs" aria-label="Session details">
           {selected && (
             <>
@@ -511,7 +564,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     const label = prLabel(u);
                     return (
                       <li key={u} className="pr-item">
-                        <Link href={u} target="_blank" rel="noopener noreferrer">{label}</Link>
+                        <Chip label={label} size="small" title={st?.title ? `${label} ${st.title}` : u} />
                         {st && st.state !== "unknown" && (
                           <span className="pr-badges">
                             {st.draft && <Chip label="Draft" size="small" />}
@@ -519,37 +572,38 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                             {st.state === "open" && !st.draft && st.checks !== "none" && <Chip label={`Checks ${st.checks}`} size="small" />}
                           </span>
                         )}
-                        {st?.state === "open" && st.draft && (
+                        <span className="pr-actions">
                           <Button
-                            appearance="ghost" size="small" icon={ReadyIcon}
-                            aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
-                            className="pr-ready"
-                            onClick={() => prAction(() => api.markPrReady(selected.id, u))}
-                          />
-                        )}
-                        {st?.canMerge && (
-                          <Button
-                            appearance="ghost" size="small" icon={MergeIcon}
-                            aria-label={`Merge ${label}`} title="Merge pull request"
-                            onClick={() => setConfirmMerge(st)}
-                          />
-                        )}
+                            appearance="secondary" size="small" icon={OpenIcon}
+                            aria-label={`Open ${label}`} title="Open pull request on GitHub"
+                            onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
+                          >
+                            Open
+                          </Button>
+                          {st?.state === "open" && st.draft && (
+                            <Button
+                              appearance="secondary" size="small" icon={ReadyIcon}
+                              aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
+                              className="pr-ready"
+                              onClick={() => prAction(() => api.markPrReady(selected.id, u))}
+                            >
+                              Mark ready
+                            </Button>
+                          )}
+                          {st?.canMerge && (
+                            <Button
+                              appearance="secondary" size="small" icon={MergeIcon}
+                              aria-label={`Merge ${label}`} title="Merge pull request"
+                              onClick={() => setConfirmMerge(st)}
+                            >
+                              Merge
+                            </Button>
+                          )}
+                        </span>
                       </li>
                     );
                   })}
                 </ul>
-              )}
-              {selected.mentionedPullRequests.length > 0 && (
-                <>
-                  <Text variant="headline" el="h4" size="small">Mentioned pull requests</Text>
-                  <ul className="pr-list">
-                    {selected.mentionedPullRequests.map((u) => (
-                      <li key={u} className="pr-item">
-                        <Link href={u} target="_blank" rel="noopener noreferrer">{prLabel(u)}</Link>
-                      </li>
-                    ))}
-                  </ul>
-                </>
               )}
               {confirmMerge && (
                 <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>

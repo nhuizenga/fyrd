@@ -700,6 +700,7 @@ public class SpecRunnerTests
         public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => inner.ListByTagAsync(tag, ct);
         public Task InterruptAsync(string id, CancellationToken ct = default) => inner.InterruptAsync(id, ct);
         public Task ArchiveAsync(string id, CancellationToken ct = default) => inner.ArchiveAsync(id, ct);
+        public Task RenameAsync(string id, string title, CancellationToken ct = default) => inner.RenameAsync(id, title, ct);
         public Task AnswerQuestionAsync(string id, Fyrd.Core.Hub.HubQuestion q, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default) =>
             inner.AnswerQuestionAsync(id, q, answers, ct);
         public IAsyncEnumerable<StreamedEvent> StreamEventsAsync(string id, long? after, CancellationToken ct = default) =>

@@ -35,6 +35,10 @@ export const retireController = () => call<void>("POST", "/api/hub/controller/re
 export const sendMessage = (sessionId: string, text: string) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/message`, { text });
 export const pause = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pause`);
+/** Renames a session (the pencil button); the new title shows on the next poll. */
+export const renameSession = (sessionId: string, title: string) =>
+  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/rename`, { title });
+
 /** Archives a session (the trash button); it leaves the list on the next poll. */
 export const archiveSession = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/archive`);
 export const pullRequests = (sessionId: string) =>
