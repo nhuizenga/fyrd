@@ -16,6 +16,13 @@ export default function ThreadItem({ item, pending, onChanged }: {
           <span>{item.status || "Working…"}</span>
         </div>
         {item.detail && <pre className="msg-progress-detail">{item.detail}</pre>}
+        {item.workers && item.workers.length > 0 && (
+          <ul className="msg-progress-workers" aria-label="Running workers">
+            {item.workers.map((w) => (
+              <li key={w.id}><strong>{w.description}</strong>{w.line && <span> · {w.line}</span>}</li>
+            ))}
+          </ul>
+        )}
         {item.text && <Markdown text={item.text} />}
       </div>
     );

@@ -23,7 +23,11 @@ public sealed record TranscriptItem(
     IReadOnlyList<TranscriptQuestion>? Questions = null,
     string? ToolUseId = null,
     string? Status = null,
-    string? Detail = null);
+    string? Detail = null,
+    IReadOnlyList<TranscriptWorker>? Workers = null);
+
+/// <summary>A running worker on a progress item: <c>Line</c> is its latest tool ("Using Bash", "Running Bash · 42s"), if known.</summary>
+public sealed record TranscriptWorker(string Id, string Description, string? Line);
 
 /// <summary>Turns a streamed cloud-session event into the transcript items the console shows; pure, never throws on bad payloads.</summary>
 public static class HubTranscript

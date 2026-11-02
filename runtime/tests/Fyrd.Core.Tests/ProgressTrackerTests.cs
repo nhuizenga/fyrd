@@ -165,4 +165,65 @@ public class ProgressTrackerTests
         var item = t.Apply(Eph("""{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"subagent_type\":\"fork\",\"description\":\"build: initial task\"}"}}}"""))!;
         Assert.Equal("build: initial task", item.Detail);
     }
+
+    private static StreamedEvent Saved(string payload)
+    {
+        var raw = JsonDocument.Parse(payload).RootElement.Clone();
+        return new StreamedEvent(5, new SessionEvent("u", raw.GetProperty("type").GetString()!, At, null, raw));
+    }
+
+    private const string WorkerStarted = """{"type":"system","subtype":"task_started","task_type":"local_agent","description":"build: initial task","subagent_type":"fork","tool_use_id":"toolu_w1","task_id":"a1"}""";
+
+    [Fact]
+    public void RunningWorker_StaysOnTheLine_AfterAMainEventClearsIt_UntilItsNotification()
+    {
+        var t = new ProgressTracker();
+        t.ApplySaved(Saved(WorkerStarted));
+        var shown = t.Reset(At)!;
+        Assert.Equal("Waiting for workers", shown.Status);
+        var w = Assert.Single(shown.Workers!);
+        Assert.Equal(new TranscriptWorker("toolu_w1", "build: initial task", null), w);
+
+        // A later saved event with no change to the workers reports nothing new.
+        t.ApplySaved(Saved("""{"type":"assistant","message":{"content":[]}}"""));
+        Assert.Null(t.Reset(At));
+
+        t.ApplySaved(Saved("""{"type":"system","subtype":"task_notification","status":"completed","tool_use_id":"toolu_w1","summary":"done"}"""));
+        var cleared = t.Reset(At)!;
+        Assert.Null(cleared.Workers);
+        Assert.Null(cleared.Status);
+    }
+
+    [Fact]
+    public void BashTask_IsNotAWorker()
+    {
+        var t = new ProgressTracker();
+        t.ApplySaved(Saved("""{"type":"system","subtype":"task_started","task_type":"local_bash","description":"ls","tool_use_id":"toolu_b"}"""));
+        Assert.Null(t.Reset(At));
+    }
+
+    [Fact]
+    public void WorkerHeartbeatAndToolStart_SetThatWorkersLine_NotTheMainStatus()
+    {
+        var t = new ProgressTracker();
+        t.ApplySaved(Saved(WorkerStarted));
+        t.Reset(At);
+        var started = t.Apply(Eph("""{"type":"stream_event","parent_tool_use_id":"toolu_w1","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Edit"}}}"""))!;
+        Assert.Equal("Using Edit", started.Workers![0].Line);
+        var beat = t.Apply(Eph("""{"type":"tool_progress","parent_tool_use_id":"toolu_w1","tool_name":"Bash","elapsed_time_seconds":42}"""))!;
+        Assert.Equal("Running Bash · 42s", beat.Workers![0].Line);
+        Assert.Equal("Waiting for workers", beat.Status);
+        // The same line again changes nothing; a heartbeat for the main agent's own call still sets the main status.
+        Assert.Null(t.Apply(Eph("""{"type":"tool_progress","parent_tool_use_id":"toolu_w1","tool_name":"Bash","elapsed_time_seconds":42}""")));
+        var main = t.Apply(Eph("""{"type":"tool_progress","parent_tool_use_id":"toolu_main_bash","tool_name":"Bash","elapsed_time_seconds":90}"""))!;
+        Assert.Equal("Running Bash · 90s", main.Status);
+        Assert.Equal("Running Bash · 42s", main.Workers![0].Line);
+    }
+
+    [Fact]
+    public void UnknownSubagentStreamEvent_IsIgnored()
+    {
+        var t = new ProgressTracker();
+        Assert.Null(t.Apply(Eph("""{"type":"stream_event","parent_tool_use_id":"toolu_x","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Edit"}}}""")));
+    }
 }

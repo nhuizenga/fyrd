@@ -28,7 +28,9 @@ public sealed partial class ProgressTracker
     private readonly StringBuilder _json = new();
     private string? _task, _block, _detail;
     private bool _settled;
-    private bool _active;
+    private bool _active, _dirty;
+    // Running forked workers by the Agent call's tool_use id, in start order; Line is each one's latest tool.
+    private readonly List<(string Id, string Description, string? Line)> _workers = [];
 
     /// <summary>Applies one ephemeral event; the new progress item, or null when it changes nothing worth showing.</summary>
     public TranscriptItem? Apply(StreamedEvent e)
@@ -54,11 +56,21 @@ public sealed partial class ProgressTracker
                 // A long-running tool's heartbeat: keeps the status current instead of a stale "Using Bash".
                 if (Str(raw, "tool_name") is not { } tool) return null;
                 var secs = raw.TryGetProperty("elapsed_time_seconds", out var el) && el.TryGetDouble(out var n) ? (int)n : 0;
-                _block = secs > 0 ? $"Running {tool} · {secs}s" : $"Running {tool}";
+                var line = secs > 0 ? $"Running {tool} · {secs}s" : $"Running {tool}";
+                // A heartbeat whose parent is a running worker is that worker's tool; any other parent is the main agent's own call.
+                if (WorkerIndex(Str(raw, "parent_tool_use_id")) is { } wi) return SetWorkerLine(wi, line, e.Event.CreatedAt);
+                _block = line;
                 break;
 
             case "stream_event":
                 if (!raw.TryGetProperty("event", out var ev) || ev.ValueKind != JsonValueKind.Object) return null;
+                if (Str(raw, "parent_tool_use_id") is { } streamParent)
+                {
+                    // A worker's own stream: only the start of one of its tool calls is shown, as that worker's latest line.
+                    if (WorkerIndex(streamParent) is not { } wj || Str(ev, "type") != "content_block_start"
+                        || !ev.TryGetProperty("content_block", out var wcb) || Str(wcb, "type") != "tool_use") return null;
+                    return SetWorkerLine(wj, "Using " + (Str(wcb, "name") ?? "a tool"), e.Event.CreatedAt);
+                }
                 switch (Str(ev, "type"))
                 {
                     case "message_start":
@@ -109,21 +121,56 @@ public sealed partial class ProgressTracker
         return Item(e.Event.CreatedAt);
     }
 
-    /// <summary>Clears the line (a saved event arrived, or the turn ended); the "nothing in progress" item once, or null if already clear.</summary>
+    /// <summary>
+    /// Notes a saved event: a forked worker starting (<c>task_started</c>, <c>task_type local_agent</c>) or ending (<c>task_notification</c>
+    /// for it) changes the running-workers list. Call before <see cref="Reset"/> for the same event, which reports the change.
+    /// </summary>
+    public void ApplySaved(StreamedEvent e)
+    {
+        var raw = e.Event.Raw;
+        if (Str(raw, "type") != "system" || Str(raw, "tool_use_id") is not { } id) return;
+        switch (Str(raw, "subtype"))
+        {
+            case "task_started" when Str(raw, "task_type") == "local_agent" && WorkerIndex(id) is null:
+                _workers.Add((id, Str(raw, "description") ?? "Worker", null));
+                _dirty = true;
+                break;
+            case "task_notification" when WorkerIndex(id) is { } i:
+                _workers.RemoveAt(i);
+                _dirty = true;
+                break;
+        }
+    }
+
+    /// <summary>Clears the line (a saved event arrived, or the turn ended); the new item if the line or the workers list changed, or null if nothing did.</summary>
     public TranscriptItem? Reset(DateTimeOffset at)
     {
         _text.Clear();
         _task = _block = _detail = null;
         _json.Clear();
         _settled = false;
-        if (!_active) return null;
+        if (!_active && !_dirty) return null;
         _active = false;
+        _dirty = false;
         return Item(at);
     }
 
+    private int? WorkerIndex(string? toolUseId) =>
+        toolUseId is null ? null : _workers.FindIndex(w => w.Id == toolUseId) is var i and >= 0 ? i : null;
+
+    private TranscriptItem? SetWorkerLine(int index, string line, DateTimeOffset at)
+    {
+        if (_workers[index].Line == line) return null;
+        _workers[index] = _workers[index] with { Line = line };
+        return Item(at);
+    }
+
+    // Running workers keep the item alive after the main agent's own line clears: "Waiting for workers" is its status then.
     private TranscriptItem Item(DateTimeOffset at) =>
-        new(Key, 0, "agent", "progress", _active ? _text.ToString() : "", at, Status: _active ? _task ?? _block : null,
-            Detail: _active ? _detail : null);
+        new(Key, 0, "agent", "progress", _active ? _text.ToString() : "", at,
+            Status: _active ? _task ?? _block : _workers.Count > 0 ? "Waiting for workers" : null,
+            Detail: _active ? _detail : null,
+            Workers: _workers.Count > 0 ? _workers.Select(w => new TranscriptWorker(w.Id, w.Description, w.Line)).ToList() : null);
 
     /// <summary>The first telling string argument in partial tool-input JSON (a half-written value counts), and whether its string has closed.</summary>
     internal static (string? Text, bool Closed) ExtractDetail(string partialJson)

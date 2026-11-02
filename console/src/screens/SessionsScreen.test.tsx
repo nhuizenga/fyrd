@@ -114,9 +114,30 @@ it("Replace Controller can be cancelled", async () => {
   expect(api.retireController).not.toHaveBeenCalled();
 });
 
+it("session rows show the server-kept progress of sessions that are not selected", () => {
+  const live = (o: object) => ({ key: "ephemeral", seq: 0, role: "agent" as const, kind: "progress" as const, text: "", at: "2026-11-01T00:00:00Z", ...o });
+  renderScreen({
+    ...two(),
+    progress: {
+      a: live({ status: "Using Bash" }),
+      b: live({ text: "First line\nWriting the report" }),
+    },
+  });
+  // Nothing is selected, so these come from the hub state rather than a transcript stream.
+  expect(FakeEventSource.instances).toHaveLength(0);
+  expect(screen.getByText("Using Bash")).toHaveClass("session-row-progress");
+  expect(screen.getByText("Writing the report")).toHaveClass("session-row-progress");
+  expect(screen.queryByText("First line")).not.toBeInTheDocument();
+});
+
+it("session rows show no progress line when the server has none", () => {
+  renderScreen(two());
+  expect(document.querySelector(".session-row-progress")).toBeNull();
+});
+
 it("select session streams its transcript", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(FakeEventSource.latest().url).toBe("/api/hub/sessions/a/stream");
   FakeEventSource.latest().emit("item", item({ text: "Working on it" }));
   FakeEventSource.latest().emit("item", item({ role: "user", text: "Go ahead" }));
@@ -126,7 +147,7 @@ it("select session streams its transcript", async () => {
 
 it("an ephemeral progress frame shows as an in-progress agent bubble until the next item", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({ text: "Starting" }));
   FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Running the tests" }));
   const bubble = screen.getByText("Running the tests").closest(".msg");
@@ -145,16 +166,16 @@ it("an ephemeral progress frame shows as an in-progress agent bubble until the n
 
 it("switching sessions closes the old stream", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const first = FakeEventSource.latest();
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   expect(first.closed).toBe(true);
   expect(FakeEventSource.latest().url).toBe("/api/hub/sessions/b/stream");
 });
 
 it("duplicate items are shown once", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const it1 = item({ text: "Only once" });
   FakeEventSource.latest().emit("item", it1);
   FakeEventSource.latest().emit("item", it1);
@@ -163,7 +184,7 @@ it("duplicate items are shown once", async () => {
 
 it("message text renders as markdown", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({ text: "Use **bold** and `code`" }));
   expect(screen.getByText("bold").tagName).toBe("STRONG");
   expect(screen.getByText("code").tagName).toBe("CODE");
@@ -175,7 +196,7 @@ it("a pending question shows answer buttons in the thread", async () => {
   st.sessions[0].status = "requires_action";
   st.questions = [question({ id: "q1", sessionId: "a", toolUseId: "tu1" })];
   render(<Routed state={st} onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({
     kind: "question", text: "Which DB?", toolUseId: "tu1",
     questions: [{ question: "Which DB?", multiSelect: false, options: [{ label: "Postgres" }, { label: "SQLite" }] }],
@@ -188,7 +209,7 @@ it("a pending question shows answer buttons in the thread", async () => {
 
 it("an answered question shows read-only, with the answer", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({
     kind: "question", text: "Which DB?", toolUseId: "tu1",
     questions: [{ question: "Which DB?", multiSelect: false, options: [{ label: "Postgres" }, { label: "SQLite" }] }],
@@ -202,13 +223,13 @@ it("a pending question the stream hasn't delivered still gets buttons", async ()
   const st = two();
   st.questions = [question({ sessionId: "a" })];
   render(<Routed state={st} onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.getByRole("button", { name: "Postgres" })).toBeInTheDocument();
 });
 
 it("a stream fault shows a warning", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("fault", { detail: "Signed out of Claude" });
   expect(screen.getByRole("alert")).toHaveTextContent("Signed out of Claude");
 });
@@ -216,7 +237,7 @@ it("a stream fault shows a warning", async () => {
 it("Enter sends and Shift+Enter adds a new line", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const box = screen.getByLabelText("Message this session");
   await userEvent.type(box, "line one{Shift>}{Enter}{/Shift}line two");
   expect(api.sendMessage).not.toHaveBeenCalled();
@@ -229,7 +250,7 @@ it("Enter sends and Shift+Enter adds a new line", async () => {
 it("Message this session sends", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   await userEvent.type(screen.getByLabelText("Message this session"), "hello");
   await userEvent.click(screen.getByRole("button", { name: "Send" }));
   expect(api.sendMessage).toHaveBeenCalledWith("a", "hello");
@@ -239,13 +260,13 @@ it("pause and resume", async () => {
   vi.mocked(api.pause).mockResolvedValue(undefined);
   vi.mocked(api.resume).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.queryByRole("button", { name: "Resume session" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Pause session" }));
   expect(api.pause).toHaveBeenCalledWith("a");
   expect(await screen.findByRole("button", { name: "Resume session" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Pause session" })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   await userEvent.click(screen.getByRole("button", { name: "Resume session" }));
   expect(api.resume).toHaveBeenCalledWith("b");
 });
@@ -378,13 +399,13 @@ it("list order: Controller, its controls, search, then the other sessions", () =
   renderScreen(two());
   const pane = screen.getByRole("complementary", { name: "Session list" });
   // Open/Replace are icon buttons on the Controller's own row.
-  const ctlRow = screen.getByRole("button", { name: /controller/ }).closest("li")!;
+  const ctlRow = screen.getByRole("button", { name: /^(?!Export).*controller/ }).closest("li")!;
   expect(pane).toContainElement(ctlRow);
   expect(ctlRow).toContainElement(screen.getByRole("button", { name: "Open Controller" }));
   expect(ctlRow).toContainElement(screen.getByRole("button", { name: "Replace Controller" }));
   const search = screen.getByLabelText("Search sessions");
   const open = screen.getByRole("button", { name: "Open Controller" });
-  const alpha = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  const alpha = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(open.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(search.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
@@ -392,21 +413,21 @@ it("list order: Controller, its controls, search, then the other sessions", () =
 it("search never hides the Controller", async () => {
   renderScreen(two());
   await userEvent.type(screen.getByLabelText("Search sessions"), "beta");
-  expect(screen.getByRole("button", { name: /controller/ })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^(?!Export).*controller/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ })).not.toBeInTheDocument();
 });
 
 it("status shows as a labelled icon", () => {
   renderScreen(two());
-  const alpha = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  const alpha = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(alpha.querySelector("[role=img]")).toHaveAttribute("aria-label", "Running");
-  expect(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }).querySelector("[role=img]")).toHaveAttribute("aria-label", "Idle");
+  expect(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }).querySelector("[role=img]")).toHaveAttribute("aria-label", "Idle");
 });
 
 it("Add repository asks the session to attach the repo", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const add = screen.getByRole("button", { name: "Add repository" });
   expect(add).toBeDisabled();
   await userEvent.type(screen.getByLabelText("Add GitHub repository"), "https://github.com/acme/widgets/blob/main/README.md");
@@ -419,7 +440,7 @@ it("Add repository asks the session to attach the repo", async () => {
 
 it("selecting a session sets a deep link, and a deep link selects the session", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   expect(window.location.hash).toBe("#/sessions/b");
   expect(screen.getByRole("heading", { name: "beta-2" })).toBeInTheDocument();
 });
@@ -436,7 +457,7 @@ it("details come first, in order, with relative times", async () => {
   st.sessions[0] = { ...st.sessions[0], repo: "acme/web", createdAt: new Date(Date.now() - 86_400_000).toISOString(),
     lastActivity: new Date(Date.now() - 5 * 60_000).toISOString() };
   render(<Routed state={st} onChanged={vi.fn()} />);
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const pane = screen.getByRole("complementary", { name: "Session details" });
   const headings = [...pane.querySelectorAll("h4")].map((h) => h.textContent);
   expect(headings).toEqual(["Details", "Estimated cost", "Tags", "Pull requests"]);
@@ -448,7 +469,7 @@ it("details come first, in order, with relative times", async () => {
 
 it("#/sessions reopens the most recently viewed session", async () => {
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   cleanup();
   window.location.hash = "#/sessions";
   renderScreen(two());
@@ -468,7 +489,7 @@ it("hovering a message offers copy to clipboard", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   renderScreen(two());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("item", item({ text: "Copy **me**" }));
   await userEvent.click(screen.getByRole("button", { name: "Copy message" }));
   expect(writeText).toHaveBeenCalledWith("Copy **me**");
@@ -486,11 +507,11 @@ const withRepo = () =>
 
 it("an ephemeral progress bubble is still there after switching sessions and coming back", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Running the tests" }));
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   expect(screen.queryByText("Running the tests")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.getByText("Running the tests")).toBeInTheDocument();
 });
 
@@ -500,7 +521,7 @@ const withTwoPrs = () =>
 
 it("a session row with several PRs shows one 'n PRs' chip instead of each number", () => {
   renderScreen(withTwoPrs());
-  const row = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(within(row).getByText("2 PRs")).toBeInTheDocument();
   expect(within(row).getByTitle("#12, #40")).toBeInTheDocument();
   expect(within(row).queryByText("#12")).not.toBeInTheDocument();
@@ -508,24 +529,24 @@ it("a session row with several PRs shows one 'n PRs' chip instead of each number
 
 it("session details have no mentioned-PRs section", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const details = screen.getByRole("complementary", { name: "Session details" });
   expect(within(details).queryByRole("heading", { name: /Mentioned/ })).not.toBeInTheDocument();
 });
 
 it("session rows show a repo chip and PR chips", () => {
   renderScreen(withRepo());
-  const row = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(within(row).getByText("widgets")).toBeInTheDocument();
   expect(within(row).getByText("#12")).toBeInTheDocument();
-  const bare = screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ });
+  const bare = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ });
   expect(within(bare).queryByText("widgets")).not.toBeInTheDocument();
 });
 
 it("session details show each PR as a chip with an Open button", async () => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const details = screen.getByRole("complementary", { name: "Session details" });
   expect(within(details).getByText("#12")).toBeInTheDocument();
   expect(within(details).queryByRole("link", { name: "#12" })).not.toBeInTheDocument();
@@ -538,12 +559,12 @@ it("session details show each PR as a chip with an Open button", async () => {
 
 it("the message draft belongs to each session and survives switching and remounting", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   await userEvent.type(screen.getByLabelText("Message this session"), "for alpha");
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   expect(screen.getByLabelText("Message this session")).toHaveValue("");
   await userEvent.type(screen.getByLabelText("Message this session"), "for beta");
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.getByLabelText("Message this session")).toHaveValue("for alpha");
 
   cleanup();
@@ -554,7 +575,7 @@ it("the message draft belongs to each session and survives switching and remount
 it("a sent message clears only that session's saved draft", async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(undefined);
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   await userEvent.type(screen.getByLabelText("Message this session"), "go{Enter}");
   await vi.waitFor(() => expect(screen.getByLabelText("Message this session")).toHaveValue(""));
   cleanup();
@@ -564,7 +585,7 @@ it("a sent message clears only that session's saved draft", async () => {
 
 it("a sliding divider resizes the message box", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const divider = screen.getByRole("separator", { name: "Resize message box" });
   const before = Number(divider.getAttribute("aria-valuenow"));
   divider.focus();
@@ -576,7 +597,7 @@ it("a sliding divider resizes the message box", async () => {
 
 it("the key hints are icons and Send sits below the message box", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   expect(screen.getByRole("img", { name: "Enter to send" })).toBeInTheDocument();
   expect(screen.getByRole("img", { name: "Shift+Enter for a new line" })).toBeInTheDocument();
@@ -646,7 +667,7 @@ it("sessions are listed by role, then by name", () => {
 
 it("a progress bubble shows the running tool's command", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Using Bash", detail: "git status && ls" }));
   expect(screen.getByText("git status && ls")).toBeInTheDocument();
 });
@@ -691,9 +712,9 @@ it("archiving can be cancelled", async () => {
 
 it("session rows no longer show a role line", () => {
   renderScreen(two());
-  const row = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(within(row).queryByText("builder")).not.toBeInTheDocument();
-  const ctl = screen.getByRole("button", { name: /^(?!Archive|Rename).*controller/ });
+  const ctl = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*controller/ });
   expect(within(ctl).queryByText("Controller")).not.toBeInTheDocument();
 });
 
@@ -703,7 +724,7 @@ const prStatus = (o: Partial<PullRequestStatus> = {}): PullRequestStatus => ({
 const openAlphaWith = async (pr: PullRequestStatus) => {
   vi.mocked(api.pullRequests).mockResolvedValue([pr]);
   const onChanged = renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const details = screen.getByRole("complementary", { name: "Session details" });
   await within(details).findByRole("button", { name: "Open #12" });
   return { details, onChanged };
@@ -766,7 +787,7 @@ const progress = (o: { text?: string; status?: string | null }) =>
 
 it("the progress bubble shows the streamed reply as markdown under the status line", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("progress", progress({ status: "Using Read", text: "Looking at **the parser**" }));
   const bubble = screen.getByText("Using Read").closest(".msg") as HTMLElement;
   expect(bubble).toHaveClass("msg-progress");
@@ -776,7 +797,7 @@ it("the progress bubble shows the streamed reply as markdown under the status li
 
 it("text with no status falls back to a generic working label", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("progress", progress({ text: "Partial reply" }));
   expect(screen.getByText("Working…")).toBeInTheDocument();
   expect(screen.getByText("Partial reply")).toBeInTheDocument();
@@ -784,19 +805,19 @@ it("text with no status falls back to a generic working label", async () => {
 
 it("an empty progress frame clears the bubble, and it stays cleared after switching back", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   FakeEventSource.latest().emit("progress", progress({ status: "Using Read" }));
   FakeEventSource.latest().emit("progress", progress({}));
   expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
 });
 
 it("shows the branch as a chip in the session list and in the details", async () => {
   renderScreen(withRepo());
-  const row = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(within(row).getByText("fyrd/alpha")).toBeInTheDocument();
   await userEvent.click(row);
   const details = screen.getByRole("complementary", { name: "Session details" });
@@ -807,7 +828,7 @@ it("shows the branch as a chip in the session list and in the details", async ()
 it("shows a workers-running chip and a collapsed worker result card", async () => {
   renderScreen(hubState({ sessions: [session({ id: "a", title: "alpha-1", status: "idle", tags: ["fyrd-hub", "fyrd-workers-running"], workersRunning: true })] }));
   expect(screen.getByText("workers running")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.getByText("Working (background)")).toBeInTheDocument();
   FakeEventSource.latest().emit("item", item({ kind: "worker", text: "build: initial task", detail: "fork", toolUseId: "tw1" }));
   FakeEventSource.latest().emit("item", item({ key: "2:0", seq: 2, kind: "worker-result", text: "Status: done", status: "completed", toolUseId: "tw1" }));
@@ -815,4 +836,64 @@ it("shows a workers-running chip and a collapsed worker result card", async () =
   const card = screen.getByText("Worker result (completed)").closest("details") as HTMLElement;
   expect(card).not.toHaveAttribute("open");
   expect(within(card).getByText("Status: done")).toBeInTheDocument();
+});
+
+describe("export", () => {
+  const okResponse = () =>
+    new Response("{}\n", { status: 200, headers: { "Content-Disposition": 'attachment; filename="alpha-1-a-20261102-201000.jsonl"' } });
+
+  beforeEach(() => {
+    vi.mocked(api.exportUrl).mockImplementation((id: string) => `/api/hub/sessions/${id}/export`);
+    URL.createObjectURL = vi.fn(() => "blob:x");
+    URL.revokeObjectURL = vi.fn();
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("shows an Export button on every row, Controller included", () => {
+    renderScreen(two());
+    for (const t of ["controller", "alpha-1", "beta-2"])
+      expect(screen.getByRole("button", { name: `Export ${t}` })).toBeInTheDocument();
+  });
+
+  it("click fetches the export URL and saves a file", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderScreen(two());
+    await userEvent.click(screen.getByRole("button", { name: "Export alpha-1" }));
+    await vi.waitFor(() => expect(click).toHaveBeenCalled());
+    expect(fetchMock).toHaveBeenCalledWith("/api/hub/sessions/a/export");
+  });
+
+  it("shows the problem detail on failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Signed out of Claude" }), { status: 502 })));
+    renderScreen(two());
+    await userEvent.click(screen.getByRole("button", { name: "Export alpha-1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Signed out of Claude");
+    expect(screen.getByRole("button", { name: "Export alpha-1" })).toBeEnabled();
+  });
+
+  it("disables the button while the request runs", async () => {
+    let finish!: (r: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((r) => { finish = r; })));
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderScreen(two());
+    await userEvent.click(screen.getByRole("button", { name: "Export alpha-1" }));
+    expect(screen.getByRole("button", { name: "Export alpha-1" })).toBeDisabled();
+    finish(okResponse());
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Export alpha-1" })).toBeEnabled());
+  });
+});
+
+it("the in-progress bubble lists running workers with their latest tool", async () => {
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", item({
+    key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Waiting for workers",
+    workers: [{ id: "tw1", description: "build: initial task", line: "Running Bash · 42s" }],
+  }));
+  const list = screen.getByRole("list", { name: "Running workers" });
+  expect(within(list).getByText("build: initial task")).toBeInTheDocument();
+  expect(within(list).getByText(/Running Bash · 42s/)).toBeInTheDocument();
 });

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using Fyrd.Core.CloudSessions;
 using Fyrd.Core.Hub;
@@ -8,7 +9,7 @@ using Microsoft.Extensions.Options;
 namespace Fyrd.Server.Endpoints;
 
 /// <summary>The console's hub API: state, Controller, hub-session actions, question answers, personas and hub memory.</summary>
-internal static class HubEndpoints
+internal static partial class HubEndpoints
 {
     private const int MaxText = 20_000;
     private const string ResumeText = "Continue where you left off.";
@@ -33,7 +34,7 @@ internal static class HubEndpoints
     {
         var group = app.MapGroup("/api/hub");
 
-        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending) => ApiErrors.Run(() =>
+        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress) => ApiErrors.Run(() =>
         {
             // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
             // after the last poll, which no poll has had the chance to list yet.
@@ -51,6 +52,8 @@ internal static class HubEndpoints
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
                 pendingMemory = pending.Count,
+                // Each session's current live-only progress line (a tool in use, the reply so far), for sessions nobody has open.
+                progress = progress.Snapshot(),
                 controller = id is null ? null : new { sessionId = id, url = "https://claude.ai/code/" + id },
             });
         }));
@@ -79,7 +82,7 @@ internal static class HubEndpoints
 
         // Live transcript: relays the cloud session's own event stream as Server-Sent Events of TranscriptItems.
         group.MapGet("/sessions/{id}/stream", async (string id, HttpContext http, HubState state, ICloudSessions cloud,
-            IOptions<JsonOptions> json) =>
+            SessionProgress sessionProgress, IOptions<JsonOptions> json) =>
         {
             if (!state.Sessions.Any(s => s.Id == id))
             {
@@ -87,17 +90,41 @@ internal static class HubEndpoints
                     .ExecuteAsync(http);
                 return;
             }
-            await StreamTranscript(id, http, cloud, json.Value.SerializerOptions);
+            await StreamTranscript(id, http, cloud, sessionProgress, json.Value.SerializerOptions);
         });
 
-        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+        // Raw event export: every saved event as JSONL (header line, one raw event per line, trailer line).
+        group.MapGet("/sessions/{id}/export", (string id, HubState state, ICloudSessions cloud, TimeProvider time,
+            ILoggerFactory logs, CancellationToken ct) =>
+            InHub(id, state, () => Cloud(async () =>
+            {
+                var view = state.Sessions.First(s => s.Id == id);
+                var now = time.GetUtcNow();
+                // Everything that can fail early (session lookup, first page) runs before any byte is written,
+                // so it comes back as an ordinary problem response.
+                var events = cloud.AllEventsAsync(id, null, 100, ct).GetAsyncEnumerator(ct);
+                try
+                {
+                    var session = await cloud.GetAsync(id, ct);
+                    var hasFirst = await events.MoveNextAsync();
+                    return new ExportResult(id, view, session, events, hasFirst, now, logs.CreateLogger("Fyrd.Export"));
+                }
+                catch
+                {
+                    await events.DisposeAsync();
+                    throw;
+                }
+            })));
+
+        // The owner typed this, so it goes through the owner's CLI and reads as theirs, not as a peer message.
+        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, IOwnerMessages owner, CancellationToken ct) =>
             InHub(id, state, () =>
             {
                 if (BlockedError(id, state) is { } blocked) return Task.FromResult(blocked);
                 if (TextError(body?.Text) is { } error) return Task.FromResult(error);
                 return Cloud(async () =>
                 {
-                    await cloud.SendMessageAsync(id, body!.Text!, ct);
+                    await owner.SendAsync(id, body!.Text!, ct);
                     return Results.NoContent();
                 });
             }));
@@ -327,7 +354,8 @@ internal static class HubEndpoints
     /// Writes <c>event: item</c> frames until the client goes away, reopening the upstream stream whenever it ends.
     /// Resumes after <c>Last-Event-ID</c> (or <c>?after=</c>); drops sequence numbers already sent.
     /// </summary>
-    private static async Task StreamTranscript(string id, HttpContext http, ICloudSessions cloud, JsonSerializerOptions options)
+    private static async Task StreamTranscript(string id, HttpContext http, ICloudSessions cloud, SessionProgress sessionProgress,
+        JsonSerializerOptions options)
     {
         var ct = http.RequestAborted;
         long? last = long.TryParse(http.Request.Headers["Last-Event-ID"].ToString(), out var h) ? h
@@ -361,6 +389,8 @@ internal static class HubEndpoints
         try
         {
             await Write(": connected\n\n");
+            // Live-only progress is never replayed upstream: start from what the watcher has kept since before this connect.
+            if (sessionProgress.Get(id) is { } kept) await Write(Progress(kept));
             using var keepAliveCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var keepAlive = Task.Run(async () =>
             {
@@ -388,6 +418,7 @@ internal static class HubEndpoints
                             last = e.Sequence;
                             foreach (var item in HubTranscript.Map(e, workerToolIds))
                                 await Write($"id: {item.Seq}\nevent: item\ndata: {JsonSerializer.Serialize(item, options)}\n\n");
+                            progress.ApplySaved(e);
                             // A saved event (a message, a turn result) supersedes whatever was streaming.
                             if (progress.Reset(e.Event.CreatedAt) is { } cleared) await Write(Progress(cleared));
                         }
@@ -420,6 +451,71 @@ internal static class HubEndpoints
 
         Task Fault(string detail) =>
             Write($"event: fault\ndata: {JsonSerializer.Serialize(new { detail }, options)}\n\n");
+    }
+
+    [GeneratedRegex("[^a-z0-9]+")]
+    private static partial Regex SlugRegex();
+
+    /// <summary><c>&lt;title-slug&gt;-&lt;session id&gt;-&lt;yyyyMMdd-HHmmss&gt;.jsonl</c>, safe for a header and a file system.</summary>
+    internal static string ExportFileName(string title, string id, DateTimeOffset at)
+    {
+        var slug = SlugRegex().Replace(title.ToLowerInvariant(), "-").Trim('-');
+        if (slug.Length > 60) slug = slug[..60].Trim('-');
+        if (slug.Length == 0) slug = "session";
+        var safeId = Regex.Replace(id, "[^A-Za-z0-9_-]", "_");
+        return $"{slug}-{safeId}-{at.UtcDateTime:yyyyMMdd-HHmmss}.jsonl";
+    }
+
+    /// <summary>Streams the export after the early calls succeeded; a later failure aborts the connection.</summary>
+    private sealed class ExportResult(string id, HubSessionView view, CloudSession session, IAsyncEnumerator<SessionEvent> events,
+        bool hasFirst, DateTimeOffset at, ILogger log) : IResult
+    {
+        public async Task ExecuteAsync(HttpContext http)
+        {
+            var ct = http.RequestAborted;
+            var name = ExportFileName(view.Title, id, at);
+            var resp = http.Response;
+            resp.ContentType = "application/x-ndjson; charset=utf-8";
+            resp.Headers.ContentDisposition = $"attachment; filename=\"{name}\"; filename*=UTF-8''{Uri.EscapeDataString(name)}";
+            resp.Headers.CacheControl = "no-store";
+            var utf8 = new UTF8Encoding(false);
+            try
+            {
+                var header = JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["type"] = "fyrd_export", ["version"] = 1, ["exportedAt"] = at.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+                    ["sessionId"] = id, ["title"] = view.Title, ["role"] = string.IsNullOrEmpty(view.Role) ? null : view.Role,
+                    ["session"] = session.Raw,
+                });
+                await resp.WriteAsync(header + "\n", utf8, ct);
+                var count = 0;
+                var inPage = 0;
+                var more = hasFirst;
+                while (more)
+                {
+                    await resp.WriteAsync(JsonSerializer.Serialize(events.Current.Raw) + "\n", utf8, ct);
+                    count++;
+                    if (++inPage >= 100) { inPage = 0; await resp.Body.FlushAsync(ct); }
+                    more = await events.MoveNextAsync();
+                }
+                await resp.WriteAsync($"{{\"type\":\"fyrd_export_end\",\"eventCount\":{count}}}\n", utf8, ct);
+                await resp.Body.FlushAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // The client went away.
+            }
+            catch (Exception e)
+            {
+                // Headers are sent: abort so the download fails instead of saving a truncated file that looks whole.
+                log.LogError(e, "Export of {SessionId} failed part-way", id);
+                http.Abort();
+            }
+            finally
+            {
+                await events.DisposeAsync();
+            }
+        }
     }
 
     private static IResult SavePersona(string? id, HubPersona? body, HubPersonas personas) => ApiErrors.Run(() =>
@@ -488,7 +584,7 @@ internal static class HubEndpoints
         {
             return Results.Problem("Signed out of Claude — run `claude auth login`", statusCode: StatusCodes.Status502BadGateway);
         }
-        catch (Exception e) when (e is CloudSessionApiException or HttpRequestException)
+        catch (Exception e) when (e is CloudSessionApiException or HttpRequestException or OwnerMessageException)
         {
             return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
         }

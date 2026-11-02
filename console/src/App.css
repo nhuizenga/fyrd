@@ -66,6 +66,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-row { display: flex; align-items: center; gap: 8px; }
 .session-row-text { display: flex; flex-direction: column; min-width: 0; }
 .session-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row-progress { display: block; font-size: 0.8125rem; color: var(--a2-foreground-color-subdued); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-btn:hover { background: var(--a2-background-color-default-hover); }
 .row-btn[aria-current="true"], .row-btn[aria-current="page"] { background: var(--a2-background-color-primary-subdued); }
 .status-icon { display: inline-flex; flex: none; }
@@ -97,6 +98,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 /* Message bubbles: agent on the left (room on the right), owner on the right (room on the left). */
 .msg { position: relative; border-radius: 6px; padding: 3px 6px; box-sizing: border-box; overflow-wrap: anywhere; }
 .msg-worker, .msg-worker-result { border-left: 3px solid var(--a2-border-color-primary, #888); }
+.msg-progress-workers { margin: 0; padding-left: 18px; font-size: 0.9em; }
 .msg-worker-label { color: var(--a2-foreground-color-subdued); }
 .msg-worker-result summary { cursor: pointer; }
 .msg-progress { display: flex; flex-direction: column; gap: 6px; }

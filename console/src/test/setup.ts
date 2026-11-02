@@ -1,9 +1,11 @@
 import "@testing-library/jest-dom/vitest";
+import { clearTranscriptCache } from "../useTranscript";
 import { FakeEventSource } from "./fakeEventSource";
 
 globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
 beforeEach(() => {
   FakeEventSource.instances = [];
+  clearTranscriptCache();
 });
 
 // Anvil2 relies on browser APIs that jsdom lacks.

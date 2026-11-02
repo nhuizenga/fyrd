@@ -94,6 +94,8 @@ export interface HubState {
   budget?: HubBudgetView | null;
   /** Peasant shared-memory proposals waiting for the owner. */
   pendingMemory?: number;
+  /** Each session's current live-only progress line, kept by the server (so sessions nobody has open still have one). */
+  progress?: Record<string, TranscriptItem>;
 }
 
 export interface TranscriptOption {
@@ -123,6 +125,14 @@ export interface TranscriptItem {
   status?: string | null;
   /** Progress frames only: the running tool's main argument, such as the Bash command. */
   detail?: string | null;
+  /** Progress frames only: forked workers still running, each with its latest tool. */
+  workers?: TranscriptWorker[] | null;
+}
+
+export interface TranscriptWorker {
+  id: string;
+  description: string;
+  line?: string | null;
 }
 
 export interface HubPersona {

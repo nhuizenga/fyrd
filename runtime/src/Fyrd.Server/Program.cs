@@ -28,6 +28,7 @@ builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<IGitHub, GhCli>();
+builder.Services.AddSingleton<IOwnerMessages, ClaudeCliOwnerMessages>();
 builder.Services.AddSingleton<OwnedPullRequests>();
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
@@ -46,8 +47,13 @@ builder.Services.AddSingleton<HubState>();
 builder.Services.AddSingleton<CostLedger>();
 builder.Services.AddSingleton<CostGuard>();
 builder.Services.AddSingleton<HubRunner>();
+builder.Services.AddSingleton<SessionProgress>();
+builder.Services.AddSingleton<SessionProgressWatcher>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
+{
     builder.Services.AddHostedService<HubRunnerService>();
+    builder.Services.AddHostedService<SessionProgressService>();
+}
 builder.Services.AddSingleton(sp =>
 {
     var dir = Path.GetFullPath(builder.Configuration["Fyrd:PersonasDir"]
