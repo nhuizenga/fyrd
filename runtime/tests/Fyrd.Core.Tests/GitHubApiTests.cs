@@ -174,10 +174,11 @@ public class GitHubApiTests
         Assert.Equal("conflicting", open.Status.Mergeable);
         Assert.True(open.Status.Draft);
         Assert.True(list.Prs[2].CrossRepository);
+        Assert.Equal([false, false, true], list.Prs.Select(p => p.Partial)); // only an open PR missing from the heavy alias is partial
         using var body = JsonDocument.Parse(Assert.Single(graph.Requests).Body!);
         var q = body.RootElement.GetProperty("query").GetString()!;
         Assert.Contains("all:pullRequests(first:100", q);
-        Assert.Contains("open:pullRequests(first:50,states:OPEN)", q);
+        Assert.Contains("open:pullRequests(first:5,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC})", q);
         Assert.Contains("defaultBranchRef{name}", q);
     }
 
@@ -280,8 +281,26 @@ public class GitHubApiTests
     public async Task GraphQlNotFound_SaysTheTokenLacksAccess()
     {
         var (api, graph, _) = Make();
-        graph.Then("""{"errors":[{"type":"NOT_FOUND","message":"Could not resolve to a Repository"}]}""");
+        graph.Then("""{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository"}]}""");
         var e = await Assert.ThrowsAsync<GitHubException>(() => api.GetAsync(Url));
+        Assert.Equal("GitHub token lacks access to acme/widgets.", e.Message);
+    }
+
+    [Fact]
+    public async Task GraphQlNotFound_OnThePullRequest_SaysThePrDoesNotExist()
+    {
+        var (api, graph, _) = Make();
+        graph.Then("""{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND","path":["repository","pullRequest"],"message":"Could not resolve to a PullRequest with the number of 12."}]}""");
+        var e = await Assert.ThrowsAsync<GitHubException>(() => api.GetAsync(Url));
+        Assert.Equal($"GitHub has no pull request at {Url}.", e.Message);
+    }
+
+    [Fact]
+    public async Task GraphQlNotFound_InAListing_SaysTheTokenLacksAccess()
+    {
+        var (api, graph, _) = Make();
+        graph.Then("""{"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository"}]}""");
+        var e = await Assert.ThrowsAsync<GitHubException>(() => api.ListAsync("acme/widgets"));
         Assert.Equal("GitHub token lacks access to acme/widgets.", e.Message);
     }
 

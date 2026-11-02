@@ -91,6 +91,9 @@ public sealed record PullRequestHead(string Url, string Branch)
     public string State { get; init; } = "unknown";
     public bool CrossRepository { get; init; }
     public PullRequestStatus? Status { get; init; }
+
+    /// <summary>An open PR the listing did not read in full (no checks, review or mergeability): read it on its own when needed.</summary>
+    public bool Partial { get; init; }
 }
 
 /// <summary>A repo's recent pull requests (any state) and its default branch, which stacks never link through.</summary>

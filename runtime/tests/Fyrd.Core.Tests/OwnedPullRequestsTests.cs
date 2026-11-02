@@ -19,7 +19,16 @@ public sealed class StubGitHub : IGitHub
         return Task.FromResult(new PullRequestListing(DefaultBranch, ByRepo.TryGetValue(repo, out var l) ? l : []));
     }
 
-    public Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
+    public Dictionary<string, PullRequestStatus> Statuses { get; } = [];
+    public List<string> Got { get; } = [];
+    public Exception? GetFail { get; set; }
+
+    public Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default)
+    {
+        Got.Add(url);
+        if (GetFail is not null) throw GetFail;
+        return Statuses.TryGetValue(url, out var s) ? Task.FromResult(s) : throw new NotSupportedException();
+    }
     public Task MarkReadyAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
     public Task MergeAsync(string url, string? headSha = null, CancellationToken ct = default) => throw new NotSupportedException();
 }
@@ -52,6 +61,57 @@ public sealed class OwnedPullRequestsTests
 
         Assert.Equal([Pr(12), Pr(13), Pr(14)], await owned.FindAsync(Repo, ["fyrd/b", "fyrd/a", "fyrd/none"]));
         Assert.Empty(await owned.FindAsync(Repo, []));
+    }
+
+    private static PullRequestStatus Light(int n) => new(Pr(n), n, "t", "open", false, "none");
+    private static PullRequestStatus Full(int n) => new(Pr(n), n, "t", "open", false, "failing") { Mergeable = "conflicting" };
+
+    [Fact]
+    public async Task Find_ReadsAnOwnedPartialPr_OnItsOwn_OncePerListing()
+    {
+        _gh.ByRepo[Repo] = [new(Pr(12), "fyrd/a") { State = "open", Status = Light(12), Partial = true },
+                            new(Pr(20), "fyrd/z") { State = "open", Status = Light(20), Partial = true }];
+        _gh.Statuses[Pr(12)] = Full(12);
+        var owned = new OwnedPullRequests(_gh, _time);
+
+        Assert.Equal([Pr(12)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        Assert.Equal("failing", owned.Status(Pr(12))!.Checks);
+        Assert.Equal("conflicting", owned.Status(Pr(12))!.Mergeable);
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Equal([Pr(12)], _gh.Got); // once per listing; the unowned partial PR is never read
+        Assert.Equal("none", owned.Status(Pr(20))!.Checks);
+    }
+
+    [Fact]
+    public async Task Find_AFailedPartialRead_KeepsThePartialStatus_UntilTheNextListing()
+    {
+        _gh.ByRepo[Repo] = [new(Pr(12), "fyrd/a") { State = "open", Status = Light(12), Partial = true }];
+        _gh.GetFail = new GitHubException("boom");
+        var owned = new OwnedPullRequests(_gh, _time);
+
+        Assert.Equal([Pr(12)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Single(_gh.Got);
+        Assert.Equal("none", owned.Status(Pr(12))!.Checks);
+
+        _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Equal(2, _gh.Got.Count);
+    }
+
+    [Fact]
+    public async Task Find_ARateLimitOnAPartialRead_StopsTheReads_AndTheNextListing()
+    {
+        _gh.ByRepo[Repo] = [new(Pr(12), "fyrd/a") { State = "open", Status = Light(12), Partial = true },
+                            new(Pr(13), "fyrd/a") { State = "open", Status = Light(13), Partial = true }];
+        _gh.GetFail = new GitHubRateLimitException(_time.GetUtcNow().AddMinutes(10));
+        var owned = new OwnedPullRequests(_gh, _time);
+
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Single(_gh.Got);
+        _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Single(_gh.Listed);
     }
 
     [Fact]
