@@ -92,8 +92,7 @@ public sealed partial class HubRunner(
             try
             {
                 var w = await PollSessionAsync(s, ct);
-                var (repo, branch) = RepoAndBranch(s.Raw);
-                var owned = ownedPrs is null ? [] : await ownedPrs.FindAsync(repo, branch, ct);
+                var owned = ownedPrs is null ? [] : await ownedPrs.FindAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
                 views.Add(View(s, w.LastActivity, owned, w.Mentions));
                 // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
                 // waiting on the owner has a live question.
@@ -344,15 +343,31 @@ public sealed partial class HubRunner(
     }
 
     /// <summary>The first non-empty value of <c>external_metadata.current_branches</c> (keyed by mount path).</summary>
-    private static string? LiveBranch(JsonElement raw)
+    private static string? LiveBranch(JsonElement raw) => LiveBranches(raw).FirstOrDefault();
+
+    private static IEnumerable<string> LiveBranches(JsonElement raw)
     {
         if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("external_metadata", out var em)
             || em.ValueKind != JsonValueKind.Object || !em.TryGetProperty("current_branches", out var cb)
             || cb.ValueKind != JsonValueKind.Object)
-            return null;
+            yield break;
         foreach (var p in cb.EnumerateObject())
-            if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is { Length: > 0 } name) return name;
-        return null;
+            if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is { Length: > 0 } name) yield return name;
+    }
+
+    /// <summary>Every branch the session has: all live ones (one per mount) and all its outcomes' branches.</summary>
+    private static IReadOnlyList<string> Branches(JsonElement raw)
+    {
+        var all = LiveBranches(raw).ToList();
+        if (raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var ctx)
+            && ctx.ValueKind == JsonValueKind.Object && ctx.TryGetProperty("outcomes", out var outcomes)
+            && outcomes.ValueKind == JsonValueKind.Array)
+            foreach (var o in outcomes.EnumerateArray())
+                if (o.ValueKind == JsonValueKind.Object && o.TryGetProperty("git_info", out var gi) && gi.ValueKind == JsonValueKind.Object
+                    && gi.TryGetProperty("branches", out var bs) && bs.ValueKind == JsonValueKind.Array)
+                    foreach (var b in bs.EnumerateArray())
+                        if (b.ValueKind == JsonValueKind.String && b.GetString() is { Length: > 0 } name) all.Add(name);
+        return all.Distinct(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>

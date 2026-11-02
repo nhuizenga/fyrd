@@ -36,9 +36,18 @@ public sealed class OwnedPullRequestsTests
     {
         var owned = new OwnedPullRequests(_gh, _time);
 
-        Assert.Equal([Pr(12), Pr(13)], await owned.FindAsync(Repo, "fyrd/a"));
-        Assert.Equal([Pr(14)], await owned.FindAsync(Repo, "fyrd/b"));
-        Assert.Empty(await owned.FindAsync(Repo, "fyrd/none"));
+        Assert.Equal([Pr(12), Pr(13)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        Assert.Equal([Pr(14)], await owned.FindAsync(Repo, ["fyrd/b"]));
+        Assert.Empty(await owned.FindAsync(Repo, ["fyrd/none"]));
+    }
+
+    [Fact]
+    public async Task Find_MatchesAnyOfSeveralBranches()
+    {
+        var owned = new OwnedPullRequests(_gh, _time);
+
+        Assert.Equal([Pr(12), Pr(13), Pr(14)], await owned.FindAsync(Repo, ["fyrd/b", "fyrd/a", "fyrd/none"]));
+        Assert.Empty(await owned.FindAsync(Repo, []));
     }
 
     [Fact]
@@ -46,12 +55,12 @@ public sealed class OwnedPullRequestsTests
     {
         var owned = new OwnedPullRequests(_gh, _time);
 
-        await owned.FindAsync(Repo, "fyrd/a");
-        await owned.FindAsync(Repo, "fyrd/b");
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        await owned.FindAsync(Repo, ["fyrd/b"]);
         Assert.Single(_gh.Listed);
 
         _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
-        await owned.FindAsync(Repo, "fyrd/a");
+        await owned.FindAsync(Repo, ["fyrd/a"]);
         Assert.Equal(2, _gh.Listed.Count);
     }
 
@@ -64,7 +73,7 @@ public sealed class OwnedPullRequestsTests
     {
         var owned = new OwnedPullRequests(_gh, _time);
 
-        Assert.Empty(await owned.FindAsync(repo, branch));
+        Assert.Empty(await owned.FindAsync(repo, [branch]));
         Assert.Empty(_gh.Listed);
     }
 
@@ -72,12 +81,12 @@ public sealed class OwnedPullRequestsTests
     public async Task Find_WhenGhFails_KeepsTheLastListAndWaitsATtlBeforeRetrying()
     {
         var owned = new OwnedPullRequests(_gh, _time);
-        await owned.FindAsync(Repo, "fyrd/a");
+        await owned.FindAsync(Repo, ["fyrd/a"]);
         _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
         _gh.Fail = new GitHubException("gh is not installed");
 
-        Assert.Equal([Pr(12), Pr(13)], await owned.FindAsync(Repo, "fyrd/a"));
-        await owned.FindAsync(Repo, "fyrd/a");
+        Assert.Equal([Pr(12), Pr(13)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        await owned.FindAsync(Repo, ["fyrd/a"]);
         Assert.Equal(2, _gh.Listed.Count);
     }
 
@@ -86,6 +95,6 @@ public sealed class OwnedPullRequestsTests
     {
         _gh.Fail = new GitHubException("gh is not installed");
 
-        Assert.Empty(await new OwnedPullRequests(_gh, _time).FindAsync(Repo, "fyrd/a"));
+        Assert.Empty(await new OwnedPullRequests(_gh, _time).FindAsync(Repo, ["fyrd/a"]));
     }
 }

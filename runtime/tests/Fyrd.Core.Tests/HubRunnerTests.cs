@@ -601,6 +601,47 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_SessionView_APrMapsToEverySessionOnItsBranch()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [new("https://github.com/acme/widgets/pull/9", "fyrd/shared-memory")];
+        _cloud.SetByTag("fyrd-hub",
+            Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw),
+            Hub("s2", "reviewer-pr-9", "idle", role: "reviewer", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.All(_state.Sessions, s => Assert.Equal(["https://github.com/acme/widgets/pull/9"], s.PullRequests));
+    }
+
+    [Fact]
+    public async Task Poll_SessionView_MatchesEveryBranchTheSessionHas()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            new("https://github.com/acme/widgets/pull/7", "claude/outcome"),
+            new("https://github.com/acme/widgets/pull/8", "fyrd/second-mount"),
+            new("https://github.com/acme/widgets/pull/9", "fyrd/live"),
+            new("https://github.com/acme/widgets/pull/10", "fyrd/unrelated"),
+        ];
+        const string raw = """
+            {"session_context":{"sources":[{"type":"git_repository","url":"https://github.com/acme/widgets"}],
+                                "outcomes":[{"type":"git_repository","git_info":{"repo":"acme/widgets","branches":["claude/outcome"]}}]},
+             "external_metadata":{"current_branches":{"":"fyrd/live","/other":"fyrd/second-mount","/x":null}}}
+            """;
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal("fyrd/live", v.Branch);
+        Assert.Equal(
+            ["https://github.com/acme/widgets/pull/7", "https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"],
+            v.PullRequests);
+    }
+
+    [Fact]
     public async Task Poll_SessionView_GhFailureLeavesThePollHealthy()
     {
         var gh = new StubGitHub { Fail = new GitHubException("gh is not installed") };
