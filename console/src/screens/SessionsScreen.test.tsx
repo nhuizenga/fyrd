@@ -1,6 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
+import { describe, vi } from "vitest";
 import * as api from "../api";
 import { FakeEventSource, item } from "../test/fakeEventSource";
 import { cost, hubState, question, session } from "../test/fixtures";
@@ -870,5 +870,34 @@ describe("export", () => {
     expect(screen.getByRole("button", { name: "Export alpha-1" })).toBeDisabled();
     finish(okResponse());
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Export alpha-1" })).toBeEnabled());
+  });
+});
+
+describe("without GitHub access", () => {
+  const openAlpha = async (gitHub: HubState["gitHub"], prs = true) => {
+    const st = withRepo();
+    st.gitHub = gitHub;
+    if (!prs) st.sessions[0].pullRequests = [];
+    vi.mocked(api.pullRequests).mockResolvedValue([prStatus({ draft: true, canMerge: true })]);
+    renderScreen(st);
+    await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+    return screen.getByRole("complementary", { name: "Session details" });
+  };
+
+  it("shows a note instead of statuses when no token is set, and hides ready and merge", async () => {
+    const details = await openAlpha({ configured: false, login: null, error: null }, false);
+    expect(within(details).getByRole("note")).toHaveTextContent("Set GH_TOKEN before /fyrd:up to see PR status and act on PRs.");
+  });
+
+  it("shows the token error the same way", async () => {
+    const details = await openAlpha({ configured: true, login: null, error: "GitHub rejected the token (bad or expired)." });
+    expect(within(details).getByRole("note")).toHaveTextContent("bad or expired");
+    expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
+  });
+
+  it("shows no note when signed in", async () => {
+    const details = await openAlpha({ configured: true, login: "octocat", error: null });
+    expect(within(details).queryByRole("note")).not.toBeInTheDocument();
   });
 });

@@ -7,6 +7,8 @@ public sealed class StubGitHub : IGitHub
     public Dictionary<string, List<PullRequestHead>> ByRepo { get; } = [];
     public List<string> Listed { get; } = [];
     public Exception? Fail { get; set; }
+    public bool Configured { get; set; } = true;
+    public Task<string?> LoginAsync(CancellationToken ct = default) => Task.FromResult<string?>(Configured ? "me" : null);
 
     public Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default)
     {
@@ -96,5 +98,37 @@ public sealed class OwnedPullRequestsTests
         _gh.Fail = new GitHubException("gh is not installed");
 
         Assert.Empty(await new OwnedPullRequests(_gh, _time).FindAsync(Repo, ["fyrd/a"]));
+    }
+
+    [Fact]
+    public async Task Find_WithoutAToken_ReturnsNothingAndNeverCallsGitHub()
+    {
+        _gh.Configured = false;
+
+        Assert.Empty(await new OwnedPullRequests(_gh, _time).FindAsync(Repo, ["fyrd/a"]));
+        Assert.Empty(_gh.Listed);
+    }
+
+    [Fact]
+    public async Task Find_WhenRateLimited_KeepsTheLastListAndDoesNotRetryBeforeTheReset()
+    {
+        var owned = new OwnedPullRequests(_gh, _time);
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        var resetAt = _time.GetUtcNow().AddMinutes(30);
+        _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
+        _gh.Fail = new GitHubRateLimitException(resetAt);
+
+        Assert.Equal([Pr(12), Pr(13)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        Assert.Equal(2, _gh.Listed.Count);
+
+        // Many TTLs later, but still before the reset: no request.
+        _time.Advance(OwnedPullRequests.Ttl * 3);
+        Assert.Equal([Pr(12), Pr(13)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        Assert.Equal(2, _gh.Listed.Count);
+
+        _time.Advance(TimeSpan.FromMinutes(30));
+        _gh.Fail = null;
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Equal(3, _gh.Listed.Count);
     }
 }

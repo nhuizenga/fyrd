@@ -71,6 +71,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     sessions: SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
+    gitHub: { configured: true, login: "octocat", error: null },
     controller: { sessionId: "session_ctl", url: "https://claude.ai/code/session_ctl" },
     pendingMemory: opts.pending?.length ?? 0,
   };

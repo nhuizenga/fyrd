@@ -27,7 +27,23 @@ builder.Services.AddSingleton<OwnerProxy>();
 builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
-builder.Services.AddSingleton<IGitHub, GhCli>();
+// The token is read once from GH_TOKEN (else GITHUB_TOKEN) and kept in memory only.
+builder.Services.AddSingleton(GitHubToken.FromEnvironment());
+builder.Services.AddHttpClient("github", c =>
+{
+    c.BaseAddress = new Uri("https://api.github.com/");
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("fyrd");
+    c.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    c.Timeout = TimeSpan.FromSeconds(30);
+});
+builder.Services.AddSingleton<IGitHub>(sp =>
+{
+    var token = sp.GetRequiredService<GitHubToken>();
+    var octokit = new Octokit.GitHubClient(new Octokit.ProductHeaderValue("fyrd"));
+    if (token.Present) octokit.Credentials = new Octokit.Credentials(token.Value);
+    return new GitHubApi(token, sp.GetRequiredService<IHttpClientFactory>().CreateClient("github"), octokit, sp.GetRequiredService<TimeProvider>());
+});
+builder.Services.AddSingleton<GitHubSignIn>();
 builder.Services.AddSingleton<IOwnerMessages, ClaudeCliOwnerMessages>();
 builder.Services.AddSingleton<OwnedPullRequests>();
 builder.Services.AddSingleton<RunnerState>();
@@ -52,6 +68,7 @@ builder.Services.AddSingleton<SessionProgressWatcher>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
 {
     builder.Services.AddHostedService<HubRunnerService>();
+    builder.Services.AddHostedService<GitHubSignInService>();
     builder.Services.AddHostedService<SessionProgressService>();
 }
 builder.Services.AddSingleton(sp =>

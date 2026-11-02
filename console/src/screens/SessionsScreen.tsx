@@ -130,6 +130,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const sessions = q ? others.filter((s) => s.title.toLowerCase().includes(q)) : others;
   const selected = all.find((s) => s.id === selectedId) ?? null;
   const hasThread = selected !== null;
+  // No token, or a bad one: there are no PR statuses or actions, only a note saying why.
+  const gitHubNote = state?.gitHub
+    ? !state.gitHub.configured ? "Set GH_TOKEN before /fyrd:up to see PR status and act on PRs." : state.gitHub.error
+    : null;
   const prKey = selected ? `${selected.id}|${selected.pullRequests.join(",")}` : "";
 
   const loadPrs = useCallback(async () => {
@@ -609,7 +613,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 {selected.tags.length === 0 ? <Text subdued size="small">None</Text> : selected.tags.map((t) => <Chip key={t} label={t} size="small" />)}
               </div>
               <Text variant="headline" el="h4" size="small">Pull requests</Text>
-              {selected.pullRequests.length === 0 ? <Text subdued>—</Text> : (
+              {gitHubNote && <Text size="small" subdued role="note">{gitHubNote}</Text>}
+              {selected.pullRequests.length === 0 ? (gitHubNote ? null : <Text subdued>—</Text>) : (
                 <ul className="pr-list">
                   {selected.pullRequests.map((u) => {
                     const st = prStatuses.find((p) => p.url === u);
@@ -630,7 +635,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                             aria-label={`Open ${label}`} title="Open pull request on GitHub"
                             onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
                           />
-                          {st?.state === "open" && st.draft && (
+                          {!gitHubNote && st?.state === "open" && st.draft && (
                             <Button
                               appearance="secondary" size="small" icon={ReadyIcon}
                               aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
@@ -638,7 +643,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                               onClick={() => prAction(() => api.markPrReady(selected.id, u))}
                             />
                           )}
-                          {st?.canMerge && (
+                          {!gitHubNote && st?.canMerge && (
                             <Button
                               appearance="secondary" size="small" icon={MergeIcon}
                               aria-label={`Merge ${label}`} title="Merge pull request"
@@ -654,7 +659,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               )}
               {confirmMerge && (
                 <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
-                  <Text>This merges the pull request on GitHub.</Text>
+                  <Text>This squash-merges the pull request on GitHub.</Text>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Button
                       appearance="primary" size="small"

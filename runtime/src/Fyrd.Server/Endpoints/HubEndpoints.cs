@@ -34,7 +34,7 @@ internal static partial class HubEndpoints
     {
         var group = app.MapGroup("/api/hub");
 
-        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress) => ApiErrors.Run(() =>
+        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress, GitHubSignIn gitHub) => ApiErrors.Run(() =>
         {
             // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
             // after the last poll, which no poll has had the chance to list yet.
@@ -51,6 +51,7 @@ internal static partial class HubEndpoints
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
+                gitHub = new { configured = gitHub.Configured, login = gitHub.Login, error = gitHub.Error },
                 pendingMemory = pending.Count,
                 // Each session's current live-only progress line (a tool in use, the reply so far), for sessions nobody has open.
                 progress = progress.Snapshot(),
@@ -165,6 +166,7 @@ internal static partial class HubEndpoints
         group.MapGet("/sessions/{id}/pull-requests", (string id, HubState state, IGitHub github, CancellationToken ct) =>
             InHub(id, state, async () =>
             {
+                if (!github.Configured) return NotConfigured();
                 var urls = state.Sessions.First(s => s.Id == id).PullRequests;
                 var all = await Task.WhenAll(urls.Select(async url =>
                 {
@@ -550,6 +552,7 @@ internal static partial class HubEndpoints
         Func<string, PullRequestStatus, Task<IResult>> action) =>
         InHub(id, state, async () =>
         {
+            if (!github.Configured) return NotConfigured();
             var url = body?.Url;
             if (!PullRequestUrl.IsValid(url) || !state.Sessions.First(s => s.Id == id).PullRequests.Contains(url!))
                 return Bad("That is not one of this session's pull requests.");
@@ -562,6 +565,9 @@ internal static partial class HubEndpoints
                 return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         });
+
+    private static IResult NotConfigured() =>
+        Results.Problem("GitHub is not configured. Set GH_TOKEN before /fyrd:up.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
     private static IResult Bad(string detail) => Results.Problem(detail, statusCode: StatusCodes.Status400BadRequest);
 

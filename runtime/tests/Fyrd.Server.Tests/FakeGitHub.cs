@@ -8,6 +8,11 @@ public sealed class FakeGitHub : IGitHub
     public List<string> Readied { get; } = [];
     public List<string> Merged { get; } = [];
     public Exception? Fail { get; set; }
+    public bool Configured { get; set; } = true;
+
+    public Task<string?> LoginAsync(CancellationToken ct = default) =>
+        Fail is not null ? throw Fail : Task.FromResult<string?>(Configured ? "octo" : null);
+
     public List<PullRequestHead> Heads { get; } = [];
 
     public Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default)
