@@ -218,7 +218,7 @@ public class ApiTests
         f.Services.GetRequiredService<SpecStore>().SetLead(specId, "sess-1");
         var card = f.Services.GetRequiredService<InboxStore>()
             .Add(specId, null, "Which?", ["a"], null, null, null, true, sourceKey: specId + ":q1");
-        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        f.Owner.ThrowOnNextCall(new HttpRequestException("boom"));
         var c = f.CreateClient();
 
         var r = await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
@@ -242,14 +242,14 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/inbox/{card.Id}/relay", null)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/inbox/abcdef123456/relay", null)).StatusCode);
 
-        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        f.Owner.ThrowOnNextCall(new HttpRequestException("boom"));
         await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
         Assert.Equal("failed", inbox.Get(card.Id).Answer!.RelayStatus);
-        Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
 
         var r = await c.PostAsync($"/api/inbox/{card.Id}/relay", null);
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
-        Assert.Single(f.Cloud.Sent);
+        Assert.Single(f.Owner.Sent);
         var after = inbox.Get(card.Id).Answer!;
         Assert.Equal(("sent", 0), (after.RelayStatus, after.RelayAttempts));
     }
@@ -265,7 +265,7 @@ public class ApiTests
         var c = f.CreateClient();
         Assert.Empty((await ReadJson(await c.GetAsync("/api/inbox/undelivered"))).EnumerateArray());
 
-        f.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        f.Owner.ThrowOnNextCall(new HttpRequestException("boom"));
         await c.PostAsJsonAsync($"/api/inbox/{card.Id}/answer", new { text = "a" });
         var list = (await ReadJson(await c.GetAsync("/api/inbox/undelivered"))).EnumerateArray().ToList();
         var item = Assert.Single(list);

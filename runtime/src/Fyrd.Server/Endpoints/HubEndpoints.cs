@@ -90,14 +90,15 @@ internal static class HubEndpoints
             await StreamTranscript(id, http, cloud, json.Value.SerializerOptions);
         });
 
-        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+        // The owner typed this, so it goes through the owner's CLI and reads as theirs, not as a peer message.
+        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, IOwnerMessages owner, CancellationToken ct) =>
             InHub(id, state, () =>
             {
                 if (BlockedError(id, state) is { } blocked) return Task.FromResult(blocked);
                 if (TextError(body?.Text) is { } error) return Task.FromResult(error);
                 return Cloud(async () =>
                 {
-                    await cloud.SendMessageAsync(id, body!.Text!, ct);
+                    await owner.SendAsync(id, body!.Text!, ct);
                     return Results.NoContent();
                 });
             }));
@@ -487,7 +488,7 @@ internal static class HubEndpoints
         {
             return Results.Problem("Signed out of Claude — run `claude auth login`", statusCode: StatusCodes.Status502BadGateway);
         }
-        catch (Exception e) when (e is CloudSessionApiException or HttpRequestException)
+        catch (Exception e) when (e is CloudSessionApiException or HttpRequestException or OwnerMessageException)
         {
             return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
         }

@@ -3,8 +3,11 @@ using Fyrd.Core.Specs;
 
 namespace Fyrd.Core.Orchestration;
 
-/// <summary>Relays the owner's inbox answers and squad-cap changes to the lead session as user messages.</summary>
-public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState state, InboxStore inbox)
+/// <summary>
+/// Relays the owner's inbox answers (through the owner's CLI, so the lead reads them as the owner's) and squad-cap
+/// changes (through the API) to the lead session.
+/// </summary>
+public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, IOwnerMessages owner, RunnerState state, InboxStore inbox)
 {
     private readonly HashSet<string> _inFlight = [];
 
@@ -51,7 +54,8 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, RunnerState
         var text = rest.StartsWith(AttentionPrefix, StringComparison.Ordinal)
             ? answered.Answer.Text
             : Protocol.FormatAnswer(rest, answered.Answer.Text);
-        await cloud.SendMessageAsync(sessionId, text, ct);
+        // The owner typed the answer, and leads honour a fyrd-answer only in an owner turn, never in a peer-wrapped one.
+        await owner.SendAsync(sessionId, text, ct);
         state.ClearQuestionFlag(specId);
         return true;
     }

@@ -59,6 +59,7 @@ The web UI creates sessions with `POST /v1/code/sessions`, putting a `config` ob
 | List by tag | `GET /v1/sessions?tags=<tag>&limit=100` | Filters on the server. `tags[]=` and `tag=` are **ignored** and return everything. Page with `has_more` / `after_id`. |
 | Interrupt | `POST /v1/sessions/{id}/events` | `{"events":[{"type":"control_request","request_id":"<uuid>","request":{"subtype":"interrupt","cancel_queued":true}}]}` |
 | Archive | `POST /v1/code/sessions/{id}/archive` | Body `{}`. The session then shows `external_metadata.archive_container_stop_pending_epoch`. |
+| Unarchive | `POST /v1/code/sessions/{id}/unarchive` | Body `{}`. Returns `{session:{…}}` (verified 2026-11-02). |
 | **Event stream** | `GET /v1/code/sessions/{id}/events/stream` | Server-Sent Events (§5). Verified 2026-10-31. |
 
 ### 3.2 Seen in the CLI, not yet called by Fyrd
@@ -188,6 +189,7 @@ Open: whether the `GET /v1/sessions?tags=` listing items carry `external_metadat
 |---|---|
 | `claude --cloud "<task>"` | Creates a session for the current repo. **Requires an interactive terminal**: a program can drive it through a pseudo-terminal (`spikes/cloud-cli/PtyProbe`), but not when its output is piped. `-p` with a task is rejected. |
 | `claude -p "<msg>" --cloud <id> [--output-format json]` | Queues one message, then exits without waiting for a reply. JSON output is `{ok, session_id, url}`. |
+| `<msg on stdin> \| claude -p --cloud <id> [--output-format json]` | Same, reading the message from stdin. Delivered byte-for-byte: newlines, quotes, `$`, backticks, `& \| < > ^ %`, non-ASCII (verified 2026-11-02). The turn is stamped `client_platform: claude_code_sdk` and reads as the owner's, with no peer wrapper. An archived session fails with `{ok:false, error:"… is archived and cannot accept new messages"}` and exit 1. |
 | `claude --cloud <id>` (without `-p`) | Fails with "Attaching to an existing cloud session is not enabled for your account." |
 | `claude -p --teleport <id> "<prompt>"` | Copies the cloud transcript to a local JSONL file and runs one model turn on it. This costs a model turn, and needs a clean local clone of the repo. |
 | `claude agents --json` | Lists **local** sessions only; cloud sessions don't appear. |
