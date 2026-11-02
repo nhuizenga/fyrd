@@ -273,10 +273,13 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
-          {(s.repo || s.pullRequests.length > 0) && (
+          {(s.repo || s.pullRequests.length > 0 || s.mentionedPullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
               {s.pullRequests.map((u) => <Chip key={u} label={prLabel(u)} size="small" title={u} />)}
+              {s.mentionedPullRequests.map((u) => (
+                <Chip key={u} label={prLabel(u)} size="small" title={`Mentioned: ${u}`} className="pr-mention" />
+              ))}
             </span>
           )}
         </span>
@@ -535,6 +538,18 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     );
                   })}
                 </ul>
+              )}
+              {selected.mentionedPullRequests.length > 0 && (
+                <>
+                  <Text variant="headline" el="h4" size="small">Mentioned pull requests</Text>
+                  <ul className="pr-list">
+                    {selected.mentionedPullRequests.map((u) => (
+                      <li key={u} className="pr-item">
+                        <Link href={u} target="_blank" rel="noopener noreferrer">{prLabel(u)}</Link>
+                      </li>
+                    ))}
+                  </ul>
+                </>
               )}
               {confirmMerge && (
                 <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>

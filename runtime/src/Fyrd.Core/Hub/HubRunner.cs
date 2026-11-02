@@ -11,7 +11,8 @@ namespace Fyrd.Core.Hub;
 /// </summary>
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
-    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard)
+    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard,
+    OwnedPullRequests? ownedPrs = null)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -19,6 +20,7 @@ public sealed partial class HubRunner(
     private const string RequiresAction = "requires_action";
     private const int RecentEvents = 200;
     private const int PageLimit = 100;
+    private const int MaxMentions = 20;
 
     /// <summary>In-memory per-session tail used for question scanning; rebuilt from the start after a restart.</summary>
     private sealed class Window
@@ -26,6 +28,8 @@ public sealed partial class HubRunner(
         public string? After;
         public List<SessionEvent> Recent = [];
         public DateTimeOffset? LastActivity;
+        /// <summary>Pull request URLs seen anywhere in the session's events, in order of first sight.</summary>
+        public List<string> Mentions = [];
     }
 
     private readonly Dictionary<string, Window> _windows = new(StringComparer.Ordinal);
@@ -88,7 +92,9 @@ public sealed partial class HubRunner(
             try
             {
                 var w = await PollSessionAsync(s, ct);
-                views.Add(View(s, w.LastActivity));
+                var (repo, branch) = RepoAndBranch(s.Raw);
+                var owned = ownedPrs is null ? [] : await ownedPrs.FindAsync(repo, branch, ct);
+                views.Add(View(s, w.LastActivity, owned, w.Mentions));
                 // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
                 // waiting on the owner has a live question.
                 if (s.SessionStatus == RequiresAction)
@@ -183,6 +189,8 @@ public sealed partial class HubRunner(
             w.Recent.AddRange(fetched);
             if (w.Recent.Count > RecentEvents) w.Recent.RemoveRange(0, w.Recent.Count - RecentEvents);
             w.After = fetched[^1].Uuid;
+            foreach (var url in fetched.SelectMany(PrUrls))
+                if (w.Mentions.Count < MaxMentions && !w.Mentions.Contains(url)) w.Mentions.Add(url);
             var newest = fetched.Max(e => e.CreatedAt);
             if (newest != default && (w.LastActivity is null || newest > w.LastActivity)) w.LastActivity = newest;
         }
@@ -268,11 +276,39 @@ public sealed partial class HubRunner(
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
     }
 
-    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity)
+    /// <summary>
+    /// Owned PRs are the ones listed in the session's outcomes plus those found on its repo and branch; mentioned PRs
+    /// are any other PR URLs in its events (links only: the console offers no actions on them).
+    /// </summary>
+    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity,
+        IReadOnlyList<string>? owned = null, IReadOnlyList<string>? mentions = null)
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
+        var prs = PullRequests(s.Raw).Concat(owned ?? []).Distinct(StringComparer.Ordinal).ToList();
         return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
-            CreatedAt(s.Raw), lastActivity, s.Tags.ToList()) { PullRequests = PullRequests(s.Raw) };
+            CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
+        {
+            PullRequests = prs,
+            MentionedPullRequests = (mentions ?? []).Where(u => !prs.Contains(u)).ToList(),
+        };
+    }
+
+    /// <summary>Pull request URLs in every string of an event (message text, tool input, tool results).</summary>
+    private static IEnumerable<string> PrUrls(SessionEvent e)
+    {
+        var found = new List<string>();
+        void Walk(JsonElement j)
+        {
+            switch (j.ValueKind)
+            {
+                case JsonValueKind.String: found.AddRange(PullRequestUrl.FindIn(j.GetString()!)); break;
+                case JsonValueKind.Array: foreach (var x in j.EnumerateArray()) Walk(x); break;
+                case JsonValueKind.Object: foreach (var p in j.EnumerateObject()) Walk(p.Value); break;
+            }
+        }
+        if (e.Text is { } text) found.AddRange(PullRequestUrl.FindIn(text));
+        Walk(e.Raw);
+        return found;
     }
 
     private bool IsController(CloudSession s) => s.Id == _controllerId;
@@ -290,21 +326,33 @@ public sealed partial class HubRunner(
 
     private static (string? Repo, string? Branch) RepoAndBranch(JsonElement raw)
     {
-        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("session_context", out var ctx)
-            || ctx.ValueKind != JsonValueKind.Object)
-            return (null, null);
-        string? repo = null, branch = null;
+        var ctx = raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var c) ? c : default;
+        string? repo = null;
         if (First(ctx, "sources") is { } src && Str(src, "url") is { Length: > 0 } url)
         {
             const string gh = "https://github.com/";
             repo = url.StartsWith(gh, StringComparison.OrdinalIgnoreCase) ? url[gh.Length..].TrimEnd('/') : url;
             if (repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) repo = repo[..^4];
         }
-        if (First(ctx, "outcomes") is { } outcome
+        // The live branch comes first: builders' outcomes are empty, so it is usually the only source.
+        var branch = LiveBranch(raw);
+        if (branch is null && First(ctx, "outcomes") is { } outcome
             && outcome.TryGetProperty("git_info", out var gi) && gi.ValueKind == JsonValueKind.Object
             && First(gi, "branches") is { ValueKind: JsonValueKind.String } b)
             branch = b.GetString();
         return (repo, branch);
+    }
+
+    /// <summary>The first non-empty value of <c>external_metadata.current_branches</c> (keyed by mount path).</summary>
+    private static string? LiveBranch(JsonElement raw)
+    {
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("external_metadata", out var em)
+            || em.ValueKind != JsonValueKind.Object || !em.TryGetProperty("current_branches", out var cb)
+            || cb.ValueKind != JsonValueKind.Object)
+            return null;
+        foreach (var p in cb.EnumerateObject())
+            if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is { Length: > 0 } name) return name;
+        return null;
     }
 
     /// <summary>

@@ -16,9 +16,14 @@ public sealed record PullRequestStatus(string Url, int Number, string Title, str
 
 public sealed class GitHubException(string message) : Exception(message);
 
+/// <summary>A pull request and the branch it merges from.</summary>
+public sealed record PullRequestHead(string Url, string Branch);
+
 /// <summary>What Fyrd does to a session's pull requests. Never sees a URL that failed <see cref="PullRequestUrl.IsValid"/>.</summary>
 public interface IGitHub
 {
+    /// <summary>The repo's most recent pull requests (any state). Never sees a repo that failed <see cref="GitHubRepo.IsValid"/>.</summary>
+    Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default);
     Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default);
     Task MarkReadyAsync(string url, CancellationToken ct = default);
     Task MergeAsync(string url, CancellationToken ct = default);
@@ -31,12 +36,45 @@ public static partial class PullRequestUrl
 
     /// <summary>Plain <c>https://github.com/{owner}/{repo}/pull/{n}</c> only, so a URL can never act as a CLI option.</summary>
     public static bool IsValid(string? url) => url is not null && Pattern().IsMatch(url);
+
+    [GeneratedRegex(@"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[0-9]+")]
+    private static partial Regex Embedded();
+
+    /// <summary>Every plain pull request URL inside free text, in order.</summary>
+    public static IEnumerable<string> FindIn(string text) =>
+        Embedded().Matches(text).Select(m => m.Value).Where(IsValid);
+}
+
+public static partial class GitHubRepo
+{
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9_.-]+$")]
+    private static partial Regex Pattern();
+
+    /// <summary>Plain <c>{owner}/{repo}</c> only, so a repo can never act as a CLI option.</summary>
+    public static bool IsValid(string? repo) => repo is not null && Pattern().IsMatch(repo);
 }
 
 /// <summary>Drives the owner's signed-in <c>gh</c> CLI. Arguments are passed as a list, never through a shell.</summary>
 public sealed class GhCli : IGitHub
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
+
+    public async Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default) =>
+        ParseList(await RunAsync(
+            ["pr", "list", "--repo=" + (GitHubRepo.IsValid(repo) ? repo : throw new GitHubException("Not a GitHub repo.")),
+             "--state=all", "--limit=100", "--json=url,headRefName"], ct));
+
+    /// <summary>Maps <c>gh pr list --json url,headRefName</c> output, skipping entries without a plain PR URL or a branch.</summary>
+    public static IReadOnlyList<PullRequestHead> ParseList(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return [];
+        return doc.RootElement.EnumerateArray()
+            .Select(e => (Url: Str(e, "url"), Branch: Str(e, "headRefName")))
+            .Where(p => PullRequestUrl.IsValid(p.Url) && !string.IsNullOrEmpty(p.Branch))
+            .Select(p => new PullRequestHead(p.Url!, p.Branch!))
+            .ToList();
+    }
 
     public async Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default) =>
         Parse(url, await RunAsync(["pr", "view", Check(url), "--json", "number,title,state,isDraft,statusCheckRollup"], ct));

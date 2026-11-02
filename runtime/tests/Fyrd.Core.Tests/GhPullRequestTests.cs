@@ -59,4 +59,27 @@ public class GhPullRequestTests
         var s = GhCli.Parse(Url, $$"""{"number":1,"title":"t","state":"{{state}}","isDraft":{{draft.ToString().ToLowerInvariant()}},"statusCheckRollup":{{rollup}}}""");
         Assert.Equal(expected, s.CanMerge);
     }
+
+    [Fact]
+    public void ParseList_MapsUrlAndHeadBranch_SkippingInvalidUrls()
+    {
+        var list = GhCli.ParseList("""
+            [{"url":"https://github.com/acme/widgets/pull/12","headRefName":"fyrd/a"},
+             {"url":"https://github.com/acme/widgets/pull/13","headRefName":"fyrd/b"},
+             {"url":"not-a-pr","headRefName":"x"},
+             {"url":"https://github.com/acme/widgets/pull/14"}]
+            """);
+
+        Assert.Equal([new PullRequestHead(Url, "fyrd/a"), new PullRequestHead("https://github.com/acme/widgets/pull/13", "fyrd/b")], list);
+    }
+
+    [Theory]
+    [InlineData("acme/widgets", true)]
+    [InlineData("acme-co/widgets.js", true)]
+    [InlineData("acme", false)]
+    [InlineData("--repo=evil/x", false)]
+    [InlineData("acme/widgets/extra", false)]
+    [InlineData("acme/wid gets", false)]
+    public void Repo_OnlyPlainOwnerSlashNameIsAccepted(string repo, bool ok) =>
+        Assert.Equal(ok, GitHubRepo.IsValid(repo));
 }
