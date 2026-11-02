@@ -46,8 +46,13 @@ builder.Services.AddSingleton<HubState>();
 builder.Services.AddSingleton<CostLedger>();
 builder.Services.AddSingleton<CostGuard>();
 builder.Services.AddSingleton<HubRunner>();
+builder.Services.AddSingleton<SessionProgress>();
+builder.Services.AddSingleton<SessionProgressWatcher>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
+{
     builder.Services.AddHostedService<HubRunnerService>();
+    builder.Services.AddHostedService<SessionProgressService>();
+}
 builder.Services.AddSingleton(sp =>
 {
     var dir = Path.GetFullPath(builder.Configuration["Fyrd:PersonasDir"]

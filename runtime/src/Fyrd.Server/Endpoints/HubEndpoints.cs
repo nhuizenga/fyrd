@@ -33,7 +33,7 @@ internal static class HubEndpoints
     {
         var group = app.MapGroup("/api/hub");
 
-        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending) => ApiErrors.Run(() =>
+        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress) => ApiErrors.Run(() =>
         {
             // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
             // after the last poll, which no poll has had the chance to list yet.
@@ -51,6 +51,8 @@ internal static class HubEndpoints
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
                 pendingMemory = pending.Count,
+                // Each session's current live-only progress line (a tool in use, the reply so far), for sessions nobody has open.
+                progress = progress.Snapshot(),
                 controller = id is null ? null : new { sessionId = id, url = "https://claude.ai/code/" + id },
             });
         }));
@@ -79,7 +81,7 @@ internal static class HubEndpoints
 
         // Live transcript: relays the cloud session's own event stream as Server-Sent Events of TranscriptItems.
         group.MapGet("/sessions/{id}/stream", async (string id, HttpContext http, HubState state, ICloudSessions cloud,
-            IOptions<JsonOptions> json) =>
+            SessionProgress sessionProgress, IOptions<JsonOptions> json) =>
         {
             if (!state.Sessions.Any(s => s.Id == id))
             {
@@ -87,7 +89,7 @@ internal static class HubEndpoints
                     .ExecuteAsync(http);
                 return;
             }
-            await StreamTranscript(id, http, cloud, json.Value.SerializerOptions);
+            await StreamTranscript(id, http, cloud, sessionProgress, json.Value.SerializerOptions);
         });
 
         group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
@@ -327,7 +329,8 @@ internal static class HubEndpoints
     /// Writes <c>event: item</c> frames until the client goes away, reopening the upstream stream whenever it ends.
     /// Resumes after <c>Last-Event-ID</c> (or <c>?after=</c>); drops sequence numbers already sent.
     /// </summary>
-    private static async Task StreamTranscript(string id, HttpContext http, ICloudSessions cloud, JsonSerializerOptions options)
+    private static async Task StreamTranscript(string id, HttpContext http, ICloudSessions cloud, SessionProgress sessionProgress,
+        JsonSerializerOptions options)
     {
         var ct = http.RequestAborted;
         long? last = long.TryParse(http.Request.Headers["Last-Event-ID"].ToString(), out var h) ? h
@@ -360,6 +363,8 @@ internal static class HubEndpoints
         try
         {
             await Write(": connected\n\n");
+            // Live-only progress is never replayed upstream: start from what the watcher has kept since before this connect.
+            if (sessionProgress.Get(id) is { } kept) await Write(Progress(kept));
             using var keepAliveCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var keepAlive = Task.Run(async () =>
             {
