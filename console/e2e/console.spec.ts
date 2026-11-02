@@ -88,6 +88,14 @@ test.describe("Sessions", () => {
     expect(sent).toContainEqual({ url: "/api/hub/sessions/session_b1/message", body: { text: "first\nsecond" } });
   });
 
+  test("Export downloads the session's events as .jsonl", async ({ page }) => {
+    await page.goto("/#/sessions");
+    const list = page.getByRole("complementary", { name: "Session list" });
+    const download = page.waitForEvent("download");
+    await list.getByRole("button", { name: "Export builder-docs" }).click();
+    expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
+  });
+
   test("list: Controller, its controls, search, then others with status icons; rows highlight on hover", async ({ page }) => {
     await page.goto("/#/sessions");
     const list = page.getByRole("complementary", { name: "Session list" });

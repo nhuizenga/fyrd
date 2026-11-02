@@ -85,6 +85,16 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         status: 200, headers: { "content-type": "text/event-stream" }, body: sse(opts.transcripts?.[stream[1]] ?? []),
       });
     }
+    const exp = /^\/api\/hub\/sessions\/([^/]+)\/export$/.exec(path);
+    if (exp) {
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/x-ndjson", "content-disposition": `attachment; filename="export-${exp[1]}-20261102-201000.jsonl"`,
+        },
+        body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
+      });
+    }
     if (path === "/api/hub/state") return route.fulfill({ json: state });
     if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });

@@ -40,6 +40,8 @@ export const renameSession = (sessionId: string, title: string) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/rename`, { title });
 
 /** Archives a session (the trash button); it leaves the list on the next poll. */
+/** URL of a session's raw-event export (JSONL). A URL, not a `call`, because the browser handles the download. */
+export const exportUrl = (sessionId: string) => `/api/hub/sessions/${enc(sessionId)}/export`;
 export const archiveSession = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/archive`);
 export const pullRequests = (sessionId: string) =>
   call<PullRequestStatus[]>("GET", `/api/hub/sessions/${enc(sessionId)}/pull-requests`);
