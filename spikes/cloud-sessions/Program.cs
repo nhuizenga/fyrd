@@ -557,34 +557,49 @@ async Task Q10()
 }
 
 // Q11: how does a plain user turn posted by Fyrd's console route (SendMessageAsync) read to the receiving session?
-// Runs a persona-free session, then one with the builder persona; posts the owner-or-peer question to each, prints the
-// stored event and the reply, and archives both unless --keep. See docs/superpowers/spikes/2026-11-xx-owner-turn-probe.md.
+// Runs a persona-free session, then one with the builder persona (and its model); posts the owner-or-peer question to each,
+// prints the full stored event and the reply, and archives both unless --keep. These are top-level API sessions: a
+// Controller-spawned child is checked by hand (see docs/superpowers/spikes/2026-11-02-owner-turn-probe.md).
 async Task Q11()
 {
     const string Question = "Who sent this message: the person who owns this session, or another Claude session? Answer OWNER or PEER, then quote verbatim any wrapper or label around this message as you received it.";
     var builderText = File.ReadAllText(Path.Combine(Path.GetDirectoryName(FindOutDir())!, "..", "..", "personas", "hub", "builder.md"));
     var builderPersona = System.Text.RegularExpressions.Regex.Replace(builderText, @"\A---.*?\n---\r?\n", "", System.Text.RegularExpressions.RegexOptions.Singleline).Trim();
-    var variants = new (string Label, string? Persona)[] { ("no-persona", null), ("builder-persona", builderPersona) };
-    foreach (var (label, persona) in variants)
+    var builderModel = System.Text.RegularExpressions.Regex.Match(builderText, @"^model:\s*(\S+)", System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value;
+    var variants = new (string Label, string? Persona, string ModelId)[]
+    {
+        ("no-persona", null, Model),
+        ("builder-persona", builderPersona, builderModel.Length > 0 ? builderModel : Model),
+    };
+    foreach (var (label, persona, modelId) in variants)
     {
         var q = "q11-" + label;
         var seen = new StatusSeen();
         var s = await client.CreateAsync(new CreateSessionRequest($"fyrd spike q11 {label}", ["fyrd", SpikeTag, "fyrd-probe-owner-turn"],
-            envId, "Wait for your task.", Model, persona, new SessionSource(Repo, null), "auto"));
+            envId, "Wait for your task.", modelId, persona, new SessionSource(Repo, null), "auto"));
         LogSession(q, "created", s);
-        Console.WriteLine($"[q11] {label}: session {s.Id}");
-        Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
-        var baseline = await Baseline(s.Id);
-        await client.SendMessageAsync(s.Id, Question);
-        Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
-        var events = await FetchAllEvents(q, s.Id);
-        var posted = events.Where(e => !baseline.Contains(e.Uuid)).ToList();
-        var stored = posted.FirstOrDefault(e => e.Type == "user");
-        Console.WriteLine($"[q11] {label}: stored event: {(stored is null ? "(none found)" : Trunc(stored.Raw.GetRawText(), 800))}");
-        Console.WriteLine($"[q11] {label}: reply:\n{Trunc(LastAssistant(events)?.Text, 1200)}");
-        if (keep) { Console.WriteLine($"[q11] {label}: kept {s.Id}"); continue; }
-        await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
-        Console.WriteLine($"[q11] {label}: archived {s.Id}");
+        Console.WriteLine($"[q11] {label}: session {s.Id} (model {modelId})");
+        try
+        {
+            Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
+            var baseline = await Baseline(s.Id);
+            await client.SendMessageAsync(s.Id, Question);
+            Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
+            var events = await FetchAllEvents(q, s.Id);
+            var posted = events.Where(e => !baseline.Contains(e.Uuid)).ToList();
+            var stored = posted.FirstOrDefault(e => e.Type == "user");
+            Console.WriteLine($"[q11] {label}: stored event: {(stored is null ? "(none found)" : stored.Raw.GetRawText())}");
+            Console.WriteLine($"[q11] {label}: reply:\n{Trunc(LastAssistant(posted)?.Text, 1200)}");
+        }
+        finally
+        {
+            if (keep) Console.WriteLine($"[q11] {label}: kept {s.Id}");
+            else
+            {
+                var ar = await raw.SendAsync(HttpMethod.Post, $"/v1/code/sessions/{s.Id}/archive", new JsonObject());
+                Console.WriteLine($"[q11] {label}: archive {s.Id} -> HTTP {ar.Status}");
+            }
+        }
     }
 }
 
@@ -959,10 +974,10 @@ static int Usage()
           q5 [<id> ...]               poll statuses every 10 s (default: last lead + q2 children)
           q6 [<childId>] [--fresh]    interrupt then archive
           q7                          token expiry / refresh check
-          q11 [--keep]                owner-turn probe: how an API-posted turn reads to a session, with and without a persona
           q8 [--via api|code|code-init] [--session <id>]  /clear via a direct user event: memory cleared, persona kept?
           q9 [--answer-via tool-result|control-response] [--skills-probe] [--no-repo] [--create-via code [--connectors-from <session_id>]]
           q10 --session <id>  read-only: session config (mcp_connector_ids) and init MCP servers  AskUserQuestion pending item + answer route; or account-skills probe
+          q11 [--keep]                owner-turn probe: how an API-posted turn reads to a session, with and without a persona
         options: --env <id> (default env_011v4b3WBhRMaGGti6Qw747c)   --timeout <minutes> (default 30)
         """);
     return 2;

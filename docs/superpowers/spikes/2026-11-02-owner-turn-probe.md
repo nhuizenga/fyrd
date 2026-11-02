@@ -1,6 +1,6 @@
 # Spike: how does an owner turn read to a Fyrd session?
 
-Date: 2026-11-xx. Owner-run. Background: builder-2 answered a console-typed message with "as the peer asked". The console posts
+Date: 2026-11-02. Owner-run. Background: builder-2 answered a console-typed message with "as the peer asked". The console posts
 a plain user event with `SendMessageAsync` (`POST /v1/sessions/{id}/events`); we need to know whether the harness renders that
 turn differently from one typed on claude.ai.
 
@@ -18,11 +18,15 @@ Who sent this message: the person who owns this session, or another Claude sessi
 ```
 
 1. **Console route, automated.** `dotnet run --project spikes/cloud-sessions -- q11` (add `--keep` to leave the sessions open).
-   It creates a persona-free session, then one with the builder persona, posts the question to each with `SendMessageAsync`,
+   It creates a persona-free session, then one with the builder persona and its model, posts the question to each with `SendMessageAsync`,
    and prints the stored user event and the reply. Raw logs land in `spikes/cloud-sessions/out`.
 2. **Web route, by hand.** Start a persona-free session on claude.ai/code (or reuse one `q11 --keep` made), type the question
    in the web UI, and copy the stored event (`list_events`) and the reply.
-3. **MCP route, by hand.** From a Fyrd session (for example the Controller), `send_message` the question to a probe session and
+3. **Controller-spawned child, by hand.** `q11` makes top-level API sessions, but real Builders are started by the Controller
+   through MCP `create_session` with their normal `append_system_prompt` (persona plus shared and role memory). Ask the
+   Controller to start a Builder with `Wait for your task.`, post the question to it with the console composer, and record the
+   stored event and reply.
+4. **MCP route, by hand.** From a Fyrd session (for example the Controller), `send_message` the question to a probe session and
    record the stored event and the reply.
 
 ## Results
@@ -32,11 +36,13 @@ Who sent this message: the person who owns this session, or another Claude sessi
 | Console (`SendMessageAsync`) | none | | | |
 | Console (`SendMessageAsync`) | builder | | | |
 | Web UI | none | | | |
+| Console, to a Controller-spawned Builder | builder + memory | | | |
 | MCP `send_message` | none | | | |
 
 ## Reading the results
 
 | Outcome | Next step |
 |---|---|
-| Console and web both come back OWNER with no wrapper (at least without a persona) | The transport is right. The persona fix (`fyrd/owner-turn-personas`) is the whole job. |
+| Console and web both come back OWNER with no wrapper, and the Controller-spawned child agrees | The transport is right. The persona fix (`fyrd/owner-turn-personas`) is the whole job. |
 | Console shows a wrapper or label the web route lacks | Stop and report to the owner. The harness treats API-posted turns differently, and Fyrd must not paper over that (no `client_platform` spoofing, no relaying Controller text as user events). It is a platform question. |
+| Controller-spawned child answers differently from the top-level builder-persona session | The cause is how the session was created, not the persona. Stop and report: the persona fix alone won't be enough. |
