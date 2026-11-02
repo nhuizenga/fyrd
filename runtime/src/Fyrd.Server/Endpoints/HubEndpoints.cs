@@ -32,7 +32,7 @@ internal static class HubEndpoints
     {
         var group = app.MapGroup("/api/hub");
 
-        group.MapGet("/state", (HubState state, ControllerManager controller) => ApiErrors.Run(() =>
+        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending) => ApiErrors.Run(() =>
         {
             // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
             // after the last poll, which no poll has had the chance to list yet.
@@ -49,6 +49,7 @@ internal static class HubEndpoints
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
+                pendingMemory = pending.Count,
                 controller = id is null ? null : new { sessionId = id, url = "https://claude.ai/code/" + id },
             });
         }));
@@ -271,6 +272,23 @@ internal static class HubEndpoints
             scopes.AddRange(all.Keys.Where(k => !known.Contains(k)).Order(StringComparer.Ordinal)
                 .Select(k => new { scope = k, label = k, entries = all[k] }));
             return Results.Ok(new { scopes });
+        }));
+
+        group.MapGet("/memory/pending", (PendingMemory pending) => ApiErrors.Run(() => Results.Ok(pending.List())));
+
+        group.MapPost("/memory/pending/{id}/approve", (string id, TextBody? body, PendingMemory pending, TimeProvider time) =>
+            ApiErrors.Run(() =>
+            {
+                // Send {} to approve as proposed, or { text } to approve an edited version (same checks as any memory edit).
+                if (body?.Text is not null && (string.IsNullOrWhiteSpace(body.Text) || body.Text.Length > PendingMemory.MaxTextLength))
+                    return Bad($"Text must be 1 to {PendingMemory.MaxTextLength} characters.");
+                return Results.Ok(pending.Approve(id, body?.Text?.Trim(), time.GetUtcNow()));
+            }));
+
+        group.MapPost("/memory/pending/{id}/reject", (string id, PendingMemory pending) => ApiErrors.Run(() =>
+        {
+            pending.Reject(id);
+            return Results.NoContent();
         }));
 
         group.MapPost("/memory/{scope}", (string scope, TextBody? body, HubMemory memory, HubPersonas personas, TimeProvider time) =>

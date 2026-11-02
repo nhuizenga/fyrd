@@ -544,6 +544,53 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task PendingMemory_ListApproveEditReject_AndStateCount()
+    {
+        using var f = new FyrdFactory();
+        var pending = f.Services.GetRequiredService<PendingMemory>();
+        var now = DateTimeOffset.Parse("2026-11-01T00:00:00Z");
+        var a = pending.Add("Use pnpm.", "builder-1", "s1", now)!;
+        var b = pending.Add("Raw text.", "builder-2", "s2", now.AddMinutes(1))!;
+        var c2 = pending.Add("Drop me.", "builder-3", "s3", now.AddMinutes(2))!;
+        var c = f.CreateClient();
+
+        Assert.Equal(3, (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("pendingMemory").GetInt32());
+        var list = (await ReadJson(await c.GetAsync("/api/hub/memory/pending"))).EnumerateArray().ToList();
+        Assert.Equal(["Drop me.", "Raw text.", "Use pnpm."], list.Select(e => e.GetProperty("text").GetString()).ToArray());
+
+        var memory = f.Services.GetRequiredService<HubMemory>();
+        var v0 = memory.Version;
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"/api/hub/memory/pending/{a.Id}/approve", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"/api/hub/memory/pending/{b.Id}/approve", new { text = "Edited." })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/memory/pending/{c2.Id}/reject", null)).StatusCode);
+
+        Assert.Equal(["Edited.", "Use pnpm."], memory.List(HubMemory.Shared).Select(e => e.Text).ToArray());
+        Assert.True(memory.Version > v0);
+        Assert.Equal(0, (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("pendingMemory").GetInt32());
+    }
+
+    [Fact]
+    public async Task PendingMemory_BadRequests()
+    {
+        using var f = new FyrdFactory();
+        var e = f.Services.GetRequiredService<PendingMemory>().Add("Keep.", "b", "s", DateTimeOffset.UtcNow)!;
+        var c = f.CreateClient();
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/hub/memory/pending/nope/approve", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/hub/memory/pending/nope/reject", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/memory/pending/{e.Id}/approve", new { text = "  " })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/memory/pending/{e.Id}/approve", new { text = new string('x', 2001) })).StatusCode);
+        Assert.Equal(1, f.Services.GetRequiredService<PendingMemory>().Count);
+
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/api/hub/memory/pending/{e.Id}/approve") { Content = JsonContent.Create(new { }) };
+        req.Headers.Add("Origin", "http://evil.example");
+        Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
+        Assert.Equal(1, f.Services.GetRequiredService<PendingMemory>().Count);
+    }
+
+    [Fact]
     public async Task Answer_Supported_CallsCloud()
     {
         using var f = new FyrdFactory();

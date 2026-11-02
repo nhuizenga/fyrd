@@ -40,6 +40,7 @@ builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPa
 builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Configuration["Fyrd:HubSkillsDir"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "controller"))));
 builder.Services.AddSingleton<HubMemory>();
+builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();
 builder.Services.AddSingleton<HubState>();
 builder.Services.AddSingleton<CostLedger>();

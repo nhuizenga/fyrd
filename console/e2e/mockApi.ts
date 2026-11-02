@@ -60,6 +60,8 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Peasant shared-memory proposals waiting for approval. */
+  pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
 }
 
 /** Serves a fake Fyrd API to the page and records the requests the console sends. */
@@ -70,6 +72,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     controller: { sessionId: "session_ctl", url: "https://claude.ai/code/session_ctl" },
+    pendingMemory: opts.pending?.length ?? 0,
   };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -87,6 +90,8 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
     }
     if (path === "/api/hub/personas") return route.fulfill({ json: PERSONAS });
+    if (/^\/api\/hub\/memory\/pending\/[^/]+\/approve$/.test(path)) return route.fulfill({ json: { id: "approved", text: "approved", source: "agent", at: new Date().toISOString() } });
+    if (path === "/api/hub/memory/pending") return route.fulfill({ json: opts.pending ?? [] });
     if (path === "/api/hub/memory") return route.fulfill({ json: { scopes: [{ scope: "shared", label: "Shared", entries: opts.memory ?? [] }] } });
     if (path === "/api/config") {
       return route.fulfill({ json: { squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5", sessionDailyLimitUsd: 50, fyrdDailyLimitUsd: 500, timeZone: "UTC" } });

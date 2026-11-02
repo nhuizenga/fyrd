@@ -77,7 +77,7 @@ export default function App() {
             <Flex gap="2">
               {navButton("inbox", "Inbox", questions.length)}
               {navButton("sessions", "Sessions")}
-              {navButton("settings", "Settings")}
+              {navButton("settings", "Settings", state?.pendingMemory ?? 0)}
             </Flex>
           </nav>
         </header>
