@@ -654,29 +654,6 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_SessionView_MentionedPullRequestsComeFromEvents_ExcludingOwnedOnes()
-    {
-        var gh = new StubGitHub();
-        gh.ByRepo["acme/widgets"] = [new("https://github.com/acme/widgets/pull/9", "fyrd/shared-memory")];
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
-        _cloud.AddAssistantEvent("s1", "e1", "Opened https://github.com/acme/widgets/pull/9 and see https://github.com/acme/widgets/pull/11.");
-        _cloud.AddEvent("s1", RawEvent("e2",
-            """{"message":{"content":[{"type":"tool_result","content":"https://github.com/acme/widgets/pull/10\n"}]}}"""));
-        _cloud.AddAssistantEvent("s1", "e3", "Again https://github.com/acme/widgets/pull/11, and an issue https://github.com/acme/widgets/issues/3.");
-        var runner = Make(gh);
-
-        await runner.PollOnceAsync(default);
-        _cloud.AddAssistantEvent("s1", "e4", "Later: https://github.com/other/repo/pull/2");
-        await runner.PollOnceAsync(default);
-
-        var v = _state.Sessions.Single();
-        Assert.Equal(["https://github.com/acme/widgets/pull/9"], v.PullRequests);
-        Assert.Equal(
-            ["https://github.com/acme/widgets/pull/11", "https://github.com/acme/widgets/pull/10", "https://github.com/other/repo/pull/2"],
-            v.MentionedPullRequests);
-    }
-
-    [Fact]
     public async Task Poll_BuildsSessionView()
     {
         const string raw = """

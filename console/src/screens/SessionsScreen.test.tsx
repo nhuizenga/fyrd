@@ -495,34 +495,22 @@ it("an ephemeral progress bubble is still there after switching sessions and com
 });
 
 const PR40 = "https://github.com/acme/widgets/pull/40";
-const withMention = () =>
-  hubState({
-    sessions: [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12], mentionedPullRequests: [PR40] })],
-  });
+const withTwoPrs = () =>
+  hubState({ sessions: [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12, PR40] })] });
 
-it("session rows show mentioned PRs as chips marked as mentions", () => {
-  renderScreen(withMention());
-  const row = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
-  expect(within(row).getByText("#12")).toBeInTheDocument();
-  expect(within(row).getByTitle(`Mentioned: ${PR40}`)).toHaveTextContent("#40");
+it("a session row with several PRs shows one 'n PRs' chip instead of each number", () => {
+  renderScreen(withTwoPrs());
+  const row = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  expect(within(row).getByText("2 PRs")).toBeInTheDocument();
+  expect(within(row).getByTitle("#12, #40")).toBeInTheDocument();
+  expect(within(row).queryByText("#12")).not.toBeInTheDocument();
 });
 
-it("session details list mentioned PRs as plain links with no actions", async () => {
-  vi.mocked(api.pullRequests).mockResolvedValue([prStatus({ draft: true, canMerge: false })]);
-  renderScreen(withMention());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
-  const details = screen.getByRole("complementary", { name: "Session details" });
-  expect(within(details).getByRole("heading", { name: "Mentioned pull requests" })).toBeInTheDocument();
-  expect(within(details).getByRole("link", { name: "#40" })).toHaveAttribute("href", PR40);
-  expect(within(details).queryByRole("button", { name: /#40/ })).not.toBeInTheDocument();
-  expect(api.pullRequests).toHaveBeenCalledTimes(1);
-});
-
-it("session details hide the mentioned section when there are none", async () => {
+it("session details have no mentioned-PRs section", async () => {
   renderScreen(withRepo());
-  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
   const details = screen.getByRole("complementary", { name: "Session details" });
-  expect(within(details).queryByRole("heading", { name: "Mentioned pull requests" })).not.toBeInTheDocument();
+  expect(within(details).queryByRole("heading", { name: /Mentioned/ })).not.toBeInTheDocument();
 });
 
 it("session rows show a repo chip and PR chips", () => {
@@ -534,11 +522,16 @@ it("session rows show a repo chip and PR chips", () => {
   expect(within(bare).queryByText("widgets")).not.toBeInTheDocument();
 });
 
-it("session details list the pull requests as links", async () => {
+it("session details show each PR as a chip with an Open button", async () => {
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
   renderScreen(withRepo());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
   const details = screen.getByRole("complementary", { name: "Session details" });
-  expect(within(details).getByRole("link", { name: "#12" })).toHaveAttribute("href", PR12);
+  expect(within(details).getByText("#12")).toBeInTheDocument();
+  expect(within(details).queryByRole("link", { name: "#12" })).not.toBeInTheDocument();
+  await userEvent.click(within(details).getByRole("button", { name: "Open #12" }));
+  expect(open).toHaveBeenCalledWith(PR12, "_blank", "noopener,noreferrer");
+  open.mockRestore();
 });
 
 it("the message draft belongs to each session and survives switching and remounting", async () => {
@@ -678,7 +671,7 @@ const openAlphaWith = async (pr: PullRequestStatus) => {
   const onChanged = renderScreen(withRepo());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
   const details = screen.getByRole("complementary", { name: "Session details" });
-  await within(details).findByRole("link", { name: "#12" });
+  await within(details).findByRole("button", { name: "Open #12" });
   return { details, onChanged };
 };
 

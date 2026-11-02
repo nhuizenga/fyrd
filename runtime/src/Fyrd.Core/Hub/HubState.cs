@@ -17,7 +17,6 @@ public sealed record HubSessionView(
     public IReadOnlyList<string> PullRequests { get; init; } = [];
 
     /// <summary>Other pull request URLs that appear in the session's events. Links only.</summary>
-    public IReadOnlyList<string> MentionedPullRequests { get; init; } = [];
 }
 
 /// <summary>

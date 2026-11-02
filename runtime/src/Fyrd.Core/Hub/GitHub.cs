@@ -122,7 +122,12 @@ public sealed class GhCli : IGitHub
 
     private static async Task<string> RunAsync(IEnumerable<string> args, CancellationToken ct)
     {
-        var psi = new ProcessStartInfo("gh") { RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true };
+        var psi = new ProcessStartInfo("gh")
+        {
+            RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true,
+            // Fyrd's server may run without a console (a GUI-less background process): gh must not open one that steals focus.
+            UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+        };
         foreach (var a in args) psi.ArgumentList.Add(a);
         psi.Environment["GH_PROMPT_DISABLED"] = "1";
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

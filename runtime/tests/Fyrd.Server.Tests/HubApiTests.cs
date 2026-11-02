@@ -337,7 +337,7 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task State_SessionsCarryOwnedAndMentionedPrs_FromTheWiredPoll()
+    public async Task State_SessionsCarryTheirBranchPrs_FromTheWiredPoll()
     {
         using var f = new FyrdFactory();
         var raw = System.Text.Json.JsonDocument.Parse("""
@@ -353,14 +353,14 @@ public class HubApiTests
         var s = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("sessions").EnumerateArray().Single();
         Assert.Equal("fyrd/fix", s.GetProperty("branch").GetString());
         Assert.Equal([Pr], s.GetProperty("pullRequests").EnumerateArray().Select(e => e.GetString()));
-        Assert.Equal([OtherPr], s.GetProperty("mentionedPullRequests").EnumerateArray().Select(e => e.GetString()));
+        Assert.False(s.TryGetProperty("mentionedPullRequests", out _));
     }
 
     [Fact]
-    public async Task PullRequests_MentionedPr_CannotBeMerged()
+    public async Task PullRequests_UnownedPr_CannotBeMerged()
     {
         using var f = new FyrdFactory();
-        f.Services.GetRequiredService<HubState>().Publish([View() with { MentionedPullRequests = [OtherPr] }], []);
+        SeedWithPr(f, draft: false);
         var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = OtherPr });
         Assert.NotEqual(HttpStatusCode.OK, r.StatusCode);
         Assert.Empty(f.GitHub.Merged);

@@ -289,13 +289,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
-          {(s.repo || s.pullRequests.length > 0 || s.mentionedPullRequests.length > 0) && (
+          {(s.repo || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
-              {s.pullRequests.map((u) => <Chip key={u} label={prLabel(u)} size="small" title={u} />)}
-              {s.mentionedPullRequests.map((u) => (
-                <Chip key={u} label={prLabel(u)} size="small" title={`Mentioned: ${u}`} className="pr-mention" />
-              ))}
+              {s.pullRequests.length === 1 && <Chip label={prLabel(s.pullRequests[0])} size="small" title={s.pullRequests[0]} />}
+              {s.pullRequests.length > 1 && <Chip label={`${s.pullRequests.length} PRs`} size="small" title={s.pullRequests.map(prLabel).join(", ")} />}
             </span>
           )}
         </span>
@@ -549,7 +547,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     const label = prLabel(u);
                     return (
                       <li key={u} className="pr-item">
-                        <Link href={u} target="_blank" rel="noopener noreferrer">{label}</Link>
+                        <Chip label={label} size="small" title={st?.title ? `${label} ${st.title}` : u} />
                         {st && st.state !== "unknown" && (
                           <span className="pr-badges">
                             {st.draft && <Chip label="Draft" size="small" />}
@@ -557,37 +555,38 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                             {st.state === "open" && !st.draft && st.checks !== "none" && <Chip label={`Checks ${st.checks}`} size="small" />}
                           </span>
                         )}
-                        {st?.state === "open" && st.draft && (
+                        <span className="pr-actions">
                           <Button
-                            appearance="ghost" size="small" icon={ReadyIcon}
-                            aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
-                            className="pr-ready"
-                            onClick={() => prAction(() => api.markPrReady(selected.id, u))}
-                          />
-                        )}
-                        {st?.canMerge && (
-                          <Button
-                            appearance="ghost" size="small" icon={MergeIcon}
-                            aria-label={`Merge ${label}`} title="Merge pull request"
-                            onClick={() => setConfirmMerge(st)}
-                          />
-                        )}
+                            appearance="secondary" size="small" icon={OpenIcon}
+                            aria-label={`Open ${label}`} title="Open pull request on GitHub"
+                            onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
+                          >
+                            Open
+                          </Button>
+                          {st?.state === "open" && st.draft && (
+                            <Button
+                              appearance="secondary" size="small" icon={ReadyIcon}
+                              aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
+                              className="pr-ready"
+                              onClick={() => prAction(() => api.markPrReady(selected.id, u))}
+                            >
+                              Mark ready
+                            </Button>
+                          )}
+                          {st?.canMerge && (
+                            <Button
+                              appearance="secondary" size="small" icon={MergeIcon}
+                              aria-label={`Merge ${label}`} title="Merge pull request"
+                              onClick={() => setConfirmMerge(st)}
+                            >
+                              Merge
+                            </Button>
+                          )}
+                        </span>
                       </li>
                     );
                   })}
                 </ul>
-              )}
-              {selected.mentionedPullRequests.length > 0 && (
-                <>
-                  <Text variant="headline" el="h4" size="small">Mentioned pull requests</Text>
-                  <ul className="pr-list">
-                    {selected.mentionedPullRequests.map((u) => (
-                      <li key={u} className="pr-item">
-                        <Link href={u} target="_blank" rel="noopener noreferrer">{prLabel(u)}</Link>
-                      </li>
-                    ))}
-                  </ul>
-                </>
               )}
               {confirmMerge && (
                 <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>

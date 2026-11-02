@@ -45,7 +45,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .composer-hints { display: inline-flex; align-items: center; gap: 12px; }
 .composer-hint { display: inline-flex; align-items: center; }
 .session-row-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-.pr-mention { opacity: 0.7; }
+.pr-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .pr-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pr-badges { display: inline-flex; gap: 4px; }
 .pr-ready { --a2-button-color: var(--a2-border-color-success); color: var(--a2-border-color-success); }
