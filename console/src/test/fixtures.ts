@@ -6,7 +6,7 @@ export const question = (o: Partial<HubQuestion> = {}): HubQuestion => ({
 });
 export const session = (o: Partial<HubSessionView> = {}): HubSessionView => ({
   id: "s1", title: "builder-ab12", role: "builder", status: "running", repo: null, branch: null,
-  createdAt: "2026-10-31T00:00:00Z", lastActivity: null, tags: ["fyrd-hub"], pullRequests: [], ...o,
+  createdAt: "2026-10-31T00:00:00Z", lastActivity: null, tags: ["fyrd-hub"], pullRequests: [], mentionedPullRequests: [], ...o,
 });
 export const hubState = (o: Partial<HubState> = {}): HubState => ({
   sessions: [], questions: [], signedOut: false, lastError: null, lastPollAt: null, controller: null, ...o,

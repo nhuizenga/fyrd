@@ -27,8 +27,10 @@ export interface HubSessionView {
   createdAt: string | null;
   lastActivity: string | null;
   tags: string[];
-  /** URLs of the pull requests the session opened. */
+  /** URLs of the pull requests the session owns (head is its branch). Only these accept PR actions. */
   pullRequests: string[];
+  /** Other pull request URLs that appear in the session's events. Links only. */
+  mentionedPullRequests: string[];
   cost?: HubCostView | null;
 }
 

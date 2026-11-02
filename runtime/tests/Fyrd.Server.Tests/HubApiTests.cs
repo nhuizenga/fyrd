@@ -316,6 +316,36 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task State_SessionsCarryOwnedAndMentionedPrs_FromTheWiredPoll()
+    {
+        using var f = new FyrdFactory();
+        var raw = System.Text.Json.JsonDocument.Parse("""
+            {"session_context":{"sources":[{"type":"git_repository","url":"https://github.com/acme/widgets"}],"outcomes":[]},
+             "external_metadata":{"current_branches":{"":"fyrd/fix"}}}
+            """).RootElement.Clone();
+        f.Cloud.SetByTag("fyrd-hub", new CloudSession(SessionId, "builder-1", "idle", "connected", null, ["fyrd-hub", "fyrd-role-builder"], raw));
+        f.Cloud.AddAssistantEvent(SessionId, "e1", $"Opened {Pr}; reviewing {OtherPr}.");
+        f.GitHub.Heads.Add(new PullRequestHead(Pr, "fyrd/fix"));
+
+        await f.Services.GetRequiredService<HubRunner>().PollOnceAsync(default);
+
+        var s = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("sessions").EnumerateArray().Single();
+        Assert.Equal("fyrd/fix", s.GetProperty("branch").GetString());
+        Assert.Equal([Pr], s.GetProperty("pullRequests").EnumerateArray().Select(e => e.GetString()));
+        Assert.Equal([OtherPr], s.GetProperty("mentionedPullRequests").EnumerateArray().Select(e => e.GetString()));
+    }
+
+    [Fact]
+    public async Task PullRequests_MentionedPr_CannotBeMerged()
+    {
+        using var f = new FyrdFactory();
+        f.Services.GetRequiredService<HubState>().Publish([View() with { MentionedPullRequests = [OtherPr] }], []);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = OtherPr });
+        Assert.NotEqual(HttpStatusCode.OK, r.StatusCode);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
     public async Task PullRequests_ListsStatusesOfTheSessionsPrs()
     {
         using var f = new FyrdFactory();
