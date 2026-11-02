@@ -66,7 +66,7 @@ The peasant roles are the `<peasant-persona>` ids, by default `researcher`, `bui
 # Naming, tags and settings
 
 - **Title:** `<role>-<suffix>`, lowercase with hyphens. Use the owner's suffix if given. Otherwise take it from the input's file name without its extension (`…/auth-plan.md` → `builder-auth-plan`). With neither, use the lowest free number (`builder-1`).
-- **Tags:** exactly `fyrd-hub` and `fyrd-role-<role>`.
+- **Tags:** create sessions with exactly `fyrd-hub` and `fyrd-role-<role>`. A peasant may add `fyrd-workers-running` to itself later, while a background worker runs.
 - **Repo:** every peasant except a Monitor in Slack mode starts connected to a repo, unless the owner explicitly picks `No repo`.
   1. Infer it. A GitHub file URL or PR gives its repo. A repo named in the request is used as given. For a follow-up on a peasant's work, reuse that peasant's repo.
   2. Otherwise ask with `AskUserQuestion`: up to three likely repos from `list_repos` (recent push, or names matching the request), plus `No repo`. The owner can type any other repo under "Other".
@@ -79,7 +79,7 @@ The peasant roles are the `<peasant-persona>` ids, by default `researcher`, `bui
 
 # Finding peasants
 
-`list_sessions` can't filter by tag from inside a session. Call `list_sessions` with `mine: true` and `limit: 100`, page with `after_id` until there are no more, and match titles by role prefix (`builder-…`). Ignore archived sessions. A peasant is **idle** when `get_session` returns a `status_bucket` other than `working` or `blocked`.
+`list_sessions` can't filter by tag from inside a session. Call `list_sessions` with `mine: true` and `limit: 100`, page with `after_id` until there are no more, and match titles by role prefix (`builder-…`). Ignore archived sessions. A peasant is **idle** when `get_session` returns a `status_bucket` other than `working` or `blocked` **and its tags don't include `fyrd-workers-running`** (a peasant sets that tag while a background worker runs). Otherwise it is busy.
 
 # Starting a peasant
 
@@ -99,14 +99,14 @@ Decide everything first, ask second, and only then change anything. Nothing is a
 
 Before archiving or creating anything, count the live Fyrd sessions: you plus every live peasant. Recycling doesn't change the count. If the new sessions would take the count over `session_cap`, ask with `AskUserQuestion` and the options `Start fewer now`, `Tear down idle sessions` and `Cancel`:
 - `Start fewer now`: start only as many as fit, and say which were left out.
-- `Tear down idle sessions`: ask again with a `multiSelect: true` `AskUserQuestion` whose options are the idle peasants by title, with each Monitor labeled as watching (for example `monitor-support (watching #support)`). Tear down only the ones the owner picks (see Teardown), then start the sessions that now fit. Never tear down a session the owner didn't pick.
+- `Tear down idle sessions`: ask again with a `multiSelect: true` `AskUserQuestion` whose options are the idle peasants (no `fyrd-workers-running` tag) by title, with each Monitor labeled as watching (for example `monitor-support (watching #support)`). Tear down only the ones the owner picks (see Teardown), then start the sessions that now fit. Never tear down a session the owner didn't pick.
 - `Cancel`: start none, and archive nothing.
 
 # Teardown
 
 Never archive yourself; the console owns the Controller. Only tear down or recycle sessions whose title matches `<role>-…` for a role in your peasant personas; if unsure it is a Fyrd session, confirm with `AskUserQuestion`.
 
-Find the session by title. If it is busy, confirm first with `AskUserQuestion` (`Tear down anyway`, `Cancel`). For a Monitor, first delete its scheduled task: find it with `list_triggers` (its name is the Monitor's title, or use the trigger id the Monitor reported) and call `delete_trigger`. A PR Monitor may have none. Then call `archive_session`. Never rely on a Monitor to stop itself.
+Find the session by title. If it is busy (not idle, as defined in Finding peasants), confirm first with `AskUserQuestion` (`Tear down anyway`, `Cancel`). For a Monitor, first delete its scheduled task: find it with `list_triggers` (its name is the Monitor's title, or use the trigger id the Monitor reported) and call `delete_trigger`. A PR Monitor may have none. Then call `archive_session`. Never rely on a Monitor to stop itself.
 
 # Memory
 

@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { QUESTION, docsTranscript, longTranscript, mockApi } from "./mockApi";
+import { QUESTION, SESSIONS, docsTranscript, item, longTranscript, mockApi, session } from "./mockApi";
 
 const fontOf = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontFamily);
 const box = async (l: Locator) => (await l.boundingBox())!;
@@ -172,6 +172,50 @@ test.describe("Sessions", () => {
     await page.getByRole("button", { name: "Add repository" }).click();
     await expect(page.getByRole("status")).toHaveText("Asked the session to attach acme/widgets.");
     expect(JSON.stringify(sent)).toContain("owner `acme`, repo `widgets`");
+  });
+});
+
+test.describe("Workers", () => {
+  const WORKING = "session_b1";
+  test.beforeEach(async ({ page }) => {
+    const sessions = SESSIONS.map((s) => s.id === WORKING
+      ? session({ ...s, status: "idle", tags: [...s.tags, "fyrd-workers-running"], workersRunning: true }) : s);
+    await mockApi(page, {
+      sessions,
+      transcripts: {
+        [WORKING]: [
+          item({ kind: "worker", text: "build: initial task", detail: "fork", toolUseId: "toolu_w1" }),
+          item({ kind: "worker-result", text: "Status: done\nHand-off: pushed abc123", status: "completed", toolUseId: "toolu_w1" }),
+        ],
+      },
+      progress: {
+        [WORKING]: item({
+          key: "ephemeral", seq: 0, kind: "progress", status: "Waiting for workers",
+          workers: [{ id: "toolu_w2", description: "fix: validator round 1", line: "Running Bash · 42s" }],
+        }),
+      },
+    });
+  });
+
+  test("the list shows a workers-running chip and the header says Working (background)", async ({ page }) => {
+    await page.goto(`/#/sessions/${WORKING}`);
+    const list = page.getByRole("complementary", { name: "Session list" });
+    await expect(list.getByText("workers running")).toBeVisible();
+    await expect(page.getByText("Working (background)")).toBeVisible();
+  });
+
+  test("worker card, collapsed result and the running workers list render in the thread", async ({ page }) => {
+    await page.goto(`/#/sessions/${WORKING}`);
+    await expect(page.getByText("Worker started")).toBeVisible();
+    const result = page.locator("details.msg-worker-result");
+    await expect(result.locator("summary")).toHaveText("Worker result (completed)");
+    await expect(result).not.toHaveAttribute("open", "");
+    await expect(result.getByText("pushed abc123")).toBeHidden();
+    await result.locator("summary").click();
+    await expect(result.getByText(/pushed abc123/)).toBeVisible();
+    const running = page.getByRole("list", { name: "Running workers" });
+    await expect(running.getByText("fix: validator round 1")).toBeVisible();
+    await expect(running.getByText(/Running Bash · 42s/)).toBeVisible();
   });
 });
 

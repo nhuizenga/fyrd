@@ -26,7 +26,7 @@ export const QUESTION: HubQuestion = {
 };
 
 let seq = 0;
-const item = (o: Partial<TranscriptItem>): TranscriptItem => {
+export const item = (o: Partial<TranscriptItem>): TranscriptItem => {
   seq += 1;
   return { key: `${seq}:0`, seq, role: "agent", kind: "text", text: "", at: minutesAgo(1), ...o };
 };
@@ -62,13 +62,17 @@ export interface MockOptions {
   memory?: MemoryEntry[];
   /** Peasant shared-memory proposals waiting for approval. */
   pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
+  /** Session rows to serve instead of the defaults. */
+  sessions?: HubSessionView[];
+  /** A live `progress` frame per session, sent after its items. */
+  progress?: Record<string, TranscriptItem>;
 }
 
 /** Serves a fake Fyrd API to the page and records the requests the console sends. */
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
   const state: HubState = {
-    sessions: SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
+    sessions: opts.sessions ?? SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     gitHub: { configured: true, login: "octocat", error: null },
@@ -84,7 +88,8 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     if (stream) {
       const after = Number(url.searchParams.get("after") ?? -1); // like the server: resume after this seq
       return route.fulfill({
-        status: 200, headers: { "content-type": "text/event-stream" }, body: sse((opts.transcripts?.[stream[1]] ?? []).filter((i) => i.seq > after)),
+        status: 200, headers: { "content-type": "text/event-stream" }, body: sse((opts.transcripts?.[stream[1]] ?? []).filter((i) => i.seq > after))
+          + (opts.progress?.[stream[1]] ? `event: progress\ndata: ${JSON.stringify(opts.progress[stream[1]])}\n\n` : ""),
       });
     }
     const exp = /^\/api\/hub\/sessions\/([^/]+)\/export$/.exec(path);
