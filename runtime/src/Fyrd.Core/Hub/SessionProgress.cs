@@ -31,6 +31,14 @@ public sealed class SessionProgress
 /// Keeps one upstream event stream open per hub session and folds its ephemeral events into <see cref="SessionProgress"/>.
 /// <see cref="Sync"/> reconciles the open streams with the sessions the last poll listed (archived ones are not watched).
 /// Each stream reopens after it ends or fails, resuming after the last saved sequence it saw.
+/// <para>
+/// Trade-off: watching every non-archived session (rather than only the polled-as-running ones) never misses the start of a
+/// turn that begins between syncs, because live-only events are not replayed upstream and cannot be recovered later. The cost is
+/// one permanent upstream connection per session (bounded by the session cap), idle ones included, plus a one-off replay of
+/// each newly watched session's saved history, which is ignored. The per-stream relay for the selected session still opens its
+/// own second stream. Narrowing <see cref="Sync"/> to <c>running</c>/<c>requires_action</c> sessions would cut the idle
+/// connections, but would lose progress from turns that start within one sync interval.
+/// </para>
 /// </summary>
 public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress store) : IDisposable
 {
@@ -56,6 +64,7 @@ public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress
             if (_disposed) return;
             foreach (var id in _watches.Keys.Where(k => !wanted.Contains(k)).ToList())
             {
+                // Cancel and clear under the gate that WatchAsync's writes also take, so a cancelled stream cannot write after the clear.
                 _watches[id].Cts.Cancel();
                 _watches.Remove(id);
                 store.Clear(id);
@@ -65,6 +74,15 @@ public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress
                 var cts = new CancellationTokenSource();
                 _watches[id] = (cts, Task.Run(() => WatchAsync(id, cts.Token)));
             }
+        }
+    }
+
+    /// <summary>Stores a line unless this watch was cancelled; checked under the same gate <see cref="Sync"/> clears under.</summary>
+    private void Publish(string id, TranscriptItem item, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            if (!ct.IsCancellationRequested) store.Set(id, item);
         }
     }
 
@@ -81,12 +99,12 @@ public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress
                 {
                     if (e.Ephemeral)
                     {
-                        if (progress.Apply(e) is { } live) store.Set(id, live);
+                        if (progress.Apply(e) is { } live) Publish(id, live, ct);
                         continue;
                     }
                     if (last is { } seen && e.Sequence <= seen) continue;
                     last = e.Sequence;
-                    if (progress.Reset(e.Event.CreatedAt) is { } cleared) store.Set(id, cleared);
+                    if (progress.Reset(e.Event.CreatedAt) is { } cleared) Publish(id, cleared, ct);
                 }
                 delay = ReopenDelay;
             }

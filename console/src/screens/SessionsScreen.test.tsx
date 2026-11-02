@@ -114,6 +114,27 @@ it("Replace Controller can be cancelled", async () => {
   expect(api.retireController).not.toHaveBeenCalled();
 });
 
+it("session rows show the server-kept progress of sessions that are not selected", () => {
+  const live = (o: object) => ({ key: "ephemeral", seq: 0, role: "agent" as const, kind: "progress" as const, text: "", at: "2026-11-01T00:00:00Z", ...o });
+  renderScreen({
+    ...two(),
+    progress: {
+      a: live({ status: "Using Bash" }),
+      b: live({ text: "First line\nWriting the report" }),
+    },
+  });
+  // Nothing is selected, so these come from the hub state rather than a transcript stream.
+  expect(FakeEventSource.instances).toHaveLength(0);
+  expect(screen.getByText("Using Bash")).toHaveClass("session-row-progress");
+  expect(screen.getByText("Writing the report")).toHaveClass("session-row-progress");
+  expect(screen.queryByText("First line")).not.toBeInTheDocument();
+});
+
+it("session rows show no progress line when the server has none", () => {
+  renderScreen(two());
+  expect(document.querySelector(".session-row-progress")).toBeNull();
+});
+
 it("select session streams its transcript", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));

@@ -298,12 +298,21 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     });
   };
 
+  // What each session is doing right now, kept by the server so it shows for sessions that are not selected.
+  const liveLine = (id: string) => {
+    const p = state?.progress?.[id];
+    if (!p) return null;
+    const text = p.status || p.text.trim().split("\n").filter(Boolean).pop() || "";
+    return text || null;
+  };
+
   const row = (s: HubSessionView, actions?: ReactNode) => (
     <li key={s.id} className="session-item">
       <button type="button" className="row-btn session-row" aria-current={s.id === selectedId} onClick={() => navigate("sessions", s.id)}>
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
+          {liveLine(s.id) && <span className="session-row-progress" title={liveLine(s.id) ?? undefined}>{liveLine(s.id)}</span>}
           {(s.repo || s.branch || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
