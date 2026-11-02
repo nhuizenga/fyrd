@@ -23,6 +23,6 @@ Request: "Build the following: {uri list}". Start one Builder per uri, all at on
      Controller session: <your own session id>
      Output: create your branch from the base branch, commit your work and push the branch as you go, then reply with the branch name and a summary. Do not open a pull request.
      ```
-     If the owner asked for PRs, replace the last sentence with `Then open a draft pull request against the base branch, subscribe to its activity, and reply with its link.`
+     If the owner asked for PRs, replace the last sentence with `Then open a draft pull request against the base branch, subscribe to its activity, ask the Controller for a validator, and reply with its link.`
    - `source_url` from step 2 (`https://github.com/<owner>/<repo>`; omit only for `No repo`). When the base is a named branch, also pass `source_revision: "<branch>"`. The Builder attaches any other repo it lacks itself (`add_repo` with `access: "push"`, clone, then `register_repo_root`).
 6. Reply listing each Builder's title and session id, and stop. The owner reads results in the Builders' own sessions.
