@@ -116,6 +116,8 @@ export interface TranscriptItem {
   toolUseId?: string | null;
   /** Progress frames only: what the agent is doing now (a tool, "Thinking…"); `text` is the reply streamed so far. Both empty = nothing in progress. */
   status?: string | null;
+  /** Progress frames only: the running tool's main argument, such as the Bash command. */
+  detail?: string | null;
 }
 
 export interface HubPersona {

@@ -106,3 +106,4 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .md th, .md td { border: 1px solid var(--a2-border-color-default); padding: 4px 8px; }
 .md blockquote { padding-left: 12px; border-left: 3px solid var(--a2-border-color-default); }
 .rename-form { display: flex; flex-direction: column; gap: 6px; }
+.msg-progress-detail { margin: 0; padding: 6px 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--a2-font-family-mono, monospace); font-size: 0.85em; background: var(--a2-background-color-primary-subdued); border-radius: 4px; }

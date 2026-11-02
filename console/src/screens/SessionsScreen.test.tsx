@@ -616,6 +616,13 @@ it("sessions are listed by role, then by name", () => {
   expect(titles).toEqual(["Archive builder-2", "Archive builder-10", "Archive reviewer-a", "Archive Alpha"]);
 });
 
+it("a progress bubble shows the running tool's command", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", item({ key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Using Bash", detail: "git status && ls" }));
+  expect(screen.getByText("git status && ls")).toBeInTheDocument();
+});
+
 it("archiving can be cancelled", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: "Archive beta-2" }));

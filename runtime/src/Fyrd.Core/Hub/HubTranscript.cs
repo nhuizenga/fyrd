@@ -10,7 +10,7 @@ public sealed record TranscriptQuestion(string Question, string? Header, bool Mu
 
 /// <summary>
 /// One line of a session's transcript as the console shows it. <c>Role</c> is <c>agent</c> or <c>user</c>; <c>Kind</c> is
-/// <c>text</c>, <c>question</c> (an <c>AskUserQuestion</c> call), <c>answer</c> (its reply) or <c>progress</c> (live-only: <c>Text</c> is the reply streamed so far, <c>Status</c> what the agent is doing; both empty means nothing is in progress). <c>Key</c> is
+/// <c>text</c>, <c>question</c> (an <c>AskUserQuestion</c> call), <c>answer</c> (its reply) or <c>progress</c> (live-only: <c>Text</c> is the reply streamed so far, <c>Status</c> what the agent is doing, <c>Detail</c> the tool's main argument such as the Bash command; both empty means nothing is in progress). <c>Key</c> is
 /// <c>{Seq}:{index}</c>, unique per item.
 /// </summary>
 public sealed record TranscriptItem(
@@ -22,7 +22,8 @@ public sealed record TranscriptItem(
     DateTimeOffset At,
     IReadOnlyList<TranscriptQuestion>? Questions = null,
     string? ToolUseId = null,
-    string? Status = null);
+    string? Status = null,
+    string? Detail = null);
 
 /// <summary>Turns a streamed cloud-session event into the transcript items the console shows; pure, never throws on bad payloads.</summary>
 public static class HubTranscript
