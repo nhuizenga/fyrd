@@ -324,6 +324,17 @@ public class HubApiTests
         var c = f.CreateClient();
         Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  " })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/hub/sessions/session_other/rename", new { title = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = new string('x', 201) })).StatusCode);
+        Assert.Empty(f.Cloud.Renamed);
+    }
+
+    [Fact]
+    public async Task Rename_Controller_409()
+    {
+        using var f = new FyrdFactory();
+        f.Services.GetRequiredService<HubState>().Publish([View() with { Role = "controller" }], []);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "New" });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Empty(f.Cloud.Renamed);
     }
 

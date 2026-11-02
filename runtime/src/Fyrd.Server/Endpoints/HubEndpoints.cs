@@ -12,6 +12,7 @@ internal static class HubEndpoints
 {
     private const int MaxText = 20_000;
     private const string ResumeText = "Continue where you left off.";
+    private const int MaxTitle = 200;
     private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
     private const string NotPending = "This question is no longer waiting for an answer.";
     private const string SessionBlocked = "This session reached its daily spend limit.";
@@ -124,6 +125,10 @@ internal static class HubEndpoints
                 var title = body?.Title?.Trim();
                 if (string.IsNullOrEmpty(title))
                     return Results.Problem("Title is required.", statusCode: StatusCodes.Status400BadRequest);
+                if (title.Length > MaxTitle)
+                    return Results.Problem($"Title is at most {MaxTitle} characters.", statusCode: StatusCodes.Status400BadRequest);
+                if (state.Sessions.First(s => s.Id == id).Role == "controller")
+                    return Results.Problem("The Controller can't be renamed.", statusCode: StatusCodes.Status409Conflict);
                 await cloud.RenameAsync(id, title, ct);
                 state.RequestPoll();
                 return Results.NoContent();

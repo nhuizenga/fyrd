@@ -68,6 +68,25 @@ public class ProgressTrackerTests
     }
 
     [Fact]
+    public void ToolInput_ShowsTheGrepPatternNotItsPath()
+    {
+        var t = new ProgressTracker();
+        t.Apply(Eph(ToolStart));
+        Assert.Equal("TODO", t.Apply(Eph(InputDelta("{\"pattern\":\"TODO\",\"path\":\"src\"}")))!.Detail);
+    }
+
+    [Fact]
+    public void ToolInput_StopsScanningOnceTheValueIsComplete()
+    {
+        var t = new ProgressTracker();
+        t.Apply(Eph(BashStart));
+        Assert.Equal("ls", t.Apply(Eph(InputDelta("{\"command\":\"ls\",")))!.Detail);
+        // A huge trailing field (a heredoc, a Write's content) neither changes the detail nor produces more items.
+        for (var i = 0; i < 50; i++)
+            Assert.Null(t.Apply(Eph(InputDelta(i == 0 ? "\"description\":\"" + new string('x', 5000) : new string('y', 5000)))));
+    }
+
+    [Fact]
     public void ToolInput_ShowsPathsAndClearsWithTheTurn()
     {
         var t = new ProgressTracker();

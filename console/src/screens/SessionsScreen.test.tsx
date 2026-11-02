@@ -665,6 +665,18 @@ it("the list and details panes resize with the keyboard, and the width is rememb
   localStorage.clear();
 });
 
+it("a failed rename keeps the form and the typed name", async () => {
+  vi.mocked(api.renameSession).mockRejectedValue(new Error("boom"));
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: "Rename beta-2" }));
+  const box = screen.getByLabelText("Session name");
+  await userEvent.clear(box);
+  await userEvent.type(box, "gamma-3");
+  await userEvent.click(screen.getByRole("button", { name: "Save name" }));
+  expect(await screen.findByText("boom")).toBeInTheDocument();
+  expect(screen.getByLabelText("Session name")).toHaveValue("gamma-3");
+});
+
 it("archiving can be cancelled", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: "Archive beta-2" }));

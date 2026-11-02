@@ -236,9 +236,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     run(async () => {
       if (!renaming) return;
       const title = renaming.title.trim();
-      setRenaming(null);
-      if (title === "" || title === renaming.session.title) return;
+      if (title === "" || title === renaming.session.title) return setRenaming(null);
+      // The form stays open if the call fails, so the typed name isn't lost.
       await api.renameSession(renaming.session.id, title);
+      setRenaming(null);
       await onChanged();
     });
 
@@ -522,7 +523,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
             </>
           )}
         </section>
-        <ColumnDivider label="Resize session details" width={attrsWidth} min={SIDE_MIN} max={SIDE_MAX} direction={-1} onChange={resizeAttrs} />
+        <ColumnDivider className="column-divider-attrs" label="Resize session details" width={attrsWidth} min={SIDE_MIN} max={SIDE_MAX} direction={-1} onChange={resizeAttrs} />
         <aside className="pane pane-attrs" aria-label="Session details">
           {selected && (
             <>
