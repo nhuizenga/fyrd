@@ -92,6 +92,8 @@ export interface HubState {
   budget?: HubBudgetView | null;
   /** Peasant shared-memory proposals waiting for the owner. */
   pendingMemory?: number;
+  /** Each session's current live-only progress line, kept by the server (so sessions nobody has open still have one). */
+  progress?: Record<string, TranscriptItem>;
 }
 
 export interface TranscriptOption {

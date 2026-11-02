@@ -66,6 +66,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-row { display: flex; align-items: center; gap: 8px; }
 .session-row-text { display: flex; flex-direction: column; min-width: 0; }
 .session-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row-progress { display: block; font-size: 0.8125rem; color: var(--a2-foreground-color-subdued); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-btn:hover { background: var(--a2-background-color-default-hover); }
 .row-btn[aria-current="true"], .row-btn[aria-current="page"] { background: var(--a2-background-color-primary-subdued); }
 .status-icon { display: inline-flex; flex: none; }
