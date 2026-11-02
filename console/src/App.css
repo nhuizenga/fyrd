@@ -66,9 +66,11 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .row-btn:hover { background: var(--a2-background-color-default-hover); }
 .row-btn[aria-current="true"], .row-btn[aria-current="page"] { background: var(--a2-background-color-primary-subdued); }
 .status-icon { display: inline-flex; flex: none; }
-.session-item { display: flex; align-items: flex-start; gap: 2px; }
-.session-item > .row-btn { flex: 1; min-width: 0; }
-.session-item-actions { display: flex; flex: none; }
+/* The actions sit inside the item's box, top right, so the chips below can use the full width. */
+.session-item { position: relative; }
+.session-item > .row-btn { width: 100%; }
+.session-item-actions { position: absolute; top: 2px; right: 2px; display: flex; }
+.session-item:has(.session-item-actions) .session-row-title { padding-right: 68px; }
 .adopt { display: flex; flex-direction: column; gap: 6px; }
 .details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 0.875rem; }
 .details dt { color: var(--a2-foreground-color-subdued); }
