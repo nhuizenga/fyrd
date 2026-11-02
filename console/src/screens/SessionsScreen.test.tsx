@@ -494,6 +494,37 @@ it("an ephemeral progress bubble is still there after switching sessions and com
   expect(screen.getByText("Running the tests")).toBeInTheDocument();
 });
 
+const PR40 = "https://github.com/acme/widgets/pull/40";
+const withMention = () =>
+  hubState({
+    sessions: [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12], mentionedPullRequests: [PR40] })],
+  });
+
+it("session rows show mentioned PRs as chips marked as mentions", () => {
+  renderScreen(withMention());
+  const row = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });
+  expect(within(row).getByText("#12")).toBeInTheDocument();
+  expect(within(row).getByTitle(`Mentioned: ${PR40}`)).toHaveTextContent("#40");
+});
+
+it("session details list mentioned PRs as plain links with no actions", async () => {
+  vi.mocked(api.pullRequests).mockResolvedValue([prStatus({ draft: true, canMerge: false })]);
+  renderScreen(withMention());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  expect(within(details).getByRole("heading", { name: "Mentioned pull requests" })).toBeInTheDocument();
+  expect(within(details).getByRole("link", { name: "#40" })).toHaveAttribute("href", PR40);
+  expect(within(details).queryByRole("button", { name: /#40/ })).not.toBeInTheDocument();
+  expect(api.pullRequests).toHaveBeenCalledTimes(1);
+});
+
+it("session details hide the mentioned section when there are none", async () => {
+  renderScreen(withRepo());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  expect(within(details).queryByRole("heading", { name: "Mentioned pull requests" })).not.toBeInTheDocument();
+});
+
 it("session rows show a repo chip and PR chips", () => {
   renderScreen(withRepo());
   const row = screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ });

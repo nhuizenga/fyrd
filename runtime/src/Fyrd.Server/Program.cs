@@ -28,6 +28,7 @@ builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<IGitHub, GhCli>();
+builder.Services.AddSingleton<OwnedPullRequests>();
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
 builder.Services.AddSingleton<LeadRelay>();
