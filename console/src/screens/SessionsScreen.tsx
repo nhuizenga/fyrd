@@ -105,7 +105,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const isController = (s: HubSessionView) => s.id === controllerId;
   const all = state?.sessions ?? [];
   const controller = all.find(isController) ?? null;
-  const others = all.filter((s) => !isController(s));
+  // Grouped by role, then by name (numeric-aware, so builder-2 comes before builder-10).
+  const byRoleThenName = (a: HubSessionView, b: HubSessionView) =>
+    a.role.localeCompare(b.role, undefined, { sensitivity: "base" }) ||
+    a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
+  const others = all.filter((s) => !isController(s)).sort(byRoleThenName);
   const q = search.trim().toLowerCase();
   const sessions = q ? others.filter((s) => s.title.toLowerCase().includes(q)) : others;
   const selected = all.find((s) => s.id === selectedId) ?? null;

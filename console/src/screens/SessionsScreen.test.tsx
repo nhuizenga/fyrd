@@ -636,6 +636,17 @@ it("renaming can be cancelled and a blank or unchanged name is not sent", async 
   expect(api.renameSession).not.toHaveBeenCalled();
 });
 
+it("sessions are listed by role, then by name", () => {
+  const mk = (id: string, title: string, role: string) => ({ ...two().sessions[0], id, title, role });
+  const base = two();
+  renderScreen({ ...base, sessions: [
+    base.sessions.find((s) => s.id !== "a" && s.id !== "b")!,
+    mk("1", "reviewer-a", "reviewer"), mk("2", "builder-10", "builder"), mk("3", "builder-2", "builder"), mk("4", "Alpha", "validator"),
+  ].filter(Boolean) });
+  const titles = screen.getAllByRole("button", { name: /^Archive / }).map((b) => b.getAttribute("aria-label"));
+  expect(titles).toEqual(["Archive builder-2", "Archive builder-10", "Archive reviewer-a", "Archive Alpha"]);
+});
+
 it("archiving can be cancelled", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: "Archive beta-2" }));
