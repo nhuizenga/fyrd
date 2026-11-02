@@ -554,6 +554,8 @@ it("the key hints are icons and Send sits below the message box", async () => {
   expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument();
   expect(screen.getByRole("img", { name: "Enter to send" })).toBeInTheDocument();
   expect(screen.getByRole("img", { name: "Shift+Enter for a new line" })).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: "Enter to send" })).toHaveTextContent("Send");
+  expect(screen.getByRole("img", { name: "Shift+Enter for a new line" })).toHaveTextContent("New line");
   const box = screen.getByLabelText("Message this session");
   const send = screen.getByRole("button", { name: "Send" });
   expect(box.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
