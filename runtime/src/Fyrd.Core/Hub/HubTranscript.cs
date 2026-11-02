@@ -10,7 +10,7 @@ public sealed record TranscriptQuestion(string Question, string? Header, bool Mu
 
 /// <summary>
 /// One line of a session's transcript as the console shows it. <c>Role</c> is <c>agent</c> or <c>user</c>; <c>Kind</c> is
-/// <c>text</c>, <c>question</c> (an <c>AskUserQuestion</c> call), <c>answer</c> (its reply) or <c>progress</c> (live-only: <c>Text</c> is the reply streamed so far, <c>Status</c> what the agent is doing, <c>Detail</c> the tool's main argument such as the Bash command; both empty means nothing is in progress). <c>Key</c> is
+/// <c>text</c>, <c>question</c> (an <c>AskUserQuestion</c> call), <c>answer</c> (its reply) or <c>worker</c> (a forked worker started, from <c>task_started</c> with <c>task_type local_agent</c>: <c>Text</c> is its description, <c>Detail</c> its subagent type), <c>worker-result</c> (its <c>task_notification</c>: <c>Text</c> is the summary, the worker's final reply, <c>Status</c> how it ended; linked to the worker by <c>ToolUseId</c>) or <c>progress</c> (live-only: <c>Text</c> is the reply streamed so far, <c>Status</c> what the agent is doing, <c>Detail</c> the tool's main argument such as the Bash command; both empty means nothing is in progress). <c>Key</c> is
 /// <c>{Seq}:{index}</c>, unique per item.
 /// </summary>
 public sealed record TranscriptItem(
@@ -23,14 +23,22 @@ public sealed record TranscriptItem(
     IReadOnlyList<TranscriptQuestion>? Questions = null,
     string? ToolUseId = null,
     string? Status = null,
-    string? Detail = null);
+    string? Detail = null,
+    IReadOnlyList<TranscriptWorker>? Workers = null);
+
+/// <summary>A running worker on a progress item: <c>Line</c> is its latest tool ("Using Bash", "Running Bash · 42s"), if known.</summary>
+public sealed record TranscriptWorker(string Id, string Description, string? Line);
 
 /// <summary>Turns a streamed cloud-session event into the transcript items the console shows; pure, never throws on bad payloads.</summary>
 public static class HubTranscript
 {
     private const string AskTool = "AskUserQuestion";
 
-    public static IReadOnlyList<TranscriptItem> Map(StreamedEvent e)
+    /// <summary>
+    /// Maps one event. <paramref name="workerToolIds"/> remembers the <c>Agent</c> calls whose workers started on this stream, so the
+    /// later <c>task_notification</c> for one becomes a <c>worker-result</c> item (a finished bash task is not one); pass the same set for the whole stream.
+    /// </summary>
+    public static IReadOnlyList<TranscriptItem> Map(StreamedEvent e, ISet<string>? workerToolIds = null)
     {
         var items = new List<TranscriptItem>();
         var raw = e.Event.Raw;
@@ -42,6 +50,8 @@ public static class HubTranscript
         switch (Str(raw, "type"))
         {
             case "assistant":
+                // A worker's own messages are saved with the Agent call's id as parent_tool_use_id: never the peasant's reply.
+                if (Str(raw, "parent_tool_use_id") is not null) break;
                 if (Content(raw) is not { ValueKind: JsonValueKind.Array } blocks) break;
                 var text = JoinText(blocks);
                 if (!string.IsNullOrWhiteSpace(text)) Add("agent", "text", text);
@@ -64,6 +74,20 @@ public static class HubTranscript
                     _ => null,
                 };
                 if (!string.IsNullOrWhiteSpace(userText)) Add("user", "text", userText);
+                break;
+
+            case "system":
+                // A forked worker is a background task of type local_agent; its start and end are system events keyed by the Agent call's id.
+                var subtype = Str(raw, "subtype");
+                if (subtype == "task_started" && Str(raw, "task_type") == "local_agent" && Str(raw, "tool_use_id") is { } startedId)
+                {
+                    workerToolIds?.Add(startedId);
+                    items.Add(new TranscriptItem($"{e.Sequence}:{items.Count}", e.Sequence, "agent", "worker",
+                        Str(raw, "description") ?? "Worker", e.Event.CreatedAt, ToolUseId: startedId, Detail: Str(raw, "subagent_type")));
+                }
+                else if (subtype == "task_notification" && Str(raw, "tool_use_id") is { } endedId && workerToolIds?.Contains(endedId) == true)
+                    items.Add(new TranscriptItem($"{e.Sequence}:{items.Count}", e.Sequence, "agent", "worker-result",
+                        Str(raw, "summary") ?? "", e.Event.CreatedAt, ToolUseId: endedId, Status: Str(raw, "status")));
                 break;
 
             case "control_response":

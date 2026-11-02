@@ -387,6 +387,7 @@ internal static partial class HubEndpoints
         }
 
         var progress = new ProgressTracker();
+        var workerToolIds = new HashSet<string>(StringComparer.Ordinal);
         string Progress(TranscriptItem item) => $"event: progress\ndata: {JsonSerializer.Serialize(item, options)}\n\n";
 
         try
@@ -419,8 +420,9 @@ internal static partial class HubEndpoints
                             }
                             if (last is { } seen && e.Sequence <= seen) continue;
                             last = e.Sequence;
-                            foreach (var item in HubTranscript.Map(e))
+                            foreach (var item in HubTranscript.Map(e, workerToolIds))
                                 await Write($"id: {item.Seq}\nevent: item\ndata: {JsonSerializer.Serialize(item, options)}\n\n");
+                            progress.ApplySaved(e);
                             // A saved event (a message, a turn result) supersedes whatever was streaming.
                             if (progress.Reset(e.Event.CreatedAt) is { } cleared) await Write(Progress(cleared));
                         }

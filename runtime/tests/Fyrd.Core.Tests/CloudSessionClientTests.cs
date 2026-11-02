@@ -435,4 +435,18 @@ public sealed class CloudSessionClientTests : IDisposable
     public async Task StreamEvents_BadSessionId_Throws() =>
         await Assert.ThrowsAsync<ArgumentException>(() =>
             Drain(Client(new FakeHandler()).StreamEventsAsync("../x", null)));
+
+    [Fact]
+    public async Task StreamEvents_KeepsOnlyASubagentsToolCallStarts()
+    {
+        static string Frame(string payload) => $"event: ephemeral_event\ndata: {{\"event_type\":\"x\",\"payload\":{payload},\"timestamp\":\"2026-11-01T10:00:02Z\"}}\n\n";
+        var sse = string.Concat(
+            Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_w","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Bash"}}}"""),
+            Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_w","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"""),
+            Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_w","event":{"type":"message_start","message":{"content":[]}}}"""),
+            Frame("""{"type":"stream_event","parent_tool_use_id":"toolu_w","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"chatter"}}}"""));
+        var events = await Drain(Client(new FakeHandler(HttpStatusCode.OK, sse)).StreamEventsAsync("session_01abc", null));
+        var only = Assert.Single(events);
+        Assert.Equal("toolu_w", only.Event.Raw.GetProperty("parent_tool_use_id").GetString());
+    }
 }

@@ -353,8 +353,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
           {liveLine(s.id) && <span className="session-row-progress" title={liveLine(s.id) ?? undefined}>{liveLine(s.id)}</span>}
-          {(s.repo || s.branch || s.pullRequests.length > 0) && (
+          {(s.repo || s.branch || s.pullRequests.length > 0 || s.workersRunning) && (
             <span className="session-row-chips">
+              {s.workersRunning && <Chip label="workers running" size="small" title="A background worker is running for this session" className="chip-workers" />}
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
               {s.branch && <Chip label={s.branch} size="small" title={`Branch ${s.branch}`} className="chip-branch" />}
               {s.pullRequests.length === 1 && <Chip label={prLabel(s.pullRequests[0])} size="small" title={s.pullRequests[0]} />}
@@ -461,7 +462,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               <div className="thread-head">
                 <div>
                   <Text variant="headline" el="h3" size="medium">{selected.title}</Text>
-                  <span className="thread-status"><StatusIcon status={selected.status} /><Text size="small" subdued>{selected.status}</Text></span>
+                  <span className="thread-status"><StatusIcon status={selected.status} /><Text size="small" subdued>{selected.workersRunning && selected.status === "idle" ? "Working (background)" : selected.status}</Text></span>
                 </div>
                 {canResume && (
                   <Button

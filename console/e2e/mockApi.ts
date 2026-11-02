@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, TranscriptItem } from "../src/types";
+import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, PullRequestStatus, TranscriptItem } from "../src/types";
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
@@ -19,6 +19,14 @@ export const SESSIONS: HubSessionView[] = [
   session({ id: "session_b4", title: "validator-web", role: "validator", status: "archived" }),
 ];
 
+export const prStatus = (o: Partial<PullRequestStatus> & { number: number }): PullRequestStatus => ({
+  url: `https://github.com/acme/sieve/pull/${o.number}`, title: `PR ${o.number}`, state: "open", draft: false, checks: "passing",
+  canMerge: true, base: "main", head: `fyrd/pr-${o.number}`, checksPassed: 3, checksFailed: 0, checksPending: 0, failingCheck: null,
+  review: "none", mergeable: "mergeable", mergeState: "clean", ...o,
+});
+
+export const LONG_TITLE = "Draft with mixed checks and a very long title that must truncate nicely in the details pane column width";
+
 export const QUESTION: HubQuestion = {
   id: "session_b2:req1:0", sessionId: "session_b2", sessionTitle: "builder-docs", question: "Which docs format?",
   options: ["Markdown", "AsciiDoc"], multiSelect: false, askedAt: minutesAgo(3), toolUseId: "tu_docs",
@@ -26,7 +34,7 @@ export const QUESTION: HubQuestion = {
 };
 
 let seq = 0;
-const item = (o: Partial<TranscriptItem>): TranscriptItem => {
+export const item = (o: Partial<TranscriptItem>): TranscriptItem => {
   seq += 1;
   return { key: `${seq}:0`, seq, role: "agent", kind: "text", text: "", at: minutesAgo(1), ...o };
 };
@@ -60,15 +68,21 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Pull requests of `session_b1` (the session lists their URLs and the API serves these statuses). */
+  prs?: PullRequestStatus[];
   /** Peasant shared-memory proposals waiting for approval. */
   pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
+  /** Session rows to serve instead of the defaults. */
+  sessions?: HubSessionView[];
+  /** A live `progress` frame per session, sent after its items. */
+  progress?: Record<string, TranscriptItem>;
 }
 
 /** Serves a fake Fyrd API to the page and records the requests the console sends. */
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
   const state: HubState = {
-    sessions: SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
+    sessions: (opts.sessions ?? SESSIONS).map((x) => (opts.prs && x.id === "session_b1" ? { ...x, pullRequests: opts.prs.map((p) => p.url) } : x)), questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     gitHub: { configured: true, login: "octocat", error: null },
@@ -84,7 +98,8 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     if (stream) {
       const after = Number(url.searchParams.get("after") ?? -1); // like the server: resume after this seq
       return route.fulfill({
-        status: 200, headers: { "content-type": "text/event-stream" }, body: sse((opts.transcripts?.[stream[1]] ?? []).filter((i) => i.seq > after)),
+        status: 200, headers: { "content-type": "text/event-stream" }, body: sse((opts.transcripts?.[stream[1]] ?? []).filter((i) => i.seq > after))
+          + (opts.progress?.[stream[1]] ? `event: progress\ndata: ${JSON.stringify(opts.progress[stream[1]])}\n\n` : ""),
       });
     }
     const exp = /^\/api\/hub\/sessions\/([^/]+)\/export$/.exec(path);
@@ -97,6 +112,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
       });
     }
+    if (opts.prs && path === "/api/hub/sessions/session_b1/pull-requests") return route.fulfill({ json: opts.prs });
     if (path === "/api/hub/state") return route.fulfill({ json: state });
     if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
