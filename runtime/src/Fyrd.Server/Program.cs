@@ -28,6 +28,7 @@ builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<IGitHub, GhCli>();
+builder.Services.AddSingleton<OwnedPullRequests>();
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
 builder.Services.AddSingleton<LeadRelay>();
@@ -39,6 +40,7 @@ builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPa
 builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Configuration["Fyrd:HubSkillsDir"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "controller"))));
 builder.Services.AddSingleton<HubMemory>();
+builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();
 builder.Services.AddSingleton<HubState>();
 builder.Services.AddSingleton<CostLedger>();
