@@ -1,7 +1,9 @@
-import { Alert, Button, Chip, Text } from "@servicetitan/anvil2";
+import { Alert, Button, Chip, Menu, Text } from "@servicetitan/anvil2";
+import MoreIcon from "@servicetitan/anvil2/assets/icons/material/round/more_vert.svg?react";
 import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
+import type { Nudge } from "../prNudges";
 import type { HubSessionView, PullRequestStatus } from "../types";
 
 export const prLabel = (url: string) => (/\/pull\/(\d+)/.exec(url)?.[1] ? `#${/\/pull\/(\d+)/.exec(url)![1]}` : url);
@@ -26,10 +28,15 @@ interface Props {
   /** The other hub sessions that own this PR, directly or through a stack. */
   alsoOn?: HubSessionView[];
   onOpenSession?: (id: string) => void;
+  /** The nudges that apply to this PR (empty hides the menu), and what to do when one is picked. */
+  nudges?: Nudge[];
+  onNudge?: (nudge: Nudge) => void;
+  /** "Sent to <session>" after a nudge went out. */
+  notice?: string | null;
 }
 
 /** One pull request in the details pane: title line, status badges, actions and its own inline error. */
-export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession }: Props) {
+export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession, nudges = [], onNudge, notice }: Props) {
   const label = prLabel(url);
   const known = st && st.state !== "unknown";
   const title = known ? st.title : "";
@@ -52,6 +59,17 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
               aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
               className="pr-ready" onClick={onReady}
             />
+          )}
+          {!actionsHidden && nudges.length > 0 && (
+            <Menu appearance="secondary" size="small" icon={MoreIcon} label="" aria-label={`Ask for help with ${label}`} title="Ask a session to do something about this PR">
+              {nudges.map((n) => (
+                <Menu.Item
+                  key={n.kind} label={n.label} disabled={!!n.disabledReason}
+                  title={n.disabledReason ?? `Sends to ${n.to?.title ?? "the Controller"}`}
+                  onClick={() => onNudge?.(n)}
+                />
+              ))}
+            </Menu>
           )}
           {!actionsHidden && st?.canMerge && (
             <Button
@@ -97,6 +115,7 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
           ))}
         </span>
       )}
+      {notice && <Text size="small" role="status">{notice}</Text>}
       {error && <Alert status="danger" title={error} role="alert" />}
     </li>
   );

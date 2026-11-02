@@ -11,6 +11,7 @@ import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
 import PullRequestItem, { prLabel } from "../components/PullRequestItem";
+import { nudgesFor, type Nudge } from "../prNudges";
 import { HEALTH_LABEL, anyPending, healthOf, stateColor, worstHealth } from "../prStatus";
 import QuestionGroup from "../components/QuestionGroup";
 import ThreadItem from "../components/ThreadItem";
@@ -102,6 +103,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
+  const [prNotices, setPrNotices] = useState<Record<string, string | null>>({});
+  const [confirmNudge, setConfirmNudge] = useState<{ url: string; nudge: Nudge } | null>(null);
   const [prErrors, setPrErrors] = useState<Record<string, string | null>>({});
   const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
   const [exporting, setExporting] = useState<string[]>([]);
@@ -148,6 +151,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   }, [prKey]);
   useEffect(() => {
     setConfirmMerge(null);
+    setConfirmNudge(null);
     void loadPrs();
   }, [loadPrs]);
 
@@ -274,6 +278,22 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
     }
   };
+
+  // A nudge is an ordinary owner message to the Controller or the owning Builder, so sessions read it as the owner's.
+  const sendNudge = async (url: string, nudge: Nudge) => {
+    if (!nudge.to) return;
+    setConfirmNudge(null);
+    setPrErrors((e) => ({ ...e, [url]: null }));
+    setPrNotices((n) => ({ ...n, [url]: null }));
+    try {
+      await api.sendMessage(nudge.to.id, nudge.text);
+      setPrNotices((n) => ({ ...n, [url]: `Sent to ${nudge.to!.title}` }));
+      await onChanged();
+    } catch (e) {
+      setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  const pickNudge = (url: string, nudge: Nudge) => (nudge.confirm ? setConfirmNudge({ url, nudge }) : void sendNudge(url, nudge));
 
   const replaceController = () =>
     run(async () => {
@@ -683,11 +703,28 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                       onOpenSession={(id) => navigate("sessions", id)}
                       actionsHidden={gitHubNote !== null}
                       error={prErrors[u]}
+                      notice={prNotices[u]}
+                      nudges={(() => {
+                        const st = prStatuses.find((p) => p.url === u) ?? listed(u);
+                        return st ? nudgesFor(st, all, controller) : [];
+                      })()}
+                      onNudge={(n) => pickNudge(u, n)}
                       onReady={() => prAction(u, () => api.markPrReady(selected.id, u))}
                       onMerge={() => setConfirmMerge(prStatuses.find((p) => p.url === u) ?? listed(u) ?? null)}
                     />
                   ))}
                 </ul>
+              )}
+              {confirmNudge && (
+                <Alert status="warning" title={confirmNudge.nudge.confirm ?? "Send this request?"}>
+                  <Text>This starts a paid session through the Controller.</Text>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button appearance="primary" size="small" onClick={() => void sendNudge(confirmNudge.url, confirmNudge.nudge)}>
+                      Start PR Monitor
+                    </Button>
+                    <Button appearance="ghost" size="small" onClick={() => setConfirmNudge(null)}>Cancel</Button>
+                  </div>
+                </Alert>
               )}
               {confirmMerge && (
                 <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
