@@ -61,7 +61,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
                     ["request"] = new JsonObject { ["subtype"] = "set_permission_mode", ["mode"] = mode },
                 },
             });
-        events.Add(new JsonObject { ["type"] = "event", ["data"] = UserEvent(request.FirstMessage) });
+        events.Add(new JsonObject { ["type"] = "event", ["data"] = UserEvent(request.FirstMessage, "") });
 
         var body = new JsonObject
         {
@@ -309,9 +309,11 @@ public sealed partial class CloudSessionClient : ICloudSessions
             throw new ArgumentException("Session id must match ^session_[A-Za-z0-9]+$.", nameof(sessionId));
     }
 
-    /// <summary>A user turn. The web UI stamps the target session's id on it; an empty id makes the worker treat the text
-    /// as coming from another session (a peer message) instead of the owner. A new session has no id yet, so create passes "".</summary>
-    private static JsonObject UserEvent(string text, string sessionId = "") => new()
+    /// <summary>A user turn. The web UI stamps the target session's id on it; an empty id appears to make the worker treat
+    /// the text as coming from another session (a peer message) instead of the owner (inferred, not yet confirmed against a
+    /// live session, nor which id form the UI sends). Required, so every call site chooses: a new session has no id yet,
+    /// so create passes "".</summary>
+    private static JsonObject UserEvent(string text, string sessionId) => new()
     {
         ["uuid"] = Guid.NewGuid().ToString(),
         ["session_id"] = sessionId,
