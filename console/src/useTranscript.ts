@@ -56,8 +56,11 @@ export function useTranscript(sessionId: string | null): Transcript {
     const cached = sessionId ? cache.get(sessionId) ?? [] : [];
     setTranscript(sessionId ? { ...empty, items: cached, progress: lastProgress.get(sessionId) ?? null } : empty);
     if (!sessionId) return;
-    const source = new EventSource(`/api/hub/sessions/${encodeURIComponent(sessionId)}/stream`);
-    // The server replays the whole transcript on every connect; anything already cached is skipped, not re-added.
+    // With a cached conversation, ask the server to resume after its newest event instead of replaying everything.
+    const after = cached.reduce((max, i) => Math.max(max, i.seq), -1);
+    const resume = cached.length ? `?after=${after}` : "";
+    const source = new EventSource(`/api/hub/sessions/${encodeURIComponent(sessionId)}/stream${resume}`);
+    // Defensive: anything already cached is skipped, not re-added.
     const seen = new Set<string>(cached.map((i) => i.key));
     let loaded = cached;
     source.onopen = () => setTranscript((t) => ({ ...t, connected: true }));
