@@ -44,6 +44,38 @@ public class ProgressTrackerTests
         Assert.Equal("Tests first: the `gh` parsing.", item.Text);
     }
 
+    private static string InputDelta(string partial) =>
+        """{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""" + JsonSerializer.Serialize(partial) + "}}}";
+
+    private const string BashStart = """{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Bash"}}}""";
+
+    [Fact]
+    public void ToolInput_StreamsTheBashCommandIntoTheDetail()
+    {
+        var t = new ProgressTracker();
+        t.Apply(Eph(BashStart));
+        Assert.Null(t.Apply(Eph(InputDelta("{\"comm"))));
+        var item = t.Apply(Eph(InputDelta("and\": \"git status && ls \\\"my d")))!;
+        Assert.Equal("Using Bash", item.Status);
+        Assert.Equal("git status && ls \"my d", item.Detail);
+        item = t.Apply(Eph(InputDelta("ir\\\"\", \"description\": \"Check\"}")))!;
+        Assert.Equal("git status && ls \"my dir\"", item.Detail);
+
+        // The heartbeat keeps the command while updating the status.
+        item = t.Apply(Eph("""{"type":"tool_progress","tool_name":"Bash","elapsed_time_seconds":5}"""))!;
+        Assert.Equal("Running Bash · 5s", item.Status);
+        Assert.Equal("git status && ls \"my dir\"", item.Detail);
+    }
+
+    [Fact]
+    public void ToolInput_ShowsPathsAndClearsWithTheTurn()
+    {
+        var t = new ProgressTracker();
+        t.Apply(Eph(ToolStart));
+        Assert.Equal("src/a.cs", t.Apply(Eph(InputDelta("""{"file_path":"src/a.cs","limit":10}""")))!.Detail);
+        Assert.Null(t.Reset(At)!.Detail);
+    }
+
     [Fact]
     public void ToolProgressHeartbeat_ShowsTheToolAndElapsedTime()
     {

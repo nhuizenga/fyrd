@@ -15,6 +15,7 @@ export default function ThreadItem({ item, pending, onChanged }: {
           <Spinner size="small" role="status" aria-label="In progress" />
           <span>{item.status || "Working…"}</span>
         </div>
+        {item.detail && <pre className="msg-progress-detail">{item.detail}</pre>}
         {item.text && <Markdown text={item.text} />}
       </div>
     );

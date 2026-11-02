@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Fyrd.Core.CloudSessions;
 
 namespace Fyrd.Core.Hub;
@@ -9,12 +10,21 @@ namespace Fyrd.Core.Hub;
 /// far (<c>text_delta</c>s) and a status (the current tool, "Thinking…", or the runtime's own <c>task_summary</c>). One per open
 /// stream; not thread-safe. A saved transcript event or the end-of-turn summary clears it.
 /// </summary>
-public sealed class ProgressTracker
+public sealed partial class ProgressTracker
 {
+    private const int DetailMax = 600;
+
+    // The argument worth showing for a tool, most telling first; matched in the partial JSON as it streams in.
+    private static readonly string[] DetailKeys = ["command", "file_path", "notebook_path", "path", "pattern", "url", "query", "description", "prompt"];
+
+    [GeneratedRegex(@"""(?<k>[a-z_]+)""\s*:\s*""(?<v>(?:[^""\\]|\\.)*)")]
+    private static partial Regex StringField();
+
     public const string Key = "ephemeral";
 
     private readonly StringBuilder _text = new();
-    private string? _task, _block;
+    private readonly StringBuilder _json = new();
+    private string? _task, _block, _detail;
     private bool _active;
 
     /// <summary>Applies one ephemeral event; the new progress item, or null when it changes nothing worth showing.</summary>
@@ -50,9 +60,12 @@ public sealed class ProgressTracker
                 {
                     case "message_start":
                         _text.Clear();
-                        _block = null;
+                        _block = _detail = null;
+                        _json.Clear();
                         break;
                     case "content_block_start":
+                        _json.Clear();
+                        _detail = null;
                         _block = ev.TryGetProperty("content_block", out var cb) ? Str(cb, "type") switch
                         {
                             "tool_use" => "Using " + (Str(cb, "name") ?? "a tool"),
@@ -62,8 +75,18 @@ public sealed class ProgressTracker
                         if (_block is null) return null;
                         break;
                     case "content_block_delta":
-                        if (!ev.TryGetProperty("delta", out var delta) || Str(delta, "type") != "text_delta"
-                            || Str(delta, "text") is not { Length: > 0 } text)
+                        if (!ev.TryGetProperty("delta", out var delta)) return null;
+                        if (Str(delta, "type") == "input_json_delta")
+                        {
+                            // The tool's arguments stream as partial JSON; show the telling one (the command, the path…) as it grows.
+                            if (Str(delta, "partial_json") is not { Length: > 0 } part) return null;
+                            _json.Append(part);
+                            var found = ExtractDetail(_json.ToString());
+                            if (found is null || found == _detail) return null;
+                            _detail = found;
+                            break;
+                        }
+                        if (Str(delta, "type") != "text_delta" || Str(delta, "text") is not { Length: > 0 } text)
                             return null;
                         _text.Append(text);
                         break;
@@ -83,14 +106,41 @@ public sealed class ProgressTracker
     public TranscriptItem? Reset(DateTimeOffset at)
     {
         _text.Clear();
-        _task = _block = null;
+        _task = _block = _detail = null;
+        _json.Clear();
         if (!_active) return null;
         _active = false;
         return Item(at);
     }
 
     private TranscriptItem Item(DateTimeOffset at) =>
-        new(Key, 0, "agent", "progress", _active ? _text.ToString() : "", at, Status: _active ? _task ?? _block : null);
+        new(Key, 0, "agent", "progress", _active ? _text.ToString() : "", at, Status: _active ? _task ?? _block : null,
+            Detail: _active ? _detail : null);
+
+    /// <summary>The first telling string argument in partial tool-input JSON (a half-written value counts), or null.</summary>
+    internal static string? ExtractDetail(string partialJson)
+    {
+        var fields = new Dictionary<string, string>();
+        foreach (Match m in StringField().Matches(partialJson)) fields.TryAdd(m.Groups["k"].Value, m.Groups["v"].Value);
+        foreach (var key in DetailKeys)
+        {
+            if (!fields.TryGetValue(key, out var raw) || raw.Length == 0) continue;
+            var text = Unescape(raw);
+            return text.Length > DetailMax ? text[..DetailMax] + "…" : text;
+        }
+        return null;
+    }
+
+    // A value cut off mid-escape (a trailing lone backslash, half a \uXXXX) does not parse: drop the tail and retry.
+    private static string Unescape(string raw)
+    {
+        for (var s = raw; s.Length > 0; s = s[..^1])
+        {
+            try { return JsonSerializer.Deserialize<string>("\"" + s + "\"") ?? ""; }
+            catch (JsonException) { }
+        }
+        return "";
+    }
 
     private static string? Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
