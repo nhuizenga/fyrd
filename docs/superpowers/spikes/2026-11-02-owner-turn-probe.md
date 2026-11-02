@@ -37,6 +37,7 @@ Who sent this message: the person who owns this session, or another Claude sessi
 | Console (`SendMessageAsync`) | builder | same shape as above | PEER (2/2 runs) | same wrapper |
 | Web UI | none | not captured | OWNER | none. The session also said its two earlier API turns (the create-time `Wait for your task.` and the posted question) both carried the peer wrapper |
 | Console, to a Controller-spawned Builder | builder + memory | | | |
+| CLI (`claude -p "<q>" --cloud <id>`), to Controller-spawned builder-1 | builder + memory | `user`; `client_platform: claude_code_sdk`; no `inbound_origin` | OWNER (1/1 run) | none: "arrived as a plain user turn with no wrapper or label" |
 | MCP `send_message` | none | | | |
 
 ## Reading the results
@@ -54,3 +55,12 @@ web arrive bare. The session and persona don't change this. In the same session,
 read as PEER. The create-time initial prompt is wrapped too, so every task a Builder receives from Fyrd reads as a peer request.
 The `session_id` stamp from #8 does not change this. Per the rule above, this is a platform question: no `client_platform`
 spoofing and no relaying text as user events. Rows 4 and 5 (Controller-spawned child, MCP `send_message`) are not run yet.
+
+## Finding: CLI route (2026-11-02)
+
+A turn queued with the owner's own CLI (`claude -p "<msg>" --cloud <id>`) reads as OWNER with no wrapper, even in a
+Controller-spawned Builder. The server stamps it `client_platform: claude_code_sdk` from the CLI's
+`anthropic-client-platform` header. Fyrd's `SendMessageAsync` sends no such header, so its events carry no
+`client_platform`, and the harness demotes them to peer (`claude.exe` v2.1.316 logs
+`demoting unwrapped inbound message to peer origin: client_platform=(absent)`). Running the real CLI is the owner's
+client sending the turn, not spoofing. Setting the header on Fyrd's own HTTP calls would be spoofing, and stays ruled out.
