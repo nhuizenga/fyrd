@@ -55,6 +55,13 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
+    public void IdleRule_TreatsWorkersTagAsBusy_InEverySkill()
+    {
+        foreach (var n in Names)
+            Assert.Contains("fyrd-workers-running", Read(n), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TearDownIdle_AsksWhichWithMultiSelect()
     {
         Assert.Contains("`multiSelect: true` `AskUserQuestion`", Read("fyrd-peasant"), StringComparison.Ordinal);
@@ -108,16 +115,20 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void Peasant_RequiresBaseBranchInFollowUps_AndHandlesReviewRequests()
+    public void Peasant_RequiresBaseBranchInFollowUps_AndHandlesPrFlowRequests()
     {
         var text = Read("fyrd-peasant");
         Assert.Contains("`Base branch:` line", text, StringComparison.Ordinal);
-        var section = text.IndexOf("## Review request from a Builder", StringComparison.Ordinal);
-        Assert.True(section > 0);
-        var tail = text[section..];
-        var cap = tail.IndexOf("**Session cap.**", StringComparison.Ordinal);
-        var recycle = tail.IndexOf("**Recycle.**", StringComparison.Ordinal);
-        Assert.True(cap > 0 && recycle > cap, "review request: session cap must come before recycling");
+        Assert.Contains("## Validation failure from a Validator", text, StringComparison.Ordinal);
+        foreach (var heading in new[] { "## Validation request from a Builder", "## Review request from a Validator" })
+        {
+            var section = text.IndexOf(heading, StringComparison.Ordinal);
+            Assert.True(section > 0, heading);
+            var tail = text[section..];
+            var cap = tail.IndexOf("**Session cap.**", StringComparison.Ordinal);
+            var recycle = tail.IndexOf("**Recycle.**", StringComparison.Ordinal);
+            Assert.True(cap > 0 && recycle > cap, $"{heading}: session cap must come before recycling");
+        }
     }
 
     [Fact]

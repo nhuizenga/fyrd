@@ -18,7 +18,7 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
 1. **Title.** `<role>-<suffix>`, lowercase with hyphens: the owner's suffix, else the input's file name without extension, else the lowest free number (`builder-1`).
 2. **Find existing sessions.** Call `mcp__claude-code-remote__list_sessions` with `mine: true`, `limit: 100`; repeat with `after_id` set to the last id until no more come back. Ignore archived sessions. Match titles by role prefix.
 3. **Plan a recycle or pick another suffix.** If a live session already has the title, call `mcp__claude-code-remote__get_session` with its `session_id`.
-   - `status_bucket` other than `working` or `blocked` (idle): mark it to recycle under the same title. Don't archive it yet.
+   - `status_bucket` other than `working` or `blocked` and its tags don't include `fyrd-workers-running` (idle): mark it to recycle under the same title. Don't archive it yet.
    - Busy: try the next suffix (`-2`, `-3`, …) with the same check.
    Archive-and-recreate is the only reset; slash commands like `/clear` can't be sent.
 4. **Repo.** Apply the Repo rule in the Controller prompt: infer the repo, else ask with `AskUserQuestion` (likely repos plus `No repo`). This includes `Wait for your task.` starts: "Start a new builder" asks which repo. Decide it before the session-cap check.
@@ -40,23 +40,50 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
 
 A later task for a running peasant goes in `mcp__claude-code-remote__send_message` (`session_id`, `message`). The first task always goes in `prompt`. A message that gives a Builder new work must include a `Base branch:` line (the branch the owner names, else `the repo's default branch`).
 
-## Review request from a Builder
+## Validation request from a Builder
 
-A message starting `Review request:` from a Builder names a PR, its base branch, the spec links and the Builder's title and session id. Start a Reviewer and a Validator for it.
+A message starting `Validation request:` from a Builder names a draft PR, its base branch, the spec links and the Builder's title and session id. Start a Validator for it. A Builder sends it again after fixing findings; handle each one the same way.
 
-1. **Titles.** `reviewer-<builder suffix>` and `validator-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
+1. **Title.** `validator-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
 2. **Repo.** It comes from the PR, so ask nothing.
-3. **Session cap.** Check once for both sessions. If over, ask as in Start step 5.
-4. **Recycle.** As in Start step 6, and only for sessions actually being started.
-5. **Create.** Reviewer `prompt`: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.` followed by the spec links. Validator `prompt`: `Validate pull request <url> against the spec below. Base branch: <base>. Reply with your findings. If anything fails, also send them to the Builder with send_message (session <builder id>).` followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
-6. Reply with both titles and session ids.
+3. **Session cap.** If over, ask as in Start step 5.
+4. **Recycle.** As in Start step 6, and only if the session is actually being started.
+5. **Create.** `prompt`:
+   ```
+   Validate pull request <url> against the spec below.
+   Base branch: <base>
+   Builder: <builder title> (<builder session id>)
+   Controller session: <your own session id>
+   If anything fails, send the findings to the Controller (Validation failed:). If everything passes, mark the PR ready for review, then ask the Controller for a reviewer (Review request:). Reply with your findings.
+   ```
+   followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
+6. Reply with the title and session id.
+
+## Validation failure from a Validator
+
+A message starting `Validation failed:` names a PR, its Builder (title and session id) and the findings.
+
+1. Forward it with `mcp__claude-code-remote__send_message` to the Builder's session: `Validator findings for <url>: <findings verbatim>. Fix them, push, then send a new Validation request:. Base branch: <base>.` Use the PR's base branch, keeping the Builder on its current branch.
+2. If the Builder isn't live, tell the owner and ask with `AskUserQuestion` (`Start a Builder to fix it`, `Leave it`).
+3. Reply with what you forwarded and to whom.
+
+## Review request from a Validator
+
+A message starting `Review request:` from a Validator names a PR it has marked ready, its base branch, the spec links and the Builder's title and session id. Start a Reviewer for it.
+
+1. **Title.** `reviewer-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
+2. **Repo.** It comes from the PR, so ask nothing.
+3. **Session cap.** If over, ask as in Start step 5.
+4. **Recycle.** As in Start step 6, and only if the session is actually being started.
+5. **Create.** `prompt`: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.` followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
+6. Reply with the title and session id.
 
 ## Tear down
 
 Request: "Tear down {name}".
 
 1. Find the session by title as in Start step 2. Only tear down titles of the form `<role>-…` for a role in your peasant personas; never archive yourself. If unsure it is a Fyrd session, confirm with `AskUserQuestion`.
-2. Call `mcp__claude-code-remote__get_session`. If it is busy (`status_bucket` `working` or `blocked`), ask with `AskUserQuestion` (`Tear down anyway`, `Cancel`) before going on.
+2. Call `mcp__claude-code-remote__get_session`. If it is busy (`status_bucket` `working` or `blocked`, or its tags include `fyrd-workers-running`), ask with `AskUserQuestion` (`Tear down anyway`, `Cancel`) before going on.
 3. For a Monitor, first find its trigger with `mcp__claude-code-remote__list_triggers` (name equals the Monitor's title, or use the trigger id it reported) and call `mcp__claude-code-remote__delete_trigger` with `trigger_id`. A PR Monitor may have none.
 4. Call `mcp__claude-code-remote__archive_session` with `session_id`. Never rely on a Monitor to stop itself.
 5. Say what was torn down.

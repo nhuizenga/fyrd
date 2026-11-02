@@ -5,7 +5,7 @@ const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString(
 
 export const session = (o: Partial<HubSessionView>): HubSessionView => ({
   id: "session_x", title: "builder-x", role: "builder", status: "idle", repo: null, branch: null,
-  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), tags: ["fyrd-hub", "fyrd-role-builder"], pullRequests: [], ...o,
+  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), pullRequests: [], tags: ["fyrd-hub", "fyrd-role-builder"], ...o,
 });
 
 export const SESSIONS: HubSessionView[] = [
@@ -26,7 +26,7 @@ export const QUESTION: HubQuestion = {
 };
 
 let seq = 0;
-const item = (o: Partial<TranscriptItem>): TranscriptItem => {
+export const item = (o: Partial<TranscriptItem>): TranscriptItem => {
   seq += 1;
   return { key: `${seq}:0`, seq, role: "agent", kind: "text", text: "", at: minutesAgo(1), ...o };
 };
@@ -62,16 +62,23 @@ export interface MockOptions {
   memory?: MemoryEntry[];
   /** Hold `POST …/message` this long (and optionally fail it) to stand in for a slow upstream. */
   message?: { delayMs: number; status?: number };
+  /** Peasant shared-memory proposals waiting for approval. */
+  pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
+  /** Session rows to serve instead of the defaults. */
+  sessions?: HubSessionView[];
+  /** A live `progress` frame per session, sent after its items. */
+  progress?: Record<string, TranscriptItem>;
 }
 
 /** Serves a fake Fyrd API to the page and records the requests the console sends. */
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
   const state: HubState = {
-    sessions: SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
+    sessions: opts.sessions ?? SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     controller: { sessionId: "session_ctl", url: "https://claude.ai/code/session_ctl" },
+    pendingMemory: opts.pending?.length ?? 0,
   };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -80,8 +87,20 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     if (req.method() !== "GET") sent.push({ url: path, body: req.postData() ? req.postDataJSON() : null });
     const stream = /^\/api\/hub\/sessions\/([^/]+)\/stream$/.exec(path);
     if (stream) {
+      const after = Number(url.searchParams.get("after") ?? -1); // like the server: resume after this seq
       return route.fulfill({
-        status: 200, headers: { "content-type": "text/event-stream" }, body: sse(opts.transcripts?.[stream[1]] ?? []),
+        status: 200, headers: { "content-type": "text/event-stream" }, body: sse((opts.transcripts?.[stream[1]] ?? []).filter((i) => i.seq > after))
+          + (opts.progress?.[stream[1]] ? `event: progress\ndata: ${JSON.stringify(opts.progress[stream[1]])}\n\n` : ""),
+      });
+    }
+    const exp = /^\/api\/hub\/sessions\/([^/]+)\/export$/.exec(path);
+    if (exp) {
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/x-ndjson", "content-disposition": `attachment; filename="export-${exp[1]}-20261102-201000.jsonl"`,
+        },
+        body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
       });
     }
     if (opts.message && req.method() === "POST" && /\/message$/.test(path)) {
@@ -95,6 +114,8 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
     }
     if (path === "/api/hub/personas") return route.fulfill({ json: PERSONAS });
+    if (/^\/api\/hub\/memory\/pending\/[^/]+\/approve$/.test(path)) return route.fulfill({ json: { id: "approved", text: "approved", source: "agent", at: new Date().toISOString() } });
+    if (path === "/api/hub/memory/pending") return route.fulfill({ json: opts.pending ?? [] });
     if (path === "/api/hub/memory") return route.fulfill({ json: { scopes: [{ scope: "shared", label: "Shared", entries: opts.memory ?? [] }] } });
     if (path === "/api/config") {
       return route.fulfill({ json: { squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5", sessionDailyLimitUsd: 50, fyrdDailyLimitUsd: 500, timeZone: "UTC" } });

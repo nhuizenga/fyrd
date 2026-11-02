@@ -69,3 +69,13 @@ it("warns and keeps running when the time zone sync fails", async () => {
   await vi.waitFor(() => expect(warn).toHaveBeenCalled());
   expect(await screen.findByRole("button", { name: "Sessions" })).toBeInTheDocument();
 });
+
+it("shows the pending-memory count as a badge on Settings, and hides it at zero", async () => {
+  vi.mocked(api.getHubState).mockResolvedValue(hubState({ pendingMemory: 2 }));
+  const { unmount } = render(<App />);
+  expect(await screen.findByRole("button", { name: "Settings 2" })).toBeInTheDocument();
+  unmount();
+  vi.mocked(api.getHubState).mockResolvedValue(hubState({ pendingMemory: 0 }));
+  render(<App />);
+  expect(await screen.findByRole("button", { name: "Settings" })).toBeInTheDocument();
+});

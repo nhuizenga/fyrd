@@ -250,6 +250,7 @@ public class HubApiTests
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_other/message", new { text = "hi" });
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -259,7 +260,21 @@ public class HubApiTests
         Seed(f);
         var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "hello" });
         Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
-        Assert.Equal((SessionId, "hello"), Assert.Single(f.Cloud.Sent));
+        // The owner's own CLI sends composer turns, so the session reads them as the owner's, not a peer's.
+        Assert.Equal((SessionId, "hello"), Assert.Single(f.Owner.Sent));
+        Assert.Empty(f.Cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Message_CliFails_502WithItsError()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        f.Owner.Fail = new OwnerMessageException("cloud session x is archived and cannot accept new messages");
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "hello" });
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Equal("cloud session x is archived and cannot accept new messages",
+            (await ReadJson(r)).GetProperty("detail").GetString());
     }
 
     [Fact]
@@ -273,6 +288,7 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.BadRequest,
             (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = new string('x', 20_001) })).StatusCode);
         Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -306,6 +322,38 @@ public class HubApiTests
         Assert.Empty(f.Cloud.Archived);
     }
 
+    [Fact]
+    public async Task Rename_HubSession_RenamesIt_204()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  New name " });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal((SessionId, "New name"), Assert.Single(f.Cloud.Renamed));
+    }
+
+    [Fact]
+    public async Task Rename_BlankTitle_400_NotHubSession_404()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  " })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/hub/sessions/session_other/rename", new { title = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = new string('x', 201) })).StatusCode);
+        Assert.Empty(f.Cloud.Renamed);
+    }
+
+    [Fact]
+    public async Task Rename_Controller_409()
+    {
+        using var f = new FyrdFactory();
+        f.Services.GetRequiredService<HubState>().Publish([View() with { Role = "controller" }], []);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "New" });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.Cloud.Renamed);
+    }
+
     private const string Pr = "https://github.com/acme/widgets/pull/12";
     private const string OtherPr = "https://github.com/acme/widgets/pull/99";
 
@@ -313,6 +361,36 @@ public class HubApiTests
     {
         f.Services.GetRequiredService<HubState>().Publish([View() with { PullRequests = [Pr] }], []);
         f.GitHub.Statuses[Pr] = new PullRequestStatus(Pr, 12, "Fix it", state, draft, checks);
+    }
+
+    [Fact]
+    public async Task State_SessionsCarryTheirBranchPrs_FromTheWiredPoll()
+    {
+        using var f = new FyrdFactory();
+        var raw = System.Text.Json.JsonDocument.Parse("""
+            {"session_context":{"sources":[{"type":"git_repository","url":"https://github.com/acme/widgets"}],"outcomes":[]},
+             "external_metadata":{"current_branches":{"":"fyrd/fix"}}}
+            """).RootElement.Clone();
+        f.Cloud.SetByTag("fyrd-hub", new CloudSession(SessionId, "builder-1", "idle", "connected", null, ["fyrd-hub", "fyrd-role-builder"], raw));
+        f.Cloud.AddAssistantEvent(SessionId, "e1", $"Opened {Pr}; reviewing {OtherPr}.");
+        f.GitHub.Heads.Add(new PullRequestHead(Pr, "fyrd/fix"));
+
+        await f.Services.GetRequiredService<HubRunner>().PollOnceAsync(default);
+
+        var s = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("sessions").EnumerateArray().Single();
+        Assert.Equal("fyrd/fix", s.GetProperty("branch").GetString());
+        Assert.Equal([Pr], s.GetProperty("pullRequests").EnumerateArray().Select(e => e.GetString()));
+        Assert.False(s.TryGetProperty("mentionedPullRequests", out _));
+    }
+
+    [Fact]
+    public async Task PullRequests_UnownedPr_CannotBeMerged()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = OtherPr });
+        Assert.NotEqual(HttpStatusCode.OK, r.StatusCode);
+        Assert.Empty(f.GitHub.Merged);
     }
 
     [Fact]
@@ -490,6 +568,53 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync($"/api/hub/memory/shared/{id}")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest,
             (await c.PostAsJsonAsync("/api/hub/memory/Bad_Scope", new { text = "x" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task PendingMemory_ListApproveEditReject_AndStateCount()
+    {
+        using var f = new FyrdFactory();
+        var pending = f.Services.GetRequiredService<PendingMemory>();
+        var now = DateTimeOffset.Parse("2026-11-01T00:00:00Z");
+        var a = pending.Add("Use pnpm.", "builder-1", "s1", now)!;
+        var b = pending.Add("Raw text.", "builder-2", "s2", now.AddMinutes(1))!;
+        var c2 = pending.Add("Drop me.", "builder-3", "s3", now.AddMinutes(2))!;
+        var c = f.CreateClient();
+
+        Assert.Equal(3, (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("pendingMemory").GetInt32());
+        var list = (await ReadJson(await c.GetAsync("/api/hub/memory/pending"))).EnumerateArray().ToList();
+        Assert.Equal(["Drop me.", "Raw text.", "Use pnpm."], list.Select(e => e.GetProperty("text").GetString()).ToArray());
+
+        var memory = f.Services.GetRequiredService<HubMemory>();
+        var v0 = memory.Version;
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"/api/hub/memory/pending/{a.Id}/approve", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsJsonAsync($"/api/hub/memory/pending/{b.Id}/approve", new { text = "Edited." })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/memory/pending/{c2.Id}/reject", null)).StatusCode);
+
+        Assert.Equal(["Edited.", "Use pnpm."], memory.List(HubMemory.Shared).Select(e => e.Text).ToArray());
+        Assert.True(memory.Version > v0);
+        Assert.Equal(0, (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("pendingMemory").GetInt32());
+    }
+
+    [Fact]
+    public async Task PendingMemory_BadRequests()
+    {
+        using var f = new FyrdFactory();
+        var e = f.Services.GetRequiredService<PendingMemory>().Add("Keep.", "b", "s", DateTimeOffset.UtcNow)!;
+        var c = f.CreateClient();
+
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/hub/memory/pending/nope/approve", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/hub/memory/pending/nope/reject", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/memory/pending/{e.Id}/approve", new { text = "  " })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/memory/pending/{e.Id}/approve", new { text = new string('x', 2001) })).StatusCode);
+        Assert.Equal(1, f.Services.GetRequiredService<PendingMemory>().Count);
+
+        var req = new HttpRequestMessage(HttpMethod.Post, $"/api/hub/memory/pending/{e.Id}/approve") { Content = JsonContent.Create(new { }) };
+        req.Headers.Add("Origin", "http://evil.example");
+        Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
+        Assert.Equal(1, f.Services.GetRequiredService<PendingMemory>().Count);
     }
 
     [Fact]
@@ -703,6 +828,7 @@ public class HubApiTests
         Assert.Equal(detail, (await ReadJson(m)).GetProperty("detail").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/hub/sessions/{SessionId}/resume", null)).StatusCode);
         Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
         // Pause stays available so the owner can still stop a running session.
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/pause", null)).StatusCode);
     }

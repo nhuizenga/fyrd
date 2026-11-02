@@ -23,7 +23,11 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .sessions { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .sessions-top { flex: none; display: flex; flex-direction: column; gap: 8px; }
 .sessions-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.sessions-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr) 280px; gap: 12px; }
+.sessions-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--list-w, 280px) 12px minmax(0, 1fr) 12px var(--attrs-w, 280px); gap: 0; }
+.column-divider { cursor: col-resize; touch-action: none; position: relative; }
+.column-divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); border-radius: 1px; background: transparent; }
+.column-divider:hover::after, .column-divider:focus-visible::after { background: var(--a2-border-color-default); }
+.column-divider:focus-visible { outline: none; }
 .pane {
   min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; box-sizing: border-box;
   border: 1px solid var(--a2-border-color-default); border-radius: 8px; background: var(--a2-background-color-default);
@@ -43,13 +47,17 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .composer-input textarea { height: 100%; resize: none; }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-hints { display: inline-flex; align-items: center; gap: 12px; }
-.composer-hint { display: inline-flex; align-items: center; }
+.composer-hint { display: inline-flex; align-items: center; gap: 4px; }
+.composer-hint-label { font-size: 12px; color: var(--a2-foreground-color-subdued); }
 .session-row-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.pr-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .pr-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pr-badges { display: inline-flex; gap: 4px; }
-.pr-ready { --a2-button-color: var(--a2-border-color-success); color: var(--a2-border-color-success); }
+/* Anvil's secondary button sets its own color, so raise specificity and colour the icon itself. */
+.pr-actions .pr-merge, .pr-actions .pr-ready { --a2-button-color: var(--a2-border-color-success); color: var(--a2-border-color-success); }
+.pr-actions .pr-merge svg, .pr-actions .pr-ready svg { fill: var(--a2-border-color-success); color: var(--a2-border-color-success); }
 .pr-list { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
-@media (max-width: 1100px) { .sessions-grid { grid-template-columns: 240px minmax(0, 1fr); } .pane-attrs { display: none; } }
+@media (max-width: 1100px) { .sessions-grid { grid-template-columns: var(--list-w, 240px) 12px minmax(0, 1fr); } .pane-attrs, .column-divider-attrs { display: none; } }
 
 .thread-status { display: inline-flex; align-items: center; gap: 4px; }
 
@@ -58,12 +66,15 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-row { display: flex; align-items: center; gap: 8px; }
 .session-row-text { display: flex; flex-direction: column; min-width: 0; }
 .session-row-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row-progress { display: block; font-size: 0.8125rem; color: var(--a2-foreground-color-subdued); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-btn:hover { background: var(--a2-background-color-default-hover); }
 .row-btn[aria-current="true"], .row-btn[aria-current="page"] { background: var(--a2-background-color-primary-subdued); }
 .status-icon { display: inline-flex; flex: none; }
-.session-item { display: flex; align-items: flex-start; gap: 2px; }
-.session-item > .row-btn { flex: 1; min-width: 0; }
-.session-item-actions { display: flex; flex: none; }
+/* The actions sit inside the item's box, top right, so the chips below can use the full width. */
+.session-item { position: relative; }
+.session-item > .row-btn { width: 100%; }
+.session-item-actions { position: absolute; top: 2px; right: 2px; display: flex; }
+.session-item:has(.session-item-actions) .session-row-title { padding-right: 68px; }
 .adopt { display: flex; flex-direction: column; gap: 6px; }
 .details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 0.875rem; }
 .details dt { color: var(--a2-foreground-color-subdued); }
@@ -86,6 +97,10 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 
 /* Message bubbles: agent on the left (room on the right), owner on the right (room on the left). */
 .msg { position: relative; border-radius: 6px; padding: 3px 6px; box-sizing: border-box; overflow-wrap: anywhere; }
+.msg-worker, .msg-worker-result { border-left: 3px solid var(--a2-border-color-primary, #888); }
+.msg-progress-workers { margin: 0; padding-left: 18px; font-size: 0.9em; }
+.msg-worker-label { color: var(--a2-foreground-color-subdued); }
+.msg-worker-result summary { cursor: pointer; }
 .msg-progress { display: flex; flex-direction: column; gap: 6px; }
 .msg-progress-head { display: flex; align-items: center; gap: 8px; color: var(--a2-foreground-color-subdued); }
 .msg-agent { align-self: stretch; margin-right: 4%; background: var(--a2-background-color-secondary); }
@@ -106,3 +121,6 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .md th, .md td { border: 1px solid var(--a2-border-color-default); padding: 4px 8px; }
 .md blockquote { padding-left: 12px; border-left: 3px solid var(--a2-border-color-default); }
 .msg-sending { opacity: 0.6; white-space: pre-wrap; }
+.rename-form { display: flex; flex-direction: column; gap: 6px; }
+.msg-progress-detail { margin: 0; padding: 6px 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--a2-font-family-mono, monospace); font-size: 0.85em; background: var(--a2-background-color-primary-subdued); border-radius: 4px; }
+.session-row-chips .chip-branch { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

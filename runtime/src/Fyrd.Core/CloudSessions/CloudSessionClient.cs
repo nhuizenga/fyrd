@@ -61,7 +61,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
                     ["request"] = new JsonObject { ["subtype"] = "set_permission_mode", ["mode"] = mode },
                 },
             });
-        events.Add(new JsonObject { ["type"] = "event", ["data"] = UserEvent(request.FirstMessage) });
+        events.Add(new JsonObject { ["type"] = "event", ["data"] = UserEvent(request.FirstMessage, "") });
 
         var body = new JsonObject
         {
@@ -107,7 +107,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
     public async Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default)
     {
         ValidateSessionId(sessionId);
-        var body = new JsonObject { ["events"] = new JsonArray(UserEvent(text)) };
+        var body = new JsonObject { ["events"] = new JsonArray(UserEvent(text, sessionId)) };
         using var _ = await SendAsync(HttpMethod.Post, $"/v1/sessions/{sessionId}/events", body, ct);
     }
 
@@ -152,6 +152,12 @@ public sealed partial class CloudSessionClient : ICloudSessions
     {
         ValidateSessionId(sessionId);
         using var _ = await SendAsync(HttpMethod.Post, $"/v1/code/sessions/{sessionId}/archive", new JsonObject(), ct);
+    }
+
+    public async Task RenameAsync(string sessionId, string title, CancellationToken ct = default)
+    {
+        ValidateSessionId(sessionId);
+        using var _ = await SendAsync(HttpMethod.Patch, $"/v1/sessions/{sessionId}", new JsonObject { ["title"] = title }, ct);
     }
 
     public async Task AnswerQuestionAsync(
@@ -270,8 +276,9 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     /// <summary>
     /// An <c>ephemeral_event</c> frame as a progress event, or null for noise and bad JSON. Kept: <c>system</c> <c>task_summary</c>
-    /// and <c>post_turn_summary</c>, <c>tool_progress</c> heartbeats, and the main agent's <c>stream_event</c>s that start a message or block or carry text.
-    /// Dropped: <c>status</c>, <c>thinking_tokens</c>, hooks, tool-input and signature deltas, and subagent output.
+    /// and <c>post_turn_summary</c>, <c>tool_progress</c> heartbeats, and the main agent's <c>stream_event</c>s that start a message or block or carry text,
+    /// plus a subagent's tool-call starts (a running worker's latest tool).
+    /// Dropped: <c>status</c>, <c>thinking_tokens</c>, hooks, tool-input and signature deltas, and other subagent output.
     /// </summary>
     private static StreamedEvent? ParseEphemeralFrame(string data)
     {
@@ -286,10 +293,12 @@ public sealed partial class CloudSessionClient : ICloudSessions
             {
                 "tool_progress" => Str(payload, "tool_name") is not null,
                 "system" => Str(payload, "subtype") is "task_summary" or "post_turn_summary",
-                "stream_event" => !(payload.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String)
-                    && payload.TryGetProperty("event", out var ev) && ev.ValueKind == JsonValueKind.Object
-                    && (Str(ev, "type") is "message_start" or "content_block_start"
-                        || (Str(ev, "type") == "content_block_delta" && ev.TryGetProperty("delta", out var d) && Str(d, "type") == "text_delta")),
+                "stream_event" => payload.TryGetProperty("event", out var ev) && ev.ValueKind == JsonValueKind.Object
+                    && (payload.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String
+                        // A subagent's stream: only the start of a tool call of its own, shown as that worker's latest line.
+                        ? Str(ev, "type") == "content_block_start" && ev.TryGetProperty("content_block", out var cb) && Str(cb, "type") == "tool_use"
+                        : Str(ev, "type") is "message_start" or "content_block_start"
+                            || (Str(ev, "type") == "content_block_delta" && ev.TryGetProperty("delta", out var d) && Str(d, "type") == "text_delta")),
                 _ => false,
             };
             if (!keep) return null;
@@ -309,10 +318,14 @@ public sealed partial class CloudSessionClient : ICloudSessions
             throw new ArgumentException("Session id must match ^session_[A-Za-z0-9]+$.", nameof(sessionId));
     }
 
-    private static JsonObject UserEvent(string text) => new()
+    /// <summary>A user turn. The web UI stamps the target session's id on it; an empty id appears to make the worker treat
+    /// the text as coming from another session (a peer message) instead of the owner (inferred, not yet confirmed against a
+    /// live session, nor which id form the UI sends). Required, so every call site chooses: a new session has no id yet,
+    /// so create passes "".</summary>
+    private static JsonObject UserEvent(string text, string sessionId) => new()
     {
         ["uuid"] = Guid.NewGuid().ToString(),
-        ["session_id"] = "",
+        ["session_id"] = sessionId,
         ["type"] = "user",
         ["parent_tool_use_id"] = null,
         ["message"] = new JsonObject { ["role"] = "user", ["content"] = text },

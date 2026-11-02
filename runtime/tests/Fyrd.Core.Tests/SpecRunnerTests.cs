@@ -16,6 +16,7 @@ public class SpecRunnerTests
         public SpecStore Specs;
         public InboxStore Inbox;
         public FakeCloudSessions Cloud = new();
+        public FakeOwnerMessages Owner = new();
         public RunnerState State = new();
         public SpecRunner Runner;
 
@@ -27,7 +28,7 @@ public class SpecRunnerTests
         }
 
         public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time, Relay);
-        public LeadRelay Relay => new(Specs, Cloud, State, Inbox);
+        public LeadRelay Relay => new(Specs, Cloud, Owner, State, Inbox);
 
         public string NewSpec(string title = "Add export button", string lead = "lead1")
         {
@@ -182,7 +183,7 @@ public class SpecRunnerTests
         await r.NewRunner().PollOnceAsync(default); // simulates a restarted runner
         await r.NewRunner().PollOnceAsync(default);
 
-        Assert.Single(r.Cloud.Sent);
+        Assert.Single(r.Owner.Sent);
         Assert.Equal("sent", r.Inbox.Get(q.Id).Answer!.RelayStatus);
     }
 
@@ -193,7 +194,7 @@ public class SpecRunnerTests
         var id = r.NewSpec();
         var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
         var card = r.Inbox.SetRelay(r.Inbox.Answer(q.Id, "blue").Id, "pending", null);
-        r.Cloud.ThrowOnNextCall(new HttpRequestException("boom"));
+        r.Owner.ThrowOnNextCall(new HttpRequestException("boom"));
         Assert.Equal("boom", await r.Relay.DeliverAsync(card, default));
         var failed = r.Inbox.Get(q.Id).Answer!;
         Assert.Equal("failed", failed.RelayStatus);
@@ -215,7 +216,7 @@ public class SpecRunnerTests
         r.Cloud.ThrowOnNextCall(new HttpRequestException("poll boom")); // the spec poll errors
         await r.Runner.PollOnceAsync(default);
         Assert.NotNull(r.State.LastError);
-        Assert.Single(r.Cloud.Sent);
+        Assert.Single(r.Owner.Sent);
         Assert.Equal(SpecStatus.Draft, r.Specs.Get(stale)!.Status);
     }
 
@@ -229,7 +230,7 @@ public class SpecRunnerTests
         r.Specs.UpdateStatus(r.Specs.Create("Stale one", "owner/repo", "x").Id, SpecStatus.Queued);
         r.Time.Advance(TimeSpan.FromMinutes(3));
         r.Cloud.SkipCalls(SkippedPollCalls); // the healthy spec poll
-        r.Cloud.ThrowOnNextCall(new HttpRequestException("relay boom"));
+        r.Owner.ThrowOnNextCall(new HttpRequestException("relay boom"));
         r.Cloud.ThrowOnNextCall(new HttpRequestException("launch boom"));
         await r.Runner.PollOnceAsync(default);
         var error = r.State.LastError!;
@@ -247,7 +248,7 @@ public class SpecRunnerTests
         var q = r.Inbox.Add(id, null, "Pick?", [], null, null, null, true, id + ":q1");
         var card = r.Inbox.Answer(q.Id, "blue");
         Assert.Null(await r.Relay.DeliverAsync(card, default));
-        Assert.Empty(r.Cloud.Sent);
+        Assert.Empty(r.Owner.Sent);
         Assert.Equal("pending", r.Inbox.Get(q.Id).Answer!.RelayStatus);
     }
 
@@ -260,7 +261,7 @@ public class SpecRunnerTests
         var snapshot = r.Inbox.Answer(q.Id, "blue");
         r.Inbox.SetRelay(q.Id, "sent", null);
         Assert.Null(await r.Relay.DeliverAsync(snapshot, default));
-        Assert.Empty(r.Cloud.Sent);
+        Assert.Empty(r.Owner.Sent);
     }
 
     [Fact]
@@ -272,7 +273,7 @@ public class SpecRunnerTests
         r.Inbox.Answer(q.Id, "blue");
         r.Specs.Finish(id, SpecStatus.ReadyForHandoff, "b", null);
         await r.Runner.PollOnceAsync(default);
-        Assert.Empty(r.Cloud.Sent);
+        Assert.Empty(r.Owner.Sent);
         var a = r.Inbox.Get(q.Id).Answer!;
         Assert.Equal(("pending", 0), (a.RelayStatus, a.RelayAttempts));
     }
@@ -700,6 +701,7 @@ public class SpecRunnerTests
         public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => inner.ListByTagAsync(tag, ct);
         public Task InterruptAsync(string id, CancellationToken ct = default) => inner.InterruptAsync(id, ct);
         public Task ArchiveAsync(string id, CancellationToken ct = default) => inner.ArchiveAsync(id, ct);
+        public Task RenameAsync(string id, string title, CancellationToken ct = default) => inner.RenameAsync(id, title, ct);
         public Task AnswerQuestionAsync(string id, Fyrd.Core.Hub.HubQuestion q, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default) =>
             inner.AnswerQuestionAsync(id, q, answers, ct);
         public IAsyncEnumerable<StreamedEvent> StreamEventsAsync(string id, long? after, CancellationToken ct = default) =>

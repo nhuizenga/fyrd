@@ -17,6 +17,7 @@ public sealed class HubRunnerTests : IDisposable
     private readonly HubState _state = new();
     private readonly CostLedger _ledger;
     private CostGuard _guard;
+    private readonly PendingMemory _pending;
 
     public HubRunnerTests()
     {
@@ -24,6 +25,7 @@ public sealed class HubRunnerTests : IDisposable
         File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-opus-5-5\nlocked: true\n---\nControl things.");
         File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\nname: Builder\nmodel: claude-sonnet-5-5\n---\nBuild things.");
         _memory = new HubMemory(_home.Paths);
+        _pending = new PendingMemory(_home.Paths, _memory);
         _personas = new HubPersonas(_home.Paths, _seeds);
         var config = new ConfigStore(_home.Paths);
         config.Save(new FyrdConfig(EnvironmentId: "env_abc123"));
@@ -50,7 +52,9 @@ public sealed class HubRunnerTests : IDisposable
         return _controller;
     }
 
-    private HubRunner Make() => new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard);
+    private HubRunner Make(IGitHub? gh = null) =>
+        new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard, _pending,
+            gh is null ? null : new OwnedPullRequests(gh, _time));
 
     private static CloudSession Hub(string id, string title, string status = "idle", string? role = null,
         string raw = "{}")
@@ -97,7 +101,60 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default);
         await runner.PollOnceAsync(default);
 
-        Assert.Equal("Repo uses trunk-based dev.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        var waiting = Assert.Single(_pending.List());
+        Assert.Equal("Repo uses trunk-based dev.", waiting.Text);
+        Assert.Equal("builder-ab12", waiting.Source);
+        Assert.Equal("s1", waiting.SessionId);
+    }
+
+    [Fact]
+    public async Task Poll_PeasantShared_WaitsForApproval_NoMemoryUpdatePosted()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Always squash."));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        _cloud.Sent.Clear();
+
+        await runner.PollOnceAsync(default);
+        await Make().PollOnceAsync(default); // a restart must not queue it twice
+
+        Assert.Equal("Always squash.", Assert.Single(_pending.List()).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        Assert.DoesNotContain(_cloud.Sent, m => m.Text.Contains("Fyrd memory update.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Poll_PeasantTaggedAsController_StillWaitsForApproval()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "controller"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Skip the gate."));
+        _cloud.AddAssistantEvent("s1", "e2", Remember("role", "Also skip it."));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("Skip the gate.", Assert.Single(_pending.List()).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        Assert.Empty(_memory.All().Values.SelectMany(v => v));
+        Assert.Equal("", _state.Sessions.Single(v => v.Id == "s1").Role);
+    }
+
+    [Fact]
+    public async Task Poll_PeasantRoleBlock_AndControllerShared_StillApplyAtOnce()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("role", "Use pnpm."));
+        _cloud.AddAssistantEvent("session_ctl", "e2", Remember("shared", "Owner likes small PRs."));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("Use pnpm.", Assert.Single(_memory.List("builder")).Text);
+        Assert.Equal("Owner likes small PRs.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Empty(_pending.List());
     }
 
     [Fact]
@@ -159,7 +216,7 @@ public sealed class HubRunnerTests : IDisposable
         Directory.Delete(blocker);
         await runner.PollOnceAsync(default);
 
-        Assert.Equal("First.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Equal("First.", Assert.Single(_pending.List()).Text);
         Assert.Equal("Second.", Assert.Single(_memory.List("builder")).Text);
     }
 
@@ -558,6 +615,97 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Equal(["https://github.com/acme/widgets/pull/12", "https://github.com/acme/widgets/pull/13"],
             _state.Sessions.Single(s => s.Id == "s1").PullRequests);
         Assert.Empty(_state.Sessions.Single(s => s.Id == "s2").PullRequests);
+    }
+
+    // The real shape: builders have empty outcomes; the live branch is in external_metadata.current_branches.
+    private const string LiveBuilderRaw = """
+        {"session_context":{"sources":[{"type":"git_repository","url":"https://github.com/acme/widgets"}],"outcomes":[]},
+         "external_metadata":{"current_branches":{"":"fyrd/shared-memory"}}}
+        """;
+
+    private static SessionEvent RawEvent(string uuid, string json) =>
+        new(uuid, "user", DateTimeOffset.UnixEpoch, null, JsonDocument.Parse(json).RootElement.Clone());
+
+    [Fact]
+    public async Task Poll_SessionView_BranchComesFromCurrentBranches_WhenOutcomesAreEmpty()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw),
+            Hub("s2", "reviewer", "idle", role: "reviewer",
+                raw: """{"external_metadata":{"current_branches":{"":null}}}"""));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("fyrd/shared-memory", _state.Sessions.Single(s => s.Id == "s1").Branch);
+        Assert.Null(_state.Sessions.Single(s => s.Id == "s2").Branch);
+    }
+
+    [Fact]
+    public async Task Poll_SessionView_OwnedPullRequestsAreThoseOnTheSessionsRepoAndBranch()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            new("https://github.com/acme/widgets/pull/9", "fyrd/shared-memory"),
+            new("https://github.com/acme/widgets/pull/8", "fyrd/other"),
+        ];
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+    }
+
+    [Fact]
+    public async Task Poll_SessionView_APrMapsToEverySessionOnItsBranch()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [new("https://github.com/acme/widgets/pull/9", "fyrd/shared-memory")];
+        _cloud.SetByTag("fyrd-hub",
+            Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw),
+            Hub("s2", "reviewer-pr-9", "idle", role: "reviewer", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.All(_state.Sessions, s => Assert.Equal(["https://github.com/acme/widgets/pull/9"], s.PullRequests));
+    }
+
+    [Fact]
+    public async Task Poll_SessionView_MatchesEveryBranchTheSessionHas()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            new("https://github.com/acme/widgets/pull/7", "claude/outcome"),
+            new("https://github.com/acme/widgets/pull/8", "fyrd/second-mount"),
+            new("https://github.com/acme/widgets/pull/9", "fyrd/live"),
+            new("https://github.com/acme/widgets/pull/10", "fyrd/unrelated"),
+        ];
+        const string raw = """
+            {"session_context":{"sources":[{"type":"git_repository","url":"https://github.com/acme/widgets"}],
+                                "outcomes":[{"type":"git_repository","git_info":{"repo":"acme/widgets","branches":["claude/outcome"]}}]},
+             "external_metadata":{"current_branches":{"":"fyrd/live","/other":"fyrd/second-mount","/x":null}}}
+            """;
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal("fyrd/live", v.Branch);
+        Assert.Equal(
+            ["https://github.com/acme/widgets/pull/7", "https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"],
+            v.PullRequests);
+    }
+
+    [Fact]
+    public async Task Poll_SessionView_GhFailureLeavesThePollHealthy()
+    {
+        var gh = new StubGitHub { Fail = new GitHubException("gh is not installed") };
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Empty(_state.Sessions.Single().PullRequests);
+        Assert.Null(_state.LastError);
     }
 
     [Fact]

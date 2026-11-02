@@ -11,7 +11,7 @@ const big = (n: number): TranscriptItem[] =>
 test("typing latency with a long transcript", async ({ page }) => {
   await mockApi(page, { transcripts: { session_ctl: big(300) } });
   await page.goto("/#/sessions/session_ctl");
-  await expect(page.locator(".msg").nth(299)).toBeAttached({ timeout: 30000 });
+  await expect(page.getByText("Message 299: ").first()).toBeAttached({ timeout: 30000 });
   const box = page.getByLabel("Message this session");
   await box.click();
   const ms = await page.evaluate(async () => {

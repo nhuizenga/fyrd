@@ -68,10 +68,12 @@ function Composer({ sessionId, sending, blocked, hint, height, onSend }: {
         <span className="composer-hints">
           <span className="composer-hint" role="img" aria-label="Enter to send" title="Enter to send">
             <Icon svg={EnterIcon} size="small" color="var(--a2-foreground-color-subdued)" />
+            <span className="composer-hint-label">Send</span>
           </span>
           <span className="composer-hint" role="img" aria-label="Shift+Enter for a new line" title="Shift+Enter for a new line">
             <Icon svg={ShiftIcon} size="small" color="var(--a2-foreground-color-subdued)" />
             <Icon svg={EnterIcon} size="small" color="var(--a2-foreground-color-subdued)" />
+            <span className="composer-hint-label">New line</span>
           </span>
         </span>
         <Button appearance="primary" disabled={!canSend} aria-describedby={blocked ? "budget-block" : undefined} onClick={() => void send()}>Send</Button>
