@@ -20,8 +20,13 @@ export interface Nudge {
  * wins. Null when none does.
  */
 export const owningBuilder = (url: string, head: string | undefined, sessions: HubSessionView[]): HubSessionView | null => {
-  const builders = sessions.filter((s) => s.role === "builder" && s.pullRequests.includes(url));
+  const builders = sessions.filter((s) => s.role === "builder" && s.status !== "archived" && s.pullRequests.includes(url));
   return builders.find((s) => head !== undefined && head !== "" && s.branch === head) ?? builders[0] ?? null;
+};
+
+const failingNames = (st: PullRequestStatus): string => {
+  const names = (st.failingChecks?.length ? st.failingChecks : st.failingCheck ? [st.failingCheck] : []).map((c) => c.name);
+  return names.length > 0 ? names.join(", ") : "see the PR";
 };
 
 /**
@@ -56,7 +61,7 @@ export function nudgesFor(
   if ((st.checks === "failing" || conflicting) && builder) {
     const text = conflicting
       ? `${st.url} has merge conflicts with ${base}. Merge ${base} in (no force-push), fix, run the tests, push, and reply as before.`
-      : `Checks are failing on ${st.url}: ${st.failingCheck?.name ?? "see the PR"}. Fix them, run the tests, push, and reply as before.`;
+      : `Checks are failing on ${st.url}: ${failingNames(st)}. Fix them, run the tests, push, and reply as before.`;
     out.push({ kind: "fix", label: "Fix failing checks", to: builder, text });
   }
   return out;

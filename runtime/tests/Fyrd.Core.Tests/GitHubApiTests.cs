@@ -86,7 +86,8 @@ public class GitHubApiTests
         var s = await api.GetAsync(Url);
 
         Assert.Equal(new PullRequestStatus(Url, 12, "Fix it", "open", true, "passing")
-            { Base = "main", Head = "fyrd/a", ChecksPassed = 3, Mergeable = "mergeable" }, s);
+            { Base = "main", Head = "fyrd/a", ChecksPassed = 3, Mergeable = "mergeable" }, s with { FailingChecks = [] });
+        Assert.Empty(s.FailingChecks);
         Assert.False(s.CanMerge);
         var req = Assert.Single(graph.Requests);
         Assert.Equal("https://api.github.com/graphql", req.Request.RequestUri!.ToString());
@@ -367,6 +368,7 @@ public class GitHubApiTests
         Assert.Equal("failing", s.Checks);
         Assert.Equal((3, 2, 2), (s.ChecksPassed, s.ChecksFailed, s.ChecksPending));
         Assert.Equal(new FailingCheck("lint", "https://ci/lint"), s.FailingCheck);
+        Assert.Equal([new FailingCheck("lint", "https://ci/lint"), new FailingCheck("deploy", "https://ci/deploy")], s.FailingChecks);
     }
 
     [Fact]

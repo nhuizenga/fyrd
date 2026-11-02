@@ -55,6 +55,8 @@ export interface PullRequestStatus {
   checksPending: number;
   /** The first failing check, with where to read why. */
   failingCheck: { name: string; url: string | null } | null;
+  /** Every failing check (older servers send only `failingCheck`). */
+  failingChecks?: { name: string; url: string | null }[];
   review: "none" | "commented" | "approved" | "changes_requested";
   mergeable: "mergeable" | "conflicting" | "unknown";
   /** GitHub's `mergeStateStatus`, lower-cased. */
