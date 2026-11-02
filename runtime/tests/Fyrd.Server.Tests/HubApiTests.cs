@@ -357,10 +357,10 @@ public class HubApiTests
     private const string Pr = "https://github.com/acme/widgets/pull/12";
     private const string OtherPr = "https://github.com/acme/widgets/pull/99";
 
-    private static void SeedWithPr(FyrdFactory f, bool draft, string checks = "passing", string state = "open")
+    private static void SeedWithPr(FyrdFactory f, bool draft, string checks = "passing", string state = "open", string mergeable = "mergeable")
     {
         f.Services.GetRequiredService<HubState>().Publish([View() with { PullRequests = [Pr] }], []);
-        f.GitHub.Statuses[Pr] = new PullRequestStatus(Pr, 12, "Fix it", state, draft, checks);
+        f.GitHub.Statuses[Pr] = new PullRequestStatus(Pr, 12, "Fix it", state, draft, checks) { Mergeable = mergeable };
     }
 
     [Fact]
@@ -407,6 +407,43 @@ public class HubApiTests
         Assert.True(pr.GetProperty("draft").GetBoolean());
         Assert.Equal("passing", pr.GetProperty("checks").GetString());
         Assert.False(pr.GetProperty("canMerge").GetBoolean());
+    }
+
+    [Fact]
+    public async Task PullRequests_ProjectsTheRichStatusFields()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false, checks: "failing");
+        f.GitHub.Statuses[Pr] = new PullRequestStatus(Pr, 12, "Fix it", "open", false, "failing")
+        {
+            Base = "main", Head = "fyrd/a", ChecksPassed = 8, ChecksFailed = 1, ChecksPending = 2,
+            FailingCheck = new FailingCheck("lint", "https://ci/lint"), Review = "commented",
+            Mergeable = "conflicting", MergeState = "dirty",
+        };
+        var r = await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/pull-requests");
+        var pr = (await ReadJson(r)).EnumerateArray().Single();
+        Assert.Equal("main", pr.GetProperty("base").GetString());
+        Assert.Equal("fyrd/a", pr.GetProperty("head").GetString());
+        Assert.Equal(8, pr.GetProperty("checksPassed").GetInt32());
+        Assert.Equal(1, pr.GetProperty("checksFailed").GetInt32());
+        Assert.Equal(2, pr.GetProperty("checksPending").GetInt32());
+        Assert.Equal("lint", pr.GetProperty("failingCheck").GetProperty("name").GetString());
+        Assert.Equal("https://ci/lint", pr.GetProperty("failingCheck").GetProperty("url").GetString());
+        Assert.Equal("commented", pr.GetProperty("review").GetString());
+        Assert.Equal("conflicting", pr.GetProperty("mergeable").GetString());
+        Assert.Equal("dirty", pr.GetProperty("mergeState").GetString());
+        Assert.False(pr.GetProperty("canMerge").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Merge_ConflictingPr_409_MentionsConflicts_NothingMerged()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false, mergeable: "conflicting");
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("merge conflicts", await r.Content.ReadAsStringAsync());
+        Assert.Empty(f.GitHub.Merged);
     }
 
     [Fact]

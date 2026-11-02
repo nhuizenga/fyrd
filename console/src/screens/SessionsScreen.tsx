@@ -2,8 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { Alert, Button, Chip, Icon, Link, ProgressBar, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import EnterIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_return.svg?react";
 import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_upward.svg?react";
-import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
-import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import DownloadIcon from "@servicetitan/anvil2/assets/icons/material/round/download.svg?react";
@@ -12,6 +10,7 @@ import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_h
 import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
+import PullRequestItem, { prLabel } from "../components/PullRequestItem";
 import QuestionGroup from "../components/QuestionGroup";
 import ThreadItem from "../components/ThreadItem";
 import StatusIcon from "../components/StatusIcon";
@@ -42,7 +41,6 @@ const writeStored = (key: string, value: string) => {
 };
 
 const repoName = (repo: string) => repo.split("/").pop() || repo;
-const prLabel = (url: string) => (/\/pull\/(\d+)/.exec(url)?.[1] ? `#${/\/pull\/(\d+)/.exec(url)![1]}` : url);
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const pct = (ratio: number) => Math.round(ratio * 100);
@@ -102,6 +100,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
+  const [prErrors, setPrErrors] = useState<Record<string, string | null>>({});
   const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
   const [exporting, setExporting] = useState<string[]>([]);
   const [confirmArchive, setConfirmArchive] = useState<HubSessionView | null>(null);
@@ -249,12 +248,17 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     });
 
-  const prAction = (fn: () => Promise<unknown>) =>
-    run(async () => {
+  // A failed ready or merge is shown under its own PR, not only in the page-level alert.
+  const prAction = async (url: string, fn: () => Promise<unknown>) => {
+    setPrErrors((e) => ({ ...e, [url]: null }));
+    try {
       await fn();
       await loadPrs();
       await onChanged();
-    });
+    } catch (e) {
+      setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
+    }
+  };
 
   const replaceController = () =>
     run(async () => {
@@ -616,57 +620,29 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               {gitHubNote && <Text size="small" subdued role="note">{gitHubNote}</Text>}
               {selected.pullRequests.length === 0 ? (gitHubNote ? null : <Text subdued>—</Text>) : (
                 <ul className="pr-list">
-                  {selected.pullRequests.map((u) => {
-                    const st = prStatuses.find((p) => p.url === u);
-                    const label = prLabel(u);
-                    return (
-                      <li key={u} className="pr-item">
-                        <Chip label={label} size="small" title={st?.title ? `${label} ${st.title}` : u} />
-                        {st && st.state !== "unknown" && (
-                          <span className="pr-badges">
-                            {st.draft && <Chip label="Draft" size="small" />}
-                            {st.state !== "open" && <Chip label={st.state} size="small" />}
-                            {st.state === "open" && !st.draft && st.checks !== "none" && <Chip label={`Checks ${st.checks}`} size="small" />}
-                          </span>
-                        )}
-                        <span className="pr-actions">
-                          <Button
-                            appearance="secondary" size="small" icon={OpenIcon}
-                            aria-label={`Open ${label}`} title="Open pull request on GitHub"
-                            onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
-                          />
-                          {!gitHubNote && st?.state === "open" && st.draft && (
-                            <Button
-                              appearance="secondary" size="small" icon={ReadyIcon}
-                              aria-label={`Mark ${label} ready for review`} title="Mark ready for review"
-                              className="pr-ready"
-                              onClick={() => prAction(() => api.markPrReady(selected.id, u))}
-                            />
-                          )}
-                          {!gitHubNote && st?.canMerge && (
-                            <Button
-                              appearance="secondary" size="small" icon={MergeIcon}
-                              aria-label={`Merge ${label}`} title="Merge pull request"
-                              className="pr-merge"
-                              onClick={() => setConfirmMerge(st)}
-                            />
-                          )}
-                        </span>
-                      </li>
-                    );
-                  })}
+                  {selected.pullRequests.map((u) => (
+                    <PullRequestItem
+                      key={u}
+                      url={u}
+                      status={prStatuses.find((p) => p.url === u)}
+                      actionsHidden={gitHubNote !== null}
+                      error={prErrors[u]}
+                      onReady={() => prAction(u, () => api.markPrReady(selected.id, u))}
+                      onMerge={() => setConfirmMerge(prStatuses.find((p) => p.url === u) ?? null)}
+                    />
+                  ))}
                 </ul>
               )}
               {confirmMerge && (
                 <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
-                  <Text>This squash-merges the pull request on GitHub.</Text>
+                  <Text>This squash-merges {prLabel(confirmMerge.url)} into <code>{confirmMerge.base || "its base"}</code> on GitHub.</Text>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Button
                       appearance="primary" size="small"
                       onClick={() => {
                         const pr = confirmMerge;
                         setConfirmMerge(null);
-                        void prAction(() => api.mergePr(selected.id, pr.url));
+                        void prAction(pr.url, () => api.mergePr(selected.id, pr.url));
                       }}
                     >
                       Merge pull request

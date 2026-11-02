@@ -115,6 +115,8 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
         var number = r.TryGetProperty("number", out var n) && n.TryGetInt32(out var num) ? num : 0;
 
         bool failing = false, pending = false, any = false;
+        int passed = 0, failed = 0, running = 0;
+        FailingCheck? firstFailing = null;
         if (Path(r, "commits", "nodes", out var commits) && commits.ValueKind == JsonValueKind.Array && commits.GetArrayLength() > 0
             && Path(commits[0], "commit", "statusCheckRollup", "contexts", "nodes", out var contexts) && contexts.ValueKind == JsonValueKind.Array)
             foreach (var c in contexts.EnumerateArray())
@@ -124,13 +126,39 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                 var status = Str(c, "status")?.ToUpperInvariant();
                 var conclusion = Str(c, "conclusion")?.ToUpperInvariant();
                 var st = Str(c, "state")?.ToUpperInvariant();
-                if (status is not null && status != "COMPLETED") pending = true;
-                else if (conclusion is "FAILURE" or "TIMED_OUT" or "CANCELLED" or "ACTION_REQUIRED" or "STARTUP_FAILURE" or "STALE") failing = true;
-                else if (st is "FAILURE" or "ERROR") failing = true;
-                else if (st is "PENDING" or "EXPECTED") pending = true;
+                if (status is not null && status != "COMPLETED") { pending = true; running++; }
+                else if (conclusion is "FAILURE" or "TIMED_OUT" or "CANCELLED" or "ACTION_REQUIRED" or "STARTUP_FAILURE" or "STALE"
+                         || st is "FAILURE" or "ERROR")
+                {
+                    failing = true;
+                    failed++;
+                    firstFailing ??= new FailingCheck(Str(c, "name") ?? Str(c, "context") ?? "check", Str(c, "detailsUrl") ?? Str(c, "targetUrl"));
+                }
+                else if (st is "PENDING" or "EXPECTED") { pending = true; running++; }
+                else passed++;
             }
         var checks = failing ? "failing" : pending ? "pending" : any ? "passing" : "none";
-        return new PullRequestStatus(url, number, Str(r, "title") ?? "", state, draft, checks);
+
+        var review = Str(r, "reviewDecision")?.ToUpperInvariant() switch
+        {
+            "APPROVED" => "approved",
+            "CHANGES_REQUESTED" => "changes_requested",
+            // REVIEW_REQUIRED and null say nothing about whether anyone has looked: use the latest reviews.
+            _ => Path(r, "latestReviews", "nodes", out var reviews) && reviews.ValueKind == JsonValueKind.Array && reviews.GetArrayLength() > 0
+                ? "commented" : "none",
+        };
+        var mergeable = Str(r, "mergeable")?.ToUpperInvariant() switch { "MERGEABLE" => "mergeable", "CONFLICTING" => "conflicting", _ => "unknown" };
+
+        return new PullRequestStatus(url, number, Str(r, "title") ?? "", state, draft, checks)
+        {
+            Base = Str(r, "baseRefName") ?? "",
+            Head = Str(r, "headRefName") ?? "",
+            ChecksPassed = passed, ChecksFailed = failed, ChecksPending = running,
+            FailingCheck = firstFailing,
+            Review = review,
+            Mergeable = mergeable,
+            MergeState = Str(r, "mergeStateStatus")?.ToLowerInvariant() ?? "unknown",
+        };
     }
 
     private async Task<JsonDocument> QueryAsync(string query, object variables, string subject, CancellationToken ct)
