@@ -11,6 +11,18 @@ import SessionsScreen from "./SessionsScreen";
 
 vi.mock("../api");
 
+// Counts Markdown renders: typing in the message box must not re-render transcript bubbles.
+const markdownRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../components/Markdown", async (importOriginal) => {
+  const { default: Real } = await importOriginal<typeof import("../components/Markdown")>();
+  return {
+    default: (props: { text: string }) => {
+      markdownRenders.count += 1;
+      return <Real {...props} />;
+    },
+  };
+});
+
 beforeEach(() => {
   vi.resetAllMocks();
   window.location.hash = "";
@@ -680,4 +692,65 @@ it("an empty progress frame clears the bubble, and it stays cleared after switch
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*beta-2/ }));
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
   expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
+});
+
+describe("sending a message", () => {
+  const open = async () => {
+    renderScreen(two());
+    await userEvent.click(screen.getByRole("button", { name: /^(?!Archive).*alpha-1/ }));
+    return screen.getByLabelText("Message this session");
+  };
+  const deferred = () => {
+    let resolve!: () => void;
+    let reject!: (e: Error) => void;
+    const promise = new Promise<undefined>((res, rej) => { resolve = () => res(undefined); reject = rej; });
+    return { promise, resolve, reject };
+  };
+
+  it("clears the box at once, shows the message optimistically and makes the box read-only while in flight", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    await userEvent.type(box, "hello there{Enter}");
+    expect(box).toHaveValue("");
+    expect(box).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByLabelText("Sending")).toHaveTextContent("hello there");
+    // Typing is ignored while the send is in flight.
+    await userEvent.type(box, "ignored");
+    expect(box).toHaveValue("");
+    d.resolve();
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    // The echoed user item replaces the optimistic one.
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "hello there" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("hello there")).toHaveLength(1);
+  });
+
+  it("on failure re-enables the box, keeps the text and shows the error", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    await userEvent.type(box, "keep me{Enter}");
+    expect(box).toHaveAttribute("readonly");
+    d.reject(new Error("upstream down"));
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    expect(box).toHaveValue("keep me");
+    expect(screen.getByRole("alert")).toHaveTextContent("upstream down");
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+  });
+
+  it("typing does not re-render the transcript", async () => {
+    const box = await open();
+    FakeEventSource.latest().emit("item", item({ text: "first" }));
+    FakeEventSource.latest().emit("item", item({ text: "second" }));
+    const bubble = screen.getByText("second");
+    await userEvent.type(box, "abcdef");
+    // The very same DOM node survives; and the render counter of the markdown component stays put.
+    expect(screen.getByText("second")).toBe(bubble);
+    const before = markdownRenders.count;
+    await userEvent.type(box, "ghijkl");
+    expect(markdownRenders.count).toBe(before);
+  });
 });

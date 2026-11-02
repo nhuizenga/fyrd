@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { Alert, Button, Chip, Icon, Link, ProgressBar, SearchField, Text, TextField, Textarea } from "@servicetitan/anvil2";
-import EnterIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_return.svg?react";
-import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_upward.svg?react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Alert, Button, Chip, Link, ProgressBar, SearchField, Text, TextField } from "@servicetitan/anvil2";
 import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
@@ -9,8 +7,8 @@ import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_n
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
 import AddRepo from "../components/AddRepo";
-import QuestionGroup from "../components/QuestionGroup";
-import ThreadItem from "../components/ThreadItem";
+import Composer, { DRAFT_KEY, readStored, writeStored } from "../components/Composer";
+import Thread from "../components/Thread";
 import StatusIcon from "../components/StatusIcon";
 import type { HubCostView, HubSessionView, PullRequestStatus } from "../types";
 import { lastSession, navigate, rememberSession, replaceRoute } from "../route";
@@ -18,20 +16,10 @@ import { fullTime, relativeTime } from "../time";
 import { useTranscript } from "../useTranscript";
 import type { ScreenProps } from "./ScreenProps";
 
-const DRAFT_KEY = (id: string) => `fyrd.draft.${id}`;
 const COMPOSER_KEY = "fyrd.composerHeight";
 const COMPOSER_MIN = 72;
 const COMPOSER_MAX = 480;
 const COMPOSER_DEFAULT = 96;
-
-const readStored = (key: string): string | null => {
-  try { return localStorage.getItem(key); } catch { return null; }
-};
-const writeStored = (key: string, value: string) => {
-  try {
-    if (value === "") localStorage.removeItem(key); else localStorage.setItem(key, value);
-  } catch { /* storage unavailable: the draft just won't outlive the page */ }
-};
 
 const repoName = (repo: string) => repo.split("/").pop() || repo;
 const prLabel = (url: string) => (/\/pull\/(\d+)/.exec(url)?.[1] ? `#${/\/pull\/(\d+)/.exec(url)![1]}` : url);
@@ -64,14 +52,6 @@ const FOLLOW_SLACK = 48;
 export default function SessionsScreen({ state, onChanged, routeId }: ScreenProps) {
   const [search, setSearch] = useState("");
   const selectedId = routeId ?? null;
-  // Unsent text is kept per session (and in localStorage), so each session's box is its own.
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const draft = selectedId ? drafts[selectedId] ?? readStored(DRAFT_KEY(selectedId)) ?? "" : "";
-  const setDraft = (value: string) => {
-    if (!selectedId) return;
-    setDrafts((d) => ({ ...d, [selectedId]: value }));
-    writeStored(DRAFT_KEY(selectedId), value);
-  };
   const [composerHeight, setComposerHeight] = useState(() => {
     const n = Number(readStored(COMPOSER_KEY));
     return n >= COMPOSER_MIN && n <= COMPOSER_MAX ? n : COMPOSER_DEFAULT;
@@ -81,7 +61,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     setComposerHeight(next);
     writeStored(COMPOSER_KEY, String(next));
   };
-  const [sending, setSending] = useState(false);
+  // Sessions with a message in flight (the box is read-only meanwhile), and messages shown optimistically until the transcript echoes them.
+  const [sendingIds, setSendingIds] = useState<string[]>([]);
+  const [outbox, setOutbox] = useState<{ id: string; sessionId: string; text: string; itemsAtSend: number }[]>([]);
+  const outboxSeq = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
@@ -93,6 +76,13 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
   const [adoptId, setAdoptId] = useState("");
   const transcript = useTranscript(selectedId);
+  // Optimistic messages show until the transcript has a newer user item with the same text.
+  const outgoing = useMemo(
+    () => outbox.filter((m) => m.sessionId === selectedId
+      && !transcript.items.slice(m.itemsAtSend).some((i) => i.role === "user" && i.kind !== "question" && i.text.trim() === m.text)),
+    [outbox, selectedId, transcript.items],
+  );
+
   const logRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -164,7 +154,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     autoTop.current = el.scrollTop;
   }, []);
 
-  useLayoutEffect(stickToBottom, [stickToBottom, transcript.items.length, selectedId, hasThread]);
+  useLayoutEffect(stickToBottom, [stickToBottom, transcript.items.length, outgoing.length, selectedId, hasThread]);
 
   // Content keeps growing after a render (fonts, markdown tables, a deep link's thread appearing late): keep following it.
   useEffect(() => {
@@ -228,27 +218,40 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
 
   const cost = selected && raised?.id === selected.id && selected.cost?.limitUsd === raised.from ? raised.view : selected?.cost;
   const blocked = cost?.blocked ?? null;
-  const send = () => {
-    if (!selected || sending || blocked || draft.trim() === "") return;
-    const text = draft.trim();
+  const sending = selected ? sendingIds.includes(selected.id) : false;
+  const itemsCount = useRef(0);
+  itemsCount.current = transcript.items.length;
+  const send = async (text: string): Promise<boolean> => {
+    if (!selected) return false;
     const sentTo = selected.id;
+    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text, itemsAtSend: itemsCount.current };
     following.current = true;
-    setSending(true);
-    void run(async () => {
-      try {
-        await api.sendMessage(sentTo, text);
-        setDrafts((d) => ({ ...d, [sentTo]: "" }));
-        writeStored(DRAFT_KEY(sentTo), "");
-      } finally {
-        setSending(false);
-      }
-    });
+    setSendingIds((ids) => [...ids, sentTo]);
+    setOutbox((o) => [...o, entry]);
+    setError(null);
+    const drop = () => setOutbox((o) => o.filter((x) => x.id !== entry.id));
+    try {
+      await api.sendMessage(sentTo, text);
+      // The echoed message normally replaces the optimistic one; if it never matches, don't leave a duplicate behind.
+      setTimeout(drop, 15_000);
+      return true;
+    } catch (e) {
+      drop();
+      // Keep the owner's words: put them back unless they've already started something new in that box.
+      if ((readStored(DRAFT_KEY(sentTo)) ?? "") === "") writeStored(DRAFT_KEY(sentTo), text);
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setSendingIds((ids) => ids.filter((id) => id !== sentTo));
+    }
   };
 
-  const pending = selected ? (state?.questions ?? []).filter((x) => x.sessionId === selected.id) : [];
-  const shownToolUses = new Set(transcript.items.filter((i) => i.kind === "question").map((i) => i.toolUseId));
-  // Questions the stream hasn't delivered yet (or never will, if it faults) still get answer buttons.
-  const unshown = pending.filter((x) => !shownToolUses.has(x.toolUseId));
+  const allQuestions = state?.questions;
+  const pending = useMemo(
+    () => (selected ? (allQuestions ?? []).filter((x) => x.sessionId === selected.id) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allQuestions, selected?.id],
+  );
   const canPause = !!selected && !pausedIds.includes(selected.id) && (selected.status === "running" || selected.status === "requires_action");
   const canResume = !!selected && (pausedIds.includes(selected.id) || selected.status === "idle");
 
@@ -390,25 +393,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               {transcript.fault && <Alert status="warning" title={transcript.fault} role="alert" />}
               <div className="thread-log" ref={logRef} onScroll={onLogScroll} role="log" aria-label="Messages">
                 <div className="thread-items" ref={itemsRef}>
-                {transcript.items.length === 0 && !transcript.progress && unshown.length === 0 && (
-                  <Text subdued>{transcript.connected ? "No messages yet." : "Loading…"}</Text>
-                )}
-                {transcript.items.map((item) => (
-                  <ThreadItem
-                    key={item.key}
-                    item={item}
-                    pending={item.kind === "question" ? pending.filter((x) => x.toolUseId === item.toolUseId) : []}
-                    onChanged={onChanged}
-                  />
-                ))}
-                {transcript.progress && (
-                  <ThreadItem item={transcript.progress} pending={[]} onChanged={onChanged} />
-                )}
-                {unshown.length > 0 && (
-                  <section className="msg msg-agent msg-question" aria-label="Question waiting for you">
-                    <QuestionGroup group={unshown} onChanged={onChanged} />
-                  </section>
-                )}
+                <Thread
+                  items={transcript.items}
+                  progress={transcript.progress}
+                  connected={transcript.connected}
+                  questions={pending}
+                  outgoing={outgoing}
+                  onChanged={onChanged}
+                />
                 </div>
               </div>
               <div
@@ -437,34 +429,15 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                   window.addEventListener("pointerup", up);
                 }}
               />
-              <div className="composer">
-                <div className="composer-input" style={{ height: composerHeight }}>
-                  <Textarea
-                    label="Message this session"
-                    hint={blocked ? (blocked === "session" ? "Add budget to continue" : "Sending is paused until midnight except for the Controller") : undefined}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        send();
-                      }
-                    }}
-                  />
-                </div>
-                <div className="composer-actions">
-                  <span className="composer-hints">
-                    <span className="composer-hint" role="img" aria-label="Enter to send" title="Enter to send">
-                      <Icon svg={EnterIcon} size="small" color="var(--a2-foreground-color-subdued)" />
-                    </span>
-                    <span className="composer-hint" role="img" aria-label="Shift+Enter for a new line" title="Shift+Enter for a new line">
-                      <Icon svg={ShiftIcon} size="small" color="var(--a2-foreground-color-subdued)" />
-                      <Icon svg={EnterIcon} size="small" color="var(--a2-foreground-color-subdued)" />
-                    </span>
-                  </span>
-                  <Button appearance="primary" disabled={sending || !!blocked || draft.trim() === ""} aria-describedby={blocked ? "budget-block" : undefined} onClick={send}>Send</Button>
-                </div>
-              </div>
+              <Composer
+                key={selected.id}
+                sessionId={selected.id}
+                sending={sending}
+                blocked={blocked}
+                hint={blocked ? (blocked === "session" ? "Add budget to continue" : "Sending is paused until midnight except for the Controller") : undefined}
+                height={composerHeight}
+                onSend={send}
+              />
             </>
           )}
         </section>

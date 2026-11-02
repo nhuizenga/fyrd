@@ -5,7 +5,7 @@ const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString(
 
 export const session = (o: Partial<HubSessionView>): HubSessionView => ({
   id: "session_x", title: "builder-x", role: "builder", status: "idle", repo: null, branch: null,
-  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), tags: ["fyrd-hub", "fyrd-role-builder"], ...o,
+  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), tags: ["fyrd-hub", "fyrd-role-builder"], pullRequests: [], ...o,
 });
 
 export const SESSIONS: HubSessionView[] = [
@@ -60,6 +60,8 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Hold `POST …/message` this long (and optionally fail it) to stand in for a slow upstream. */
+  message?: { delayMs: number; status?: number };
 }
 
 /** Serves a fake Fyrd API to the page and records the requests the console sends. */
@@ -81,6 +83,12 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       return route.fulfill({
         status: 200, headers: { "content-type": "text/event-stream" }, body: sse(opts.transcripts?.[stream[1]] ?? []),
       });
+    }
+    if (opts.message && req.method() === "POST" && /\/message$/.test(path)) {
+      await new Promise((r) => setTimeout(r, opts.message!.delayMs));
+      return route.fulfill(opts.message.status && opts.message.status >= 400
+        ? { status: opts.message.status, json: { detail: "Upstream down" } }
+        : { status: 204 });
     }
     if (path === "/api/hub/state") return route.fulfill({ json: state });
     if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
