@@ -874,6 +874,36 @@ describe("sending a message", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
   });
 
+  it("the echo replaces the optimistic message even when the thread is longer than the render window", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    for (let n = 0; n < 150; n++) FakeEventSource.latest().emit("item", item({ text: `filler ${n}` }));
+    await screen.findByText("Load earlier messages (50)");
+    await userEvent.type(box, "late echo{Enter}");
+    expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+    d.resolve();
+    // New items shift the window while the optimistic bubble is up; the echo still matches it by seq.
+    FakeEventSource.latest().emit("item", item({ text: "agent noise" }));
+    expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "late echo" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("late echo")).toHaveLength(1);
+  });
+
+  it("still matches the echo after load-more widened the window", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    for (let n = 0; n < 150; n++) FakeEventSource.latest().emit("item", item({ text: `filler ${n}` }));
+    await userEvent.type(box, "after more{Enter}");
+    await userEvent.click(await screen.findByRole("button", { name: /Load earlier messages/ }));
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "after more" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("after more")).toHaveLength(1);
+    d.resolve();
+  });
+
   it("typing does not re-render the transcript", async () => {
     const box = await open();
     FakeEventSource.latest().emit("item", item({ text: "first" }));

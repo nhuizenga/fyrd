@@ -71,7 +71,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   };
   // Sessions with a message in flight (the box is read-only meanwhile), and messages shown optimistically until the transcript echoes them.
   const [sendingIds, setSendingIds] = useState<string[]>([]);
-  const [outbox, setOutbox] = useState<{ id: string; sessionId: string; text: string; itemsAtSend: number }[]>([]);
+  const [outbox, setOutbox] = useState<{ id: string; sessionId: string; text: string; seqAtSend: number }[]>([]);
   const outboxSeq = useRef(0);
   const storedWidth = (key: string) => {
     const n = Number(readStored(key));
@@ -97,7 +97,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   // Optimistic messages show until the transcript has a newer user item with the same text.
   const outgoing = useMemo(
     () => outbox.filter((m) => m.sessionId === selectedId
-      && !transcript.items.slice(m.itemsAtSend).some((i) => i.role === "user" && i.kind !== "question" && i.text.trim() === m.text)),
+      && !transcript.items.some((i) => i.seq > m.seqAtSend && i.role === "user" && i.kind !== "question" && i.text.trim() === m.text)),
     [outbox, selectedId, transcript.items],
   );
 
@@ -252,12 +252,13 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const cost = selected && raised?.id === selected.id && selected.cost?.limitUsd === raised.from ? raised.view : selected?.cost;
   const blocked = cost?.blocked ?? null;
   const sending = selected ? sendingIds.includes(selected.id) : false;
-  const itemsCount = useRef(0);
-  itemsCount.current = transcript.items.length;
+  // The newest loaded item's seq (not an index: the thread shows only a window of the items, which shifts as new ones arrive).
+  const latestSeq = useRef(0);
+  latestSeq.current = transcript.items.reduce((m, i) => Math.max(m, i.seq), 0);
   const send = async (text: string): Promise<boolean> => {
     if (!selected) return false;
     const sentTo = selected.id;
-    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text, itemsAtSend: itemsCount.current };
+    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text, seqAtSend: latestSeq.current };
     following.current = true;
     setSendingIds((ids) => [...ids, sentTo]);
     setOutbox((o) => [...o, entry]);
