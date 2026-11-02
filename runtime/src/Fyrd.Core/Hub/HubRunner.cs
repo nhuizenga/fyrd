@@ -193,13 +193,7 @@ public sealed partial class HubRunner(
     private async Task<List<SessionEvent>> FetchAfterAsync(string sessionId, string? after, CancellationToken ct)
     {
         var events = new List<SessionEvent>();
-        while (true)
-        {
-            var page = await cloud.ListEventsAsync(sessionId, PageLimit, after, null, ct);
-            events.AddRange(page.Events);
-            if (!page.HasMore || page.LastId is null || page.LastId == after) break;
-            after = page.LastId;
-        }
+        await foreach (var e in cloud.AllEventsAsync(sessionId, after, PageLimit, ct)) events.Add(e);
         return events;
     }
 
