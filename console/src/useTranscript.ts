@@ -1,8 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { TranscriptItem } from "./types";
 
+/** How many of the newest items are rendered at first; "load more" widens the window by this much. */
+export const DEFAULT_ITEM_LIMIT = 100;
+/** Sessions whose loaded conversations are kept for instant re-selection; the least recently used is dropped past this. */
+const MAX_CACHED_SESSIONS = 20;
+
 export interface Transcript {
+  /** The newest items, capped at the current limit. */
   items: TranscriptItem[];
+  /** How many older items are loaded but not rendered. */
+  hiddenCount: number;
+  /** Renders another page of older items. */
+  loadMore: () => void;
   /** The latest live-only progress line ("in progress" status); replaced by each new one, cleared by the next saved item. */
   progress: TranscriptItem | null;
   /** True once the stream has opened at least once for this session. */
@@ -14,27 +24,51 @@ export interface Transcript {
 /** Progress is live-only (the server never replays it), so keep each session's last line for when the owner comes back. */
 const lastProgress = new Map<string, TranscriptItem>();
 
-const empty: Transcript = { items: [], progress: null, connected: false, fault: null };
+/** Loaded conversations by session (Map order = recency), so re-selecting a session doesn't start from a blank thread. */
+const cache = new Map<string, TranscriptItem[]>();
+
+function remember(sessionId: string, items: TranscriptItem[]) {
+  cache.delete(sessionId);
+  cache.set(sessionId, items);
+  while (cache.size > MAX_CACHED_SESSIONS) cache.delete(cache.keys().next().value as string);
+}
+
+/** Test hook: forget every cached conversation and progress line. */
+export function clearTranscriptCache() {
+  cache.clear();
+  lastProgress.clear();
+}
+
+type State = Omit<Transcript, "hiddenCount" | "loadMore">;
+const empty: State = { items: [], progress: null, connected: false, fault: null };
 
 /**
  * Follows a session's live transcript over Server-Sent Events. The server replays the whole transcript first,
  * then streams new items; EventSource reconnects on its own and resumes from the last `id:` it saw.
  */
 export function useTranscript(sessionId: string | null): Transcript {
-  const [transcript, setTranscript] = useState<Transcript>(empty);
+  const [transcript, setTranscript] = useState<State>(empty);
+  const [limit, setLimit] = useState(DEFAULT_ITEM_LIMIT);
+  const loadMore = useCallback(() => setLimit((l) => l + DEFAULT_ITEM_LIMIT), []);
 
   useEffect(() => {
-    setTranscript(sessionId ? { ...empty, progress: lastProgress.get(sessionId) ?? null } : empty);
+    setLimit(DEFAULT_ITEM_LIMIT);
+    const cached = sessionId ? cache.get(sessionId) ?? [] : [];
+    setTranscript(sessionId ? { ...empty, items: cached, progress: lastProgress.get(sessionId) ?? null } : empty);
     if (!sessionId) return;
     const source = new EventSource(`/api/hub/sessions/${encodeURIComponent(sessionId)}/stream`);
-    const seen = new Set<string>();
+    // The server replays the whole transcript on every connect; anything already cached is skipped, not re-added.
+    const seen = new Set<string>(cached.map((i) => i.key));
+    let loaded = cached;
     source.onopen = () => setTranscript((t) => ({ ...t, connected: true }));
     source.addEventListener("item", (e) => {
       const item = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
       if (seen.has(item.key)) return;
       seen.add(item.key);
       lastProgress.delete(sessionId);
-      setTranscript((t) => ({ ...t, fault: null, progress: null, items: [...t.items, item] }));
+      loaded = [...loaded, item];
+      remember(sessionId, loaded);
+      setTranscript((t) => ({ ...t, fault: null, progress: null, items: loaded }));
     });
     source.addEventListener("progress", (e) => {
       const progress = JSON.parse((e as MessageEvent<string>).data) as TranscriptItem;
@@ -51,5 +85,7 @@ export function useTranscript(sessionId: string | null): Transcript {
     return () => source.close();
   }, [sessionId]);
 
-  return transcript;
+  const hiddenCount = Math.max(0, transcript.items.length - limit);
+  const items = hiddenCount ? transcript.items.slice(hiddenCount) : transcript.items;
+  return { ...transcript, items, hiddenCount, loadMore };
 }
