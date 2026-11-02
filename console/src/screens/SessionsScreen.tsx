@@ -304,10 +304,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
-          {(s.repo || s.pullRequests.length > 0) && (
+          {(s.repo || s.branch || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
-              {s.repo && s.branch && <Chip label={s.branch} size="small" title={`Branch ${s.branch}`} />}
+              {s.branch && <Chip label={s.branch} size="small" title={`Branch ${s.branch}`} className="chip-branch" />}
               {s.pullRequests.length === 1 && <Chip label={prLabel(s.pullRequests[0])} size="small" title={s.pullRequests[0]} />}
               {s.pullRequests.length > 1 && <Chip label={`${s.pullRequests.length} PRs`} size="small" title={s.pullRequests.map(prLabel).join(", ")} />}
             </span>

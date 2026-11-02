@@ -530,7 +530,7 @@ it("session details show each PR as a chip with an Open button", async () => {
   expect(within(details).getByText("#12")).toBeInTheDocument();
   expect(within(details).queryByRole("link", { name: "#12" })).not.toBeInTheDocument();
   const openBtn = within(details).getByRole("button", { name: "Open #12" });
-  expect(openBtn).toHaveTextContent("");
+  expect(openBtn.textContent).toBe("");
   await userEvent.click(openBtn);
   expect(open).toHaveBeenCalledWith(PR12, "_blank", "noopener,noreferrer");
   open.mockRestore();
@@ -712,7 +712,10 @@ it("a draft PR gets a green check button that marks it ready, and no merge butto
   const { details, onChanged } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
   expect(within(details).getByText("Draft")).toBeInTheDocument();
   expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
-  await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+  const ready = within(details).getByRole("button", { name: "Mark #12 ready for review" });
+  expect(ready.textContent).toBe("");
+  expect(ready).toHaveClass("pr-ready");
+  await userEvent.click(ready);
   expect(api.markPrReady).toHaveBeenCalledWith("a", PR12);
   expect(api.pullRequests).toHaveBeenCalledTimes(2);
   expect(onChanged).toHaveBeenCalled();
@@ -722,7 +725,10 @@ it("a ready PR with passing checks gets a merge button that confirms first", asy
   vi.mocked(api.mergePr).mockResolvedValue(undefined);
   const { details } = await openAlphaWith(prStatus());
   expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
-  await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+  const merge = within(details).getByRole("button", { name: "Merge #12" });
+  expect(merge.textContent).toBe("");
+  expect(merge).toHaveClass("pr-merge");
+  await userEvent.click(merge);
   expect(api.mergePr).not.toHaveBeenCalled();
   expect(within(details).getByText("Merge #12 Fix it?")).toBeInTheDocument();
   await userEvent.click(within(details).getByRole("button", { name: "Merge pull request" }));
