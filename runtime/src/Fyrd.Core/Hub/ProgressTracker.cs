@@ -73,7 +73,7 @@ public sealed partial class ProgressTracker
                         _settled = false;
                         _block = ev.TryGetProperty("content_block", out var cb) ? Str(cb, "type") switch
                         {
-                            "tool_use" => "Using " + (Str(cb, "name") ?? "a tool"),
+                            "tool_use" => Str(cb, "name") is "Agent" ? "Starting a worker" : "Using " + (Str(cb, "name") ?? "a tool"),
                             "thinking" => "Thinking…",
                             _ => null,
                         } : null;

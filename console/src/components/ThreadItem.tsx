@@ -20,6 +20,22 @@ export default function ThreadItem({ item, pending, onChanged }: {
       </div>
     );
   }
+  if (item.kind === "worker") {
+    return (
+      <div className="msg msg-agent msg-worker">
+        <span className="msg-worker-label">Worker started</span> <strong>{item.text}</strong>
+        {item.detail && <span className="msg-worker-type"> · {item.detail}</span>}
+      </div>
+    );
+  }
+  if (item.kind === "worker-result") {
+    return (
+      <details className="msg msg-agent msg-worker-result">
+        <summary>Worker result</summary>
+        <Markdown text={item.text} />
+      </details>
+    );
+  }
   if (item.kind === "question") {
     if (pending.length > 0) {
       return (

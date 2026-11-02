@@ -115,4 +115,49 @@ public class HubTranscriptTests
     [InlineData("""null""")]
     public void OtherOrMalformedPayloads_NoItemsNoThrow(string payload) =>
         Assert.Empty(HubTranscript.Map(Event(1, payload)));
+
+    [Fact]
+    public void Assistant_AgentToolUse_WorkerItemWithDescription()
+    {
+        var ids = new HashSet<string>();
+        var items = HubTranscript.Map(Event(11, """
+            {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_w1","name":"Agent","input":{"description":"build: initial task","subagent_type":"fork","run_in_background":true,"prompt":"You are a worker for Builder b-1"}}]}}
+            """), ids);
+        var w = Assert.Single(items);
+        Assert.Equal(("11:0", "agent", "worker", "build: initial task"), (w.Key, w.Role, w.Kind, w.Text));
+        Assert.Equal(("toolu_w1", "fork"), (w.ToolUseId, w.Detail));
+        Assert.Contains("toolu_w1", ids);
+    }
+
+    [Fact]
+    public void Assistant_SubagentAgentToolUse_Ignored()
+    {
+        var items = HubTranscript.Map(Event(12, """
+            {"type":"assistant","parent_tool_use_id":"toolu_w1","message":{"content":[{"type":"tool_use","id":"toolu_x","name":"Agent","input":{"description":"nested"}}]}}
+            """), new HashSet<string>());
+        Assert.Empty(items);
+    }
+
+    [Fact]
+    public void User_ToolResultForWorker_WorkerResultItem_OthersIgnored()
+    {
+        var ids = new HashSet<string> { "toolu_w1" };
+        var items = HubTranscript.Map(Event(13, """
+            {"type":"user","parent_tool_use_id":null,"message":{"content":[
+              {"type":"tool_result","tool_use_id":"toolu_w1","content":[{"type":"text","text":"Status: done\nHand-off: pushed abc123"}]},
+              {"type":"tool_result","tool_use_id":"toolu_other","content":"ignored"}]}}
+            """), ids);
+        var r = Assert.Single(items);
+        Assert.Equal(("agent", "worker-result", "toolu_w1"), (r.Role, r.Kind, r.ToolUseId));
+        Assert.Equal("Status: done\nHand-off: pushed abc123", r.Text);
+    }
+
+    [Fact]
+    public void User_SubagentPromptWithWorkerIds_StillIgnored()
+    {
+        var items = HubTranscript.Map(Event(14, """
+            {"type":"user","parent_tool_use_id":"toolu_w1","message":{"content":"You are a worker for Builder b-1"}}
+            """), new HashSet<string> { "toolu_w1" });
+        Assert.Empty(items);
+    }
 }

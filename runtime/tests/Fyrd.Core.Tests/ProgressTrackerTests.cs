@@ -155,4 +155,14 @@ public class ProgressTrackerTests
         Assert.Null(t.Apply(Eph("""{"type":"stream_event","event":{"type":"content_block_stop","index":0}}""")));
         Assert.Null(t.Apply(Eph(TextStart)));
     }
+
+    [Fact]
+    public void AgentToolUse_ShowsStartingAWorker_WithItsDescription()
+    {
+        var t = new ProgressTracker();
+        var started = t.Apply(Eph("""{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","name":"Agent"}}}"""))!;
+        Assert.Equal("Starting a worker", started.Status);
+        var item = t.Apply(Eph("""{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"subagent_type\":\"fork\",\"description\":\"build: initial task\"}"}}}"""))!;
+        Assert.Equal("build: initial task", item.Detail);
+    }
 }

@@ -803,3 +803,16 @@ it("shows the branch as a chip in the session list and in the details", async ()
   expect(within(details).getByText("Branch")).toBeInTheDocument();
   expect(within(details).getByText("fyrd/alpha")).toBeInTheDocument();
 });
+
+it("shows a workers-running chip and a collapsed worker result card", async () => {
+  renderScreen(hubState({ sessions: [session({ id: "a", title: "alpha-1", status: "idle", tags: ["fyrd-hub", "fyrd-workers-running"], workersRunning: true })] }));
+  expect(screen.getByText("workers running")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
+  expect(screen.getByText("Working (background)")).toBeInTheDocument();
+  FakeEventSource.latest().emit("item", item({ kind: "worker", text: "build: initial task", detail: "fork", toolUseId: "tw1" }));
+  FakeEventSource.latest().emit("item", item({ key: "2:0", seq: 2, kind: "worker-result", text: "Status: done", toolUseId: "tw1" }));
+  expect(screen.getByText("build: initial task")).toBeInTheDocument();
+  const card = screen.getByText("Worker result").closest("details") as HTMLElement;
+  expect(card).not.toHaveAttribute("open");
+  expect(within(card).getByText("Status: done")).toBeInTheDocument();
+});
