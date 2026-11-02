@@ -21,6 +21,7 @@ Make pull requests in the Fyrd console accurate, live and actionable. You should
 
 ## Gaps and friction
 
+0. **The backend shells out to `gh`.** That needs the CLI installed and signed in, takes one process per call with a 30 s timeout, and returns errors as stderr text (`GhCli` in `GitHub.cs`).
 1. **Wrong merge method.** The console merges with a merge commit, but shared memory says squash, and recent `main` history is squashed. Repos that disallow merge commits fail with a raw `gh` error (a 502).
 2. **Rows are blind.** The design spec (§12.2) and mockup call for PR state and check counts on each row. Rows show only `#N`, so you must click every session to find a failing or mergeable PR.
 3. **Stale status.** The details pane never refreshes, so checks go pending → passing without the Merge button appearing.
@@ -34,20 +35,22 @@ Make pull requests in the Fyrd console accurate, live and actionable. You should
 
 | # | Decision | Choice |
 |---|---|---|
-| D1 | Merge method | **Always squash** (`gh pr merge --squash`). No method menu. |
+| D1 | Merge method | **Always squash** (Octokit `MergeMethod = Squash`, Phase 0). No method menu. |
 | D2 | Status source for live rows | **Widen the per-repo listing** that `OwnedPullRequests` already makes (one call per repo per TTL) to return status fields, and publish statuses in hub state. The details pane still re-reads live on select and after an action. |
 | D3 | Cross-session PR view (a new tab or Inbox cards) | **Neither for now.** Enrich session rows and the details pane only. |
 | D4 | Stacked PRs | **Show the stack, guard merges, and add a "Merge stack" action.** |
 | D5 | Between stack steps | **Wait for checks.** A server-side job merges the top PR, polls the next PR until it can merge (timeout 30 min), merges it, and repeats. It stops and reports on a failure, conflict, close or timeout. |
 | D6 | Owner nudge buttons | **All four:** Request validation, Request review, Watch PR (to the Controller), and Fix failing checks (to the owning Builder). |
+| D7 | How the backend talks to GitHub | **Directly, through a library, never by running `gh`.** Use **Octokit.NET** for REST (squash merge, signed-in user, rate limits) and **GitHub GraphQL posted with `HttpClient`** for the status listing and mark-ready, which REST can't do. The token comes from the `GH_TOKEN` environment variable (falling back to `GITHUB_TOKEN`), set before `/fyrd:up`. |
 
 ## Prioritised improvements
 
-Ordered by value ÷ effort. Each phase is one stacked PR (shared memory: stacked branches and PRs), and each PR bumps `.claude-plugin/plugin.json` once (`CLAUDE.md`).
+Ordered by value ÷ effort. Phase 0 goes first because every later phase reads GitHub through it. Each phase is one stacked PR (shared memory: stacked branches and PRs), and each PR bumps `.claude-plugin/plugin.json` once (`CLAUDE.md`).
 
 | Phase | Improvement | Value | Effort |
 |---|---|---|---|
-| 1 | Squash merge, richer status model, and a details pane that shows checks on drafts, counts, failing-check link, review, conflicts/behind, base and title | High | S–M |
+| 0 | Replace `gh` with Octokit and GraphQL, using a `GH_TOKEN` token; show GitHub sign-in status | High (it's the base for the other phases) | M |
+| 1 | Richer status model, and a details pane that shows checks on drafts, counts, failing-check link, review, conflicts/behind, base and title | High | S–M |
 | 2 | Live statuses in hub state, state chips on session rows, auto-refreshing details, "also on" sessions | High | M |
 | 3 | Nudge buttons, plus Controller routing rows | Medium–High | S–M |
 | 4a | Stack detection, stack display and merge-order guard | Medium | S–M |
@@ -55,14 +58,72 @@ Ordered by value ÷ effort. Each phase is one stacked PR (shared memory: stacked
 
 ---
 
-## Phase 1: Correct merge and richer PR status
+## Phase 0: Talk to GitHub directly (Octokit and GraphQL)
 
-**Branch:** `fyrd/pr-status-model` from `main`.
+**Branch:** `fyrd/github-api` from `main`.
+
+### Why both
+
+GitHub's REST API has no single check rollup: you'd need combined statuses plus check runs, two or more calls per PR. It also can't mark a PR ready for review, which is GraphQL-only (`markPullRequestReadyForReview`). One GraphQL query per repo returns every field the console needs. Octokit (official and maintained) covers the REST side: squash merge, the signed-in user and rate limits.
+
+### Token
+
+- At startup, read `GH_TOKEN`, else `GITHUB_TOKEN`, from the environment. `scripts/fyrd.mjs` already spawns the server with the inherited environment, so nothing needs passing through.
+- The token lives in memory only. It never goes into hub state, logs, error messages or the console.
+- The scopes it needs are covered by a classic token with `repo`. With a fine-grained token, grant **Pull requests: read/write**, **Contents: read/write** (merge), **Commit statuses: read** and **Checks: read** on the repos Fyrd works in.
+- The server reads the token once. Changing it needs `/fyrd:down` and then `/fyrd:up`, because `/fyrd:up` reuses a running server.
+- For owners who already use `gh`, the README tip is: `export GH_TOKEN=$(gh auth token)` before `/fyrd:up`.
 
 ### Server
 
-1. `Hub/GitHub.cs`
-   - `MergeAsync`: run `["pr", "merge", url, "--squash"]`. Replace the stale comment with "Squash, the owner's default". Don't delete the branch.
+1. Add the `Octokit` NuGet package to `Fyrd.Core.csproj`, pinned to the latest stable version.
+2. Add `Hub/GitHubApi.cs`, `GitHubApi : IGitHub`, replacing `GhCli`:
+   - Construct it with `(GitHubToken token, HttpClient http, IGitHubClient octokit)`. Register `HttpClient` through `AddHttpClient("github")` with base `https://api.github.com/`, `User-Agent: fyrd` and `Authorization: Bearer <token>`. Build Octokit's `GitHubClient` with `new ProductHeaderValue("fyrd")` and `new Credentials(token)`.
+   - **Repo listing:** one GraphQL request per repo with two aliases:
+     - `all: pullRequests(first:100, orderBy:{field:UPDATED_AT, direction:DESC})` with `url number title state isDraft headRefName baseRefName`
+     - `open: pullRequests(first:50, states:OPEN)` with `id url reviewDecision mergeable mergeStateStatus latestReviews(first:10){nodes{state}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl} ... on StatusContext{context state targetUrl}}}}}}}`
+   - **`GetAsync(url)`:** the same fields for `repository(owner,name){pullRequest(number)}`, including the node `id`.
+   - **`MarkReadyAsync`:** a GraphQL mutation `markPullRequestReadyForReview(input:{pullRequestId})`, using the id from a fresh `GetAsync`.
+   - **`MergeAsync`:** Octokit `PullRequest.Merge(owner, repo, n, new MergePullRequest { MergeMethod = PullRequestMergeMethod.Squash })`. This lands the D1 squash default here, so Phase 1 needn't repeat it.
+   - Keep the query strings as `const` text in one place. Parse the responses with `System.Text.Json`, keeping today's rollup rules (`FAILURE`, `TIMED_OUT`, `CANCELLED`, … mean failing; any running check means pending).
+3. Errors:
+   - Map Octokit `ApiException`, GraphQL `errors[]` and HTTP failures to `GitHubException`, with a short owner-facing message: "GitHub refused the merge: <message>", or "GitHub token lacks access to <repo>".
+   - Add `GitHubRateLimitException(resetAt)`, raised on 403/429 with `x-ratelimit-remaining: 0` or a GraphQL `RATE_LIMITED`. `OwnedPullRequests` keeps its last good listing and doesn't retry a repo before `resetAt`.
+   - With no token, `GitHubApi` throws `GitHubNotConfiguredException` without any network call.
+4. Sign-in status:
+   - On startup, and then every 10 minutes, call Octokit `User.Current()`.
+   - Publish `gitHub: { configured: bool, login: string | null, error: string | null }` in hub state. It holds no token, only the login.
+5. `Program.cs`: register `IGitHub` as `GitHubApi`. Delete `GhCli`, its `ProcessStartInfo` code and its tests. Keep the `PullRequestUrl` and `GitHubRepo` validators: the URL is still parsed into owner, repo and number, and nothing but those three reaches a query.
+6. `scripts/fyrd.mjs up`: when neither `GH_TOKEN` nor `GITHUB_TOKEN` is set, print one line: `GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.` Don't fail. `status` adds `GitHub: signed in as <login>` or `GitHub: not configured`, taken from `/api/hub/state`.
+7. Docs: add `GH_TOKEN` and `GITHUB_TOKEN` to the README's environment variables (with scopes, the restart note and the `gh auth token` tip), and add a line to `commands/up.md`.
+
+### Console
+
+8. `types.ts` gets `HubState.gitHub`. When `configured` is false, the details pane's Pull requests section shows a note instead of statuses: "Set GH_TOKEN before /fyrd:up to see PR status and act on PRs." Ready and merge are hidden. When `error` is set (a bad or expired token), show it the same way. Show PR links that came from session outcomes. Branch-owned PRs can't be found without the token, because finding them needs the listing.
+
+### Tests
+
+- `runtime/tests/Fyrd.Core.Tests/GitHubApiTests.cs`, using the existing `FakeHandler`:
+  - GraphQL listing parse from JSON fixtures (mixed rollup, a draft, conflicting, merged)
+  - `GetAsync` parse
+  - the mark-ready mutation body and the id taken from a fresh read
+  - squash merge: Octokit built over `new HttpClientAdapter(() => fakeHandler)`; assert `PUT …/pulls/{n}/merge` with `merge_method: "squash"`
+  - GraphQL `errors[]` becomes a `GitHubException`, a rate-limit response becomes `GitHubRateLimitException`, no token means no request
+  - the token never appears in exception messages
+- `OwnedPullRequestsTests`: no retries before `resetAt`.
+- `HubApiTests`: `gitHub` in state, PR actions return 503 "GitHub is not configured" with no token.
+- `scripts/lib.test.mjs`: the missing-token warning text.
+- Console: the not-configured note, and the buttons hidden.
+
+---
+
+## Phase 1: Richer PR status
+
+**Branch:** `fyrd/pr-status-model`, stacked on Phase 0.
+
+### Server
+
+1. `Hub/GitHub.cs` / `GitHubApi.cs`
    - Extend `PullRequestStatus`. Keep the existing positional fields and add init-only properties so existing callers and tests still compile:
      - `Base` (`baseRefName`), `Head` (`headRefName`)
      - `ChecksPassed`, `ChecksFailed`, `ChecksPending` (ints, counted in the same loop that builds the rollup)
@@ -71,8 +132,7 @@ Ordered by value ÷ effort. Each phase is one stacked PR (shared memory: stacked
      - `Mergeable`: `mergeable | conflicting | unknown` (from `mergeable`)
      - `MergeState`: lower-cased `mergeStateStatus` (`clean`, `behind`, `blocked`, `dirty`, `unstable`, `draft`, `has_hooks` or `unknown`)
    - `CanMerge` = `State == "open" && !Draft && Checks is "passing" or "none" && Mergeable != "conflicting"`. Don't gate on `blocked`, because GitHub's own branch rules answer that, and the error is surfaced.
-   - `GetAsync` asks for `--json number,title,state,isDraft,baseRefName,headRefName,statusCheckRollup,reviewDecision,latestReviews,mergeable,mergeStateStatus`.
-   - Split the parse into `ParseStatus(url, JsonElement)` so Phase 2's list parse reuses it.
+   - Fill them from the GraphQL fields Phase 0 already requests: one `ParseStatus(url, JsonElement)` serves both `GetAsync` and the open-PR alias of the listing.
 2. `Endpoints/HubEndpoints.cs`: the `GET …/pull-requests` projection adds the new fields. The merge 409 message mentions conflicts.
 
 ### Console
@@ -93,10 +153,9 @@ Ordered by value ÷ effort. Each phase is one stacked PR (shared memory: stacked
 
 ### Tests
 
-- `runtime/tests/Fyrd.Core.Tests/GhPullRequestTests.cs`:
+- `runtime/tests/Fyrd.Core.Tests/GitHubApiTests.cs`:
   - Parse fixtures for a mixed rollup with counts and the failing check's URL, `reviewDecision` set vs. only `COMMENT` reviews, and `mergeable: CONFLICTING`.
   - `CanMerge` is false when the PR is conflicting.
-  - `MergeAsync` uses `--squash`. Assert through a seam: expose the argument list builder, or test `GhCli.MergeArgs(url)`.
 - `runtime/tests/Fyrd.Server.Tests/HubApiTests.cs`: the projection includes the new fields, and merge on a conflicting PR returns 409.
 - `console/src/screens/SessionsScreen.test.tsx`: checks show on drafts with counts, the conflicts badge shows and Merge is hidden, the base badge and title render.
 - Update `console/e2e/mockApi.ts` fixtures.
@@ -109,11 +168,9 @@ Ordered by value ÷ effort. Each phase is one stacked PR (shared memory: stacked
 
 ### Server
 
-1. `IGitHub.ListAsync` returns richer listings (rename the record to `PullRequestSummary` or extend `PullRequestHead`). Make **two `gh` calls per repo per TTL**, because `statusCheckRollup` across 100 PRs of every state is heavy and risks GraphQL complexity limits:
-   - `gh pr list --state=all --limit=100 --json url,number,title,state,isDraft,headRefName,baseRefName`. This is cheap and covers merged and closed PRs.
-   - `gh pr list --state=open --limit=50 --json url,statusCheckRollup,reviewDecision,latestReviews,mergeable,mergeStateStatus`. This adds the live fields to open PRs, through `ParseStatus`.
+1. `IGitHub.ListAsync` returns full statuses (rename the record to `PullRequestSummary` or extend `PullRequestHead`). They come from Phase 0's single GraphQL request per repo: the light `all` alias joined with the heavy `open` alias by URL. Only open PRs carry the rollup, which keeps the query's point cost down.
 2. `OwnedPullRequests`:
-   - Keep the per-repo cache and TTL, and lower the TTL to **60 s**. That is still one or two calls per repo per minute.
+   - Keep the per-repo cache and TTL, and lower the TTL to **60 s**. That is one GraphQL request per repo per minute.
    - Add `Invalidate(repo)`, called after any console PR action so the next poll re-lists.
    - `FindAsync` keeps returning URLs. Add `Status(url)` to read the cached summary.
 3. `HubState` / `HubRunner`:
@@ -134,7 +191,7 @@ Ordered by value ÷ effort. Each phase is one stacked PR (shared memory: stacked
 
 ### Tests
 
-- `OwnedPullRequestsTests.cs`: two-call parse and merge, TTL 60 s, `Invalidate`, and a failed open-listing that keeps the last good statuses.
+- `OwnedPullRequestsTests.cs`: joining the two aliases, TTL 60 s, `Invalidate`, and a failed open-listing that keeps the last good statuses.
 - `HubRunnerTests.cs`: the `pullRequests` map is in hub state and deduplicated across sessions.
 - `HubApiTests.cs`: an action invalidates the cache and requests a poll.
 - `SessionsScreen.test.tsx`: the row chip shows the worst status, the 30 s refresh uses fake timers, and "also on" lists the sibling sessions.
@@ -247,7 +304,7 @@ The buttons send ordinary owner messages through the existing `POST /api/hub/ses
 ## How to test end to end
 
 1. Run `dotnet test runtime/Fyrd.sln`, `cd console && npm test`, `npx playwright test` (in `console/`), and `node --test "scripts/*.test.mjs"`.
-2. Run a manual smoke test against a scratch repo with `/fyrd:up` and a signed-in `gh`:
+2. Run a manual smoke test against a scratch repo: `export GH_TOKEN=…` then `/fyrd:up`. `/fyrd:status` shows `GitHub: signed in as <you>`. Start once without the token to see the warning and the console note. Then:
    - Open a draft PR with a failing check. The row shows a red dot, and the details pane shows counts and the failing-check link.
    - Use Fix failing checks and confirm the Builder receives the message.
    - Use Request validation and confirm the Controller starts a Validator.
@@ -256,10 +313,14 @@ The buttons send ordinary owner messages through the existing `POST /api/hub/ses
 
 ## Risks and open questions
 
-- **`gh pr list` cost.** `statusCheckRollup` and `latestReviews` on 50 open PRs per repo per minute could hit GraphQL rate or complexity limits on busy repos. Mitigations: keep `--limit=50`, back off the TTL to 5 min when `gh` reports rate-limit errors, and fall back to per-PR `view` only for owned PRs. Measure on the first real repo.
+- **GraphQL cost.** Rollup `contexts(first:100)` on 50 open PRs per repo per minute costs points against the 5,000/hour GraphQL budget. Log `rateLimit { cost remaining }` (add it to the query) and measure it on the first real repo. If it's too high, drop to `first:30` open PRs, fetch `contexts` only for owned PRs, or raise the TTL. Rate-limit responses back off until the reset time.
+- **The token is a long-lived secret** in the owner's shell environment and in the server process. Fyrd only reads it and never persists it. A fine-grained token scoped to the working repos is the safer recommendation.
+- **The token is read at startup**, so rotating it needs `/fyrd:down` and `/fyrd:up`. A token that expires mid-run surfaces as `gitHub.error` within 10 minutes, and PR actions return the GitHub error.
+- **Without a token, branch-owned PRs disappear**, because ownership needs the listing. Only outcome-listed PR links remain. This is a regression for owners who relied on a signed-in `gh` without setting `GH_TOKEN`. The `/fyrd:up` warning and the console note make it visible.
+- **Behaviour parity.** The rollup states that `gh` reported (`STALE`, `STARTUP_FAILURE`, `EXPECTED`, …) must map the same way from GraphQL enums. Port the existing `Parse` tests to GraphQL fixtures before deleting `GhCli`.
 - **Fyrd Reviewers comment and don't approve,** so `reviewDecision` stays null. "Reviewed" relies on `latestReviews`. Repos that require approvals show `MergeState: blocked`, and the Merge error comes from GitHub.
 - **Squash-merging stacks top-down** relies on each child's base being the parent's head branch. If a Builder rebased or retargeted a child onto `main`, the chain detection simply won't link them. That is safe.
-- **Repos that disallow squash** fail on Merge with `gh`'s error (D1 accepted this trade-off).
+- **Repos that disallow squash** fail on Merge with GitHub's "merge method not allowed" error (D1 accepted this trade-off).
 - **Stack-merge jobs are in memory** (see Phase 4b). This is acceptable for a single-owner local server.
 - **Persona update.** The new Controller routing row only takes effect after the owner accepts the persona update in Settings and the Controller is replaced or re-seeded.
 - **Deferred (D3):** a cross-session Pull requests tab and Inbox "needs you" cards. Revisit after Phase 2, once rows carry status. "Update branch" for `behind` PRs and auto-merge are also out of scope.
