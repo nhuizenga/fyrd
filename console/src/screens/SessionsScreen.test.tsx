@@ -440,7 +440,7 @@ it("details come first, in order, with relative times", async () => {
   const pane = screen.getByRole("complementary", { name: "Session details" });
   const headings = [...pane.querySelectorAll("h4")].map((h) => h.textContent);
   expect(headings).toEqual(["Details", "Estimated cost", "Tags", "Pull requests"]);
-  expect([...pane.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Role", "Repository", "Started", "Last activity"]);
+  expect([...pane.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Role", "Repository", "Branch", "Started", "Last activity"]);
   expect(pane).toHaveTextContent("Started1 day ago");
   expect(pane).toHaveTextContent("Last activity5 minutes ago");
   expect(pane).toHaveTextContent("Repositoryacme/web");
@@ -479,7 +479,7 @@ const PR12 = "https://github.com/acme/widgets/pull/12";
 const withRepo = () =>
   hubState({
     sessions: [
-      session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12] }),
+      session({ id: "a", title: "alpha-1", repo: "acme/widgets", branch: "fyrd/alpha", pullRequests: [PR12] }),
       session({ id: "b", title: "beta-2" }),
     ],
   });
@@ -529,7 +529,9 @@ it("session details show each PR as a chip with an Open button", async () => {
   const details = screen.getByRole("complementary", { name: "Session details" });
   expect(within(details).getByText("#12")).toBeInTheDocument();
   expect(within(details).queryByRole("link", { name: "#12" })).not.toBeInTheDocument();
-  await userEvent.click(within(details).getByRole("button", { name: "Open #12" }));
+  const openBtn = within(details).getByRole("button", { name: "Open #12" });
+  expect(openBtn.textContent).toBe("");
+  await userEvent.click(openBtn);
   expect(open).toHaveBeenCalledWith(PR12, "_blank", "noopener,noreferrer");
   open.mockRestore();
 });
@@ -712,7 +714,10 @@ it("a draft PR gets a green check button that marks it ready, and no merge butto
   const { details, onChanged } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
   expect(within(details).getByText("Draft")).toBeInTheDocument();
   expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
-  await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+  const ready = within(details).getByRole("button", { name: "Mark #12 ready for review" });
+  expect(ready.textContent).toBe("");
+  expect(ready).toHaveClass("pr-ready");
+  await userEvent.click(ready);
   expect(api.markPrReady).toHaveBeenCalledWith("a", PR12);
   expect(api.pullRequests).toHaveBeenCalledTimes(2);
   expect(onChanged).toHaveBeenCalled();
@@ -722,7 +727,10 @@ it("a ready PR with passing checks gets a merge button that confirms first", asy
   vi.mocked(api.mergePr).mockResolvedValue(undefined);
   const { details } = await openAlphaWith(prStatus());
   expect(within(details).queryByRole("button", { name: "Mark #12 ready for review" })).not.toBeInTheDocument();
-  await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+  const merge = within(details).getByRole("button", { name: "Merge #12" });
+  expect(merge.textContent).toBe("");
+  expect(merge).toHaveClass("pr-merge");
+  await userEvent.click(merge);
   expect(api.mergePr).not.toHaveBeenCalled();
   expect(within(details).getByText("Merge #12 Fix it?")).toBeInTheDocument();
   await userEvent.click(within(details).getByRole("button", { name: "Merge pull request" }));
@@ -784,4 +792,14 @@ it("an empty progress frame clears the bubble, and it stays cleared after switch
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*beta-2/ }));
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ }));
   expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
+});
+
+it("shows the branch as a chip in the session list and in the details", async () => {
+  renderScreen(withRepo());
+  const row = screen.getByRole("button", { name: /^(?!Archive|Rename).*alpha-1/ });
+  expect(within(row).getByText("fyrd/alpha")).toBeInTheDocument();
+  await userEvent.click(row);
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  expect(within(details).getByText("Branch")).toBeInTheDocument();
+  expect(within(details).getByText("fyrd/alpha")).toBeInTheDocument();
 });
