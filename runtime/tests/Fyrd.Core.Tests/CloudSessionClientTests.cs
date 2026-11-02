@@ -141,6 +141,8 @@ public sealed class CloudSessionClientTests : IDisposable
         var ev = JsonDocument.Parse(r.Body!).RootElement.GetProperty("events")[0];
         Assert.Equal("user", ev.GetProperty("type").GetString());
         Assert.Equal("go on", ev.GetProperty("message").GetProperty("content").GetString());
+        // An empty session_id appears to read as a peer message to the worker; the UI sends the target's id.
+        Assert.Equal("session_01abc", ev.GetProperty("session_id").GetString());
     }
 
     [Theory]
@@ -189,6 +191,8 @@ public sealed class CloudSessionClientTests : IDisposable
         Assert.Equal("auto", data.GetProperty("request").GetProperty("mode").GetString());
         Assert.StartsWith("set-mode-", data.GetProperty("request_id").GetString());
         Assert.Equal("user", events[1].GetProperty("data").GetProperty("type").GetString());
+        // A new session has no id yet; creation deliberately sends an empty one.
+        Assert.Equal("", events[1].GetProperty("data").GetProperty("session_id").GetString());
     }
 
     [Fact]
