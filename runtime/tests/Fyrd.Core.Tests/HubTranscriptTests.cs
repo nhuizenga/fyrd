@@ -115,4 +115,43 @@ public class HubTranscriptTests
     [InlineData("""null""")]
     public void OtherOrMalformedPayloads_NoItemsNoThrow(string payload) =>
         Assert.Empty(HubTranscript.Map(Event(1, payload)));
+
+    private static IReadOnlyList<TranscriptItem> MapFixture(string name, ISet<string> ids) =>
+        FixtureEvents.Load(name).SelectMany((ev, i) => HubTranscript.Map(new StreamedEvent(100 + i, ev), ids)).ToList();
+
+    [Fact]
+    public void RealForkEvents_WorkerStartedThenResultFromTaskNotification_AndNothingElse()
+    {
+        // Captured from a cloud session: background_tasks_changed, task_started (local_agent), the "launched" tool_result,
+        // the fork's own assistant message (parent_tool_use_id set), task_updated, task_notification, background_tasks_changed.
+        var ids = new HashSet<string>();
+        var items = MapFixture("fork-worker-events.json", ids);
+        Assert.Equal(["worker", "worker-result"], items.Select(i => i.Kind));
+        Assert.Equal("Fork of this session", items[0].Text);
+        Assert.Equal("fork", items[0].Detail);
+        Assert.Equal("toolu_011Z6kMxGHdjM8Pymjn3LFcC", items[0].ToolUseId);
+        Assert.Equal(items[0].ToolUseId, items[1].ToolUseId);
+        Assert.Equal("completed", items[1].Status);
+        Assert.StartsWith("Task: acknowledge the fork", items[1].Text);
+    }
+
+    [Fact]
+    public void BashTaskNotification_IsNotAWorkerResult()
+    {
+        var items = HubTranscript.Map(Event(20, """
+            {"type":"system","subtype":"task_notification","status":"completed","summary":"ls","task_id":"b1","tool_use_id":"toolu_bash"}
+            """), new HashSet<string>());
+        Assert.Empty(items);
+        Assert.Empty(HubTranscript.Map(Event(21, """
+            {"type":"system","subtype":"task_started","task_type":"local_bash","description":"ls","task_id":"b1","tool_use_id":"toolu_bash"}
+            """), new HashSet<string>()));
+    }
+
+    [Fact]
+    public void Assistant_WithParentToolUse_IsAWorkersMessage_NotTheAgents()
+    {
+        Assert.Empty(HubTranscript.Map(Event(22, """
+            {"type":"assistant","parent_tool_use_id":"toolu_w1","agent_id":"a1","message":{"content":[{"type":"text","text":"worker chatter"}]}}
+            """)));
+    }
 }

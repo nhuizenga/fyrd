@@ -29,6 +29,8 @@ export interface HubSessionView {
   tags: string[];
   /** URLs of the pull requests the session owns (head is its branch). Only these accept PR actions. */
   pullRequests: string[];
+  /** The peasant has a background worker running (tag `fyrd-workers-running`): it can look idle yet still be working. */
+  workersRunning?: boolean;
   cost?: HubCostView | null;
 }
 
@@ -113,15 +115,24 @@ export interface TranscriptItem {
   key: string;
   seq: number;
   role: "user" | "agent";
-  kind: "text" | "question" | "answer" | "progress";
+  kind: "text" | "question" | "answer" | "progress" | "worker" | "worker-result";
   text: string;
   at: string;
   questions?: TranscriptQuestion[] | null;
   toolUseId?: string | null;
+  /** `worker` items: `text` is the worker's description, `detail` its subagent type. `worker-result` items: `text` is the worker's final reply (the `task_notification` summary), `status` how it ended, `toolUseId` links it to its `worker`. */
   /** Progress frames only: what the agent is doing now (a tool, "Thinking…"); `text` is the reply streamed so far. Both empty = nothing in progress. */
   status?: string | null;
   /** Progress frames only: the running tool's main argument, such as the Bash command. */
   detail?: string | null;
+  /** Progress frames only: forked workers still running, each with its latest tool. */
+  workers?: TranscriptWorker[] | null;
+}
+
+export interface TranscriptWorker {
+  id: string;
+  description: string;
+  line?: string | null;
 }
 
 export interface HubPersona {

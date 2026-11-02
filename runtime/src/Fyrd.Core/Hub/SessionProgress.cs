@@ -104,6 +104,7 @@ public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress
                     }
                     if (last is { } seen && e.Sequence <= seen) continue;
                     last = e.Sequence;
+                    progress.ApplySaved(e);
                     if (progress.Reset(e.Event.CreatedAt) is { } cleared) Publish(id, cleared, ct);
                 }
                 delay = ReopenDelay;

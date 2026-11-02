@@ -1,0 +1,127 @@
+[
+ {
+  "created_at": "2026-11-02T21:51:35.576104Z",
+  "session_id": "session-redacted",
+  "subtype": "background_tasks_changed",
+  "tasks": [
+   {
+    "description": "Fork of this session",
+    "run_id": "0mvzsnb61-b123c916",
+    "subagent_type": "fork",
+    "task_id": "a85794c7e4294762d",
+    "task_type": "local_agent"
+   }
+  ],
+  "type": "system",
+  "uuid": "aee599a3-2907-41a1-a81d-c2c67fb2b409"
+ },
+ {
+  "created_at": "2026-11-02T21:51:35.698581Z",
+  "description": "Fork of this session",
+  "is_backgrounded": true,
+  "prompt": "You are a fork of this session. Continue from the current conversation state and await further instructions from the user in the fork's context; for now, acknowledge the fork and summarize in two lines where things stand (branches pushed, spike findings, pending decision on task_started/task_notification handling).",
+  "run_id": "0mvzsnb61-b123c916",
+  "session_id": "session-redacted",
+  "spawn_depth": 1,
+  "subagent_type": "fork",
+  "subtype": "task_started",
+  "task_id": "a85794c7e4294762d",
+  "task_type": "local_agent",
+  "tool_use_id": "toolu_011Z6kMxGHdjM8Pymjn3LFcC",
+  "type": "system",
+  "uuid": "be65d657-79af-4f0f-8917-3a1d3dc5d9c1"
+ },
+ {
+  "created_at": "2026-11-02T21:51:35.698581Z",
+  "message": {
+   "content": [
+    {
+     "content": [
+      {
+       "text": "Async agent launched successfully. (This tool result is internal metadata \u2014 never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a85794c7e4294762d (internal ID - do not mention to user. Use SendMessage with to: 'a85794c7e4294762d', summary: '<5-10 word recap>' to continue this agent.)\nThe agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives \u2014 do not report, assume, or predict them; continue other work or respond to the user in the meantime.\nDo not duplicate this agent's work \u2014 avoid working with the same files or topics it is using.\noutput_file: /tmp/tasks/a85794c7e4294762d.output\nDo NOT Read or tail this file via the shell tool \u2014 it is the full subagent JSONL transcript and reading it will overflow your context. If the user asks for progress, say the agent is still running; you'll get a completion notification.",
+       "type": "text"
+      }
+     ],
+     "tool_use_id": "toolu_011Z6kMxGHdjM8Pymjn3LFcC",
+     "type": "tool_result"
+    }
+   ],
+   "role": "user"
+  },
+  "parent_tool_use_id": null,
+  "session_id": "session-redacted",
+  "timestamp": "2026-11-02T21:51:35.509Z",
+  "tool_use_result": {
+   "agentId": "a85794c7e4294762d",
+   "canContinueAgent": true,
+   "canReadOutputFile": true,
+   "description": "Fork of this session",
+   "isAsync": true,
+   "outputFile": "/tmp/tasks/a85794c7e4294762d.output",
+   "prompt": "You are a fork of this session. Continue from the current conversation state and await further instructions from the user in the fork's context; for now, acknowledge the fork and summarize in two lines where things stand (branches pushed, spike findings, pending decision on task_started/task_notification handling).",
+   "resolvedModel": "claude-sonnet-5-5",
+   "status": "async_launched"
+  },
+  "type": "user",
+  "uuid": "78c2ef13-ec7a-4d8d-85a8-6bca1866437a"
+ },
+ {
+  "agent_id": "a85794c7e4294762d",
+  "created_at": "2026-11-02T21:51:38.762945Z",
+  "message": {
+   "role": "assistant",
+   "content": [
+    {
+     "text": "Task: acknowledge the fork and give a two-line status.\n\nBoth branches are pushed. Phase 1 is `fyrd/peasant-workers-personas` (`2a91c6d`) and Phase 2 is `fyrd/peasant-workers-console` (`d247898`, stacked on Phase 1). Tests pass, no PR is open, and the live spike is still uncaptured.\n\nThe uploaded sample has no `Agent` call, but it confirms `system/task_started`, `system/task_notification` and `tool_progress` shapes. I'm still waiting on your decision: either handle `task_started`/`task_notification` for non-`local_bash` tasks now, or wait for an export from a session that actually forked a worker.",
+     "type": "text"
+    }
+   ]
+  },
+  "parent_tool_use_id": "toolu_011Z6kMxGHdjM8Pymjn3LFcC",
+  "session_id": "session-redacted",
+  "subagent_type": "fork",
+  "task_description": "Fork of this session",
+  "timestamp": "2026-11-02T21:51:38.675Z",
+  "type": "assistant",
+  "uuid": "6fadb6b3-0f9f-493c-84e0-ea91f70deef5"
+ },
+ {
+  "created_at": "2026-11-02T21:51:38.912897Z",
+  "patch": {
+   "end_time": 1793656298776,
+   "status": "completed"
+  },
+  "run_id": "0mvzsnb61-b123c916",
+  "session_id": "session-redacted",
+  "subtype": "task_updated",
+  "task_id": "a85794c7e4294762d",
+  "type": "system",
+  "uuid": "4d471fe2-2c70-4212-9de1-5fec8b99bd8b"
+ },
+ {
+  "created_at": "2026-11-02T21:51:38.912897Z",
+  "output_file": "/tmp/tasks/a85794c7e4294762d.output",
+  "run_id": "0mvzsnb61-b123c916",
+  "session_id": "session-redacted",
+  "status": "completed",
+  "subtype": "task_notification",
+  "summary": "Task: acknowledge the fork and give a two-line status.\n\nBoth branches are pushed. Phase 1 is `fyrd/peasant-workers-personas` (`2a91c6d`) and Phase 2 is `fyrd/peasant-workers-console` (`d247898`, stacked on Phase 1). Tests pass, no PR is open, and the live spike is still uncaptured.\n\nThe uploaded sample has no `Agent` call, but it confirms `system/task_started`, `system/task_notification` and `tool_progress` shapes. I'm still waiting on your decision: either handle `task_started`/`task_notification` for non-`local_bash` tasks now, or wait for an export from a session that actually forked a worker.",
+  "task_id": "a85794c7e4294762d",
+  "tool_use_id": "toolu_011Z6kMxGHdjM8Pymjn3LFcC",
+  "type": "system",
+  "usage": {
+   "duration_ms": 3293,
+   "tool_uses": 0,
+   "total_tokens": 183536
+  },
+  "uuid": "e9f76041-6821-4163-bafb-a44e829e9f99"
+ },
+ {
+  "created_at": "2026-11-02T21:51:38.912897Z",
+  "session_id": "session-redacted",
+  "subtype": "background_tasks_changed",
+  "tasks": [],
+  "type": "system",
+  "uuid": "abc6f03b-2f0b-4deb-861a-31c5c3ee85f3"
+ }
+]

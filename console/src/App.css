@@ -97,6 +97,10 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 
 /* Message bubbles: agent on the left (room on the right), owner on the right (room on the left). */
 .msg { position: relative; border-radius: 6px; padding: 3px 6px; box-sizing: border-box; overflow-wrap: anywhere; }
+.msg-worker, .msg-worker-result { border-left: 3px solid var(--a2-border-color-primary, #888); }
+.msg-progress-workers { margin: 0; padding-left: 18px; font-size: 0.9em; }
+.msg-worker-label { color: var(--a2-foreground-color-subdued); }
+.msg-worker-result summary { cursor: pointer; }
 .msg-progress { display: flex; flex-direction: column; gap: 6px; }
 .msg-progress-head { display: flex; align-items: center; gap: 8px; color: var(--a2-foreground-color-subdued); }
 .msg-agent { align-self: stretch; margin-right: 4%; background: var(--a2-background-color-secondary); }
