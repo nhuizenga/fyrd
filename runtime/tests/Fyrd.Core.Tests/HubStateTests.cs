@@ -112,4 +112,13 @@ public sealed class HubStateTests
         s.ResetPollRequest();
         Assert.False(s.PollRequested.IsCompleted);
     }
+
+    [Theory]
+    [InlineData("fyrd-workers-running", true)]
+    [InlineData("fyrd-hub", false)]
+    public void SessionView_WorkersRunning_ReadsTheTag(string tag, bool expected)
+    {
+        var view = new HubSessionView("s1", "builder-1", "builder", "idle", null, null, null, null, ["fyrd-hub", tag]);
+        Assert.Equal(expected, view.WorkersRunning);
+    }
 }

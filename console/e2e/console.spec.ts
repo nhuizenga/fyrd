@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { QUESTION, docsTranscript, longTranscript, mockApi } from "./mockApi";
+import { LONG_TITLE, QUESTION, SESSIONS, docsTranscript, item, longTranscript, mockApi, prStatus, session } from "./mockApi";
 
 const fontOf = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontFamily);
 const box = async (l: Locator) => (await l.boundingBox())!;
@@ -175,6 +175,50 @@ test.describe("Sessions", () => {
   });
 });
 
+test.describe("Workers", () => {
+  const WORKING = "session_b1";
+  test.beforeEach(async ({ page }) => {
+    const sessions = SESSIONS.map((s) => s.id === WORKING
+      ? session({ ...s, status: "idle", tags: [...s.tags, "fyrd-workers-running"], workersRunning: true }) : s);
+    await mockApi(page, {
+      sessions,
+      transcripts: {
+        [WORKING]: [
+          item({ kind: "worker", text: "build: initial task", detail: "fork", toolUseId: "toolu_w1" }),
+          item({ kind: "worker-result", text: "Status: done\nHand-off: pushed abc123", status: "completed", toolUseId: "toolu_w1" }),
+        ],
+      },
+      progress: {
+        [WORKING]: item({
+          key: "ephemeral", seq: 0, kind: "progress", status: "Waiting for workers",
+          workers: [{ id: "toolu_w2", description: "fix: validator round 1", line: "Running Bash · 42s" }],
+        }),
+      },
+    });
+  });
+
+  test("the list shows a workers-running chip and the header says Working (background)", async ({ page }) => {
+    await page.goto(`/#/sessions/${WORKING}`);
+    const list = page.getByRole("complementary", { name: "Session list" });
+    await expect(list.getByText("workers running")).toBeVisible();
+    await expect(page.getByText("Working (background)")).toBeVisible();
+  });
+
+  test("worker card, collapsed result and the running workers list render in the thread", async ({ page }) => {
+    await page.goto(`/#/sessions/${WORKING}`);
+    await expect(page.getByText("Worker started")).toBeVisible();
+    const result = page.locator("details.msg-worker-result");
+    await expect(result.locator("summary")).toHaveText("Worker result (completed)");
+    await expect(result).not.toHaveAttribute("open", "");
+    await expect(result.getByText("pushed abc123")).toBeHidden();
+    await result.locator("summary").click();
+    await expect(result.getByText(/pushed abc123/)).toBeVisible();
+    const running = page.getByRole("list", { name: "Running workers" });
+    await expect(running.getByText("fix: validator round 1")).toBeVisible();
+    await expect(running.getByText(/Running Bash · 42s/)).toBeVisible();
+  });
+});
+
 test.describe("Sessions, more", () => {
   test("copy appears on hover and copies the message", async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -299,5 +343,39 @@ test.describe("Stacked PRs", () => {
     const details = page.getByRole("complementary", { name: "Session details" });
     await expect(details.getByText("Waiting for checks on #12 (step 2 of 3)")).toBeVisible();
     await expect(details.getByRole("button", { name: "Cancel stack merge" })).toBeVisible();
+  });
+});
+
+test.describe("Pull request details", () => {
+  const prs = [
+    prStatus({ number: 20, title: LONG_TITLE, draft: true, canMerge: false, base: "fyrd/github-api", checks: "failing", checksPassed: 8, checksFailed: 1, checksPending: 2,
+      failingCheck: { name: "lint", url: "https://ci.example/lint" }, review: "commented", mergeable: "conflicting", mergeState: "behind" }),
+    prStatus({ number: 21, title: "Short title" }),
+  ];
+
+  test("a long title truncates inside the pane and the action buttons stay visible", async ({ page }) => {
+    await mockApi(page, { prs });
+    await page.goto("/#/sessions/session_b1");
+    const details = page.getByRole("complementary", { name: "Session details" });
+    const title = details.getByText(LONG_TITLE);
+    await expect(title).toBeVisible();
+    await expect(title).toHaveAttribute("title", LONG_TITLE);
+    const pane = await box(details);
+    const open = await box(details.getByRole("button", { name: "Open #20" }));
+    expect(open.x + open.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
+    expect(await details.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const t = await box(title);
+    expect(t.x + t.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
+    await expect(details.getByRole("button", { name: "Open #21" })).toBeVisible();
+  });
+
+  test("shows counts on a draft, the base, review, conflicts and behind badges, and no Merge on a conflict", async ({ page }) => {
+    await mockApi(page, { prs });
+    await page.goto("/#/sessions/session_b1");
+    const details = page.getByRole("complementary", { name: "Session details" });
+    await expect(details.getByText("✓ 8 ✗ 1 ◌ 2")).toBeVisible();
+    for (const t of ["Draft", "Conflicts", "Behind base", "Reviewed", "→ fyrd/github-api"]) await expect(details.getByText(t, { exact: true })).toBeVisible();
+    await expect(details.getByRole("button", { name: "Merge #20" })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: "Merge #21" })).toBeVisible();
   });
 });

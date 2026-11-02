@@ -16,8 +16,31 @@ export default function ThreadItem({ item, pending, onChanged }: {
           <span>{item.status || "Working…"}</span>
         </div>
         {item.detail && <pre className="msg-progress-detail">{item.detail}</pre>}
+        {item.workers && item.workers.length > 0 && (
+          <ul className="msg-progress-workers" aria-label="Running workers">
+            {item.workers.map((w) => (
+              <li key={w.id}><strong>{w.description}</strong>{w.line && <span> · {w.line}</span>}</li>
+            ))}
+          </ul>
+        )}
         {item.text && <Markdown text={item.text} />}
       </div>
+    );
+  }
+  if (item.kind === "worker") {
+    return (
+      <div className="msg msg-agent msg-worker">
+        <span className="msg-worker-label">Worker started</span> <strong>{item.text}</strong>
+        {item.detail && <span className="msg-worker-type"> · {item.detail}</span>}
+      </div>
+    );
+  }
+  if (item.kind === "worker-result") {
+    return (
+      <details className="msg msg-agent msg-worker-result">
+        <summary>Worker result{item.status ? ` (${item.status})` : ""}</summary>
+        <Markdown text={item.text} />
+      </details>
     );
   }
   if (item.kind === "question") {

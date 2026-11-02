@@ -21,6 +21,11 @@ public sealed record HubSessionView(
 
     /// <summary>The subset of <see cref="PullRequests"/> owned only through a stack.</summary>
     public IReadOnlyList<string> StackedPullRequests { get; init; } = [];
+    /// <summary>Tag a peasant puts on itself while a background worker runs (see the persona's Workers section).</summary>
+    public const string WorkersRunningTag = "fyrd-workers-running";
+
+    /// <summary>True while the peasant has a background worker running: it can look idle to the cloud API yet still be working.</summary>
+    public bool WorkersRunning => Tags.Contains(WorkersRunningTag);
 }
 
 /// <summary>

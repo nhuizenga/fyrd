@@ -12,12 +12,24 @@ export interface Chain {
 
 const open = (prs: PullRequestStatus[]) => prs.filter((p) => p.state === "open");
 
-/** PR B is stacked on A when B's base is A's head (both open, so a merged branch name cannot link anything). */
+const repoOf = (url: string) => url.slice(0, url.lastIndexOf("/pull/")).toLowerCase();
+
+/**
+ * PR `child` is stacked on `parent` when its base is the parent's head, in the same repo, neither head is in a fork, and the
+ * parent's head is not the default branch (PRs that merely target `main` are not stacked with each other).
+ */
+export const isStackedOn = (child: PullRequestStatus, parent: PullRequestStatus): boolean =>
+  child.url !== parent.url && !!child.base && child.base === parent.head
+  && !parent.crossRepository && !child.crossRepository
+  && (!parent.defaultBranch || parent.head !== parent.defaultBranch)
+  && repoOf(child.url) === repoOf(parent.url);
+
+/** The open PR below this one. Both must be open, so a merged branch name cannot link anything. */
 export const parentOf = (pr: PullRequestStatus, prs: PullRequestStatus[]): PullRequestStatus | undefined =>
-  pr.base ? open(prs).find((p) => p.url !== pr.url && p.head === pr.base) : undefined;
+  open(prs).find((p) => isStackedOn(pr, p));
 
 export const childrenOf = (pr: PullRequestStatus, prs: PullRequestStatus[]): PullRequestStatus[] =>
-  pr.head ? open(prs).filter((p) => p.url !== pr.url && p.base === pr.head).sort((a, b) => a.number - b.number) : [];
+  open(prs).filter((p) => isStackedOn(p, pr)).sort((a, b) => a.number - b.number);
 
 /**
  * The chain the PR belongs to, or null when it is not stacked with another PR. Walks up to the root, then down through

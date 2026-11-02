@@ -45,9 +45,14 @@ describe("chainOf", () => {
     expect(chainOf(lower[0], lower)!.fork).toBe(true);
     expect(chainOf(lower[3], lower)!.fork).toBe(true);
   });
-  it("does not loop on a cycle", () => {
+  it("does not loop on a cycle, and returns each PR once", () => {
     const cyc = [pr(1, "a", "b"), pr(2, "b", "a")];
-    expect(chainOf(cyc[0], cyc)).not.toBeUndefined();
+    const c = chainOf(cyc[0], cyc);
+    expect(c).not.toBeNull();
+    const urls = c!.prs.map((p) => p.url);
+    expect(new Set(urls).size).toBe(urls.length);
+    expect(urls.length).toBeLessThanOrEqual(2);
+    expect(aboveTopDown(cyc[0], cyc).map((p) => p.number)).toEqual([2]);
   });
 });
 
@@ -69,5 +74,43 @@ describe("merge order", () => {
   it("a fork names every child", () => {
     const f = [pr(1, "a", "main"), pr(2, "b", "a"), pr(3, "c", "a")];
     expect(mergeOrderWarning(f[0], f)).toMatch(/^#2, #3 are stacked on this PR\./);
+  });
+});
+
+describe("links stay within one repo and never go through forks or the default branch", () => {
+  const inRepo = (repo: string, n: number, head: string, base: string, o: Partial<PullRequestStatus> = {}): PullRequestStatus =>
+    ({ ...pr(n, head, base), url: `https://github.com/${repo}/pull/${n}`, ...o });
+
+  it("PRs in different repos are not stacked even when branch names match", () => {
+    const prs = [inRepo("acme/a", 1, "feat", "main"), inRepo("acme/b", 2, "other", "feat")];
+    expect(parentOf(prs[1], prs)).toBeUndefined();
+    expect(childrenOf(prs[0], prs)).toEqual([]);
+    expect(chainOf(prs[0], prs)).toBeNull();
+    expect(mergeOrderWarning(prs[0], prs)).toBeNull();
+  });
+
+  it("repo names compare case-insensitively", () => {
+    const prs = [inRepo("Acme/Widgets", 1, "feat", "main"), inRepo("acme/widgets", 2, "other", "feat")];
+    expect(childrenOf(prs[0], prs).map((p) => p.number)).toEqual([2]);
+  });
+
+  it("a fork PR whose head is the default branch does not make every PR on main stacked", () => {
+    const prs = [
+      inRepo("acme/a", 1, "main", "release", { crossRepository: true, defaultBranch: "main" }),
+      inRepo("acme/a", 2, "x", "main"), inRepo("acme/a", 3, "y", "main"),
+    ];
+    expect(childrenOf(prs[0], prs)).toEqual([]);
+    expect(chainOf(prs[1], prs)).toBeNull();
+    expect(mergeOrderWarning(prs[0], prs)).toBeNull();
+  });
+
+  it("a same-repo PR whose head is the default branch never links", () => {
+    const prs = [inRepo("acme/a", 1, "main", "dev", { defaultBranch: "main" }), inRepo("acme/a", 2, "x", "main")];
+    expect(childrenOf(prs[0], prs)).toEqual([]);
+  });
+
+  it("fork heads never link", () => {
+    const prs = [inRepo("acme/a", 1, "feat", "main"), inRepo("acme/a", 2, "other", "feat", { crossRepository: true })];
+    expect(childrenOf(prs[0], prs)).toEqual([]);
   });
 });

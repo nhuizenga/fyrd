@@ -55,6 +55,13 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
+    public void IdleRule_TreatsWorkersTagAsBusy_InEverySkill()
+    {
+        foreach (var n in Names)
+            Assert.Contains("fyrd-workers-running", Read(n), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TearDownIdle_AsksWhichWithMultiSelect()
     {
         Assert.Contains("`multiSelect: true` `AskUserQuestion`", Read("fyrd-peasant"), StringComparison.Ordinal);

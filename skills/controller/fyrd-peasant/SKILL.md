@@ -18,7 +18,7 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
 1. **Title.** `<role>-<suffix>`, lowercase with hyphens: the owner's suffix, else the input's file name without extension, else the lowest free number (`builder-1`).
 2. **Find existing sessions.** Call `mcp__claude-code-remote__list_sessions` with `mine: true`, `limit: 100`; repeat with `after_id` set to the last id until no more come back. Ignore archived sessions. Match titles by role prefix.
 3. **Plan a recycle or pick another suffix.** If a live session already has the title, call `mcp__claude-code-remote__get_session` with its `session_id`.
-   - `status_bucket` other than `working` or `blocked` (idle): mark it to recycle under the same title. Don't archive it yet.
+   - `status_bucket` other than `working` or `blocked` and its tags don't include `fyrd-workers-running` (idle): mark it to recycle under the same title. Don't archive it yet.
    - Busy: try the next suffix (`-2`, `-3`, …) with the same check.
    Archive-and-recreate is the only reset; slash commands like `/clear` can't be sent.
 4. **Repo.** Apply the Repo rule in the Controller prompt: infer the repo, else ask with `AskUserQuestion` (likely repos plus `No repo`). This includes `Wait for your task.` starts: "Start a new builder" asks which repo. Decide it before the session-cap check.
@@ -88,7 +88,7 @@ A message starting `Review request:` from a Validator names a PR it has marked r
 Request: "Tear down {name}".
 
 1. Find the session by title as in Start step 2. Only tear down titles of the form `<role>-…` for a role in your peasant personas; never archive yourself. If unsure it is a Fyrd session, confirm with `AskUserQuestion`.
-2. Call `mcp__claude-code-remote__get_session`. If it is busy (`status_bucket` `working` or `blocked`), ask with `AskUserQuestion` (`Tear down anyway`, `Cancel`) before going on.
+2. Call `mcp__claude-code-remote__get_session`. If it is busy (`status_bucket` `working` or `blocked`, or its tags include `fyrd-workers-running`), ask with `AskUserQuestion` (`Tear down anyway`, `Cancel`) before going on.
 3. For a Monitor, first find its trigger with `mcp__claude-code-remote__list_triggers` (name equals the Monitor's title, or use the trigger id it reported) and call `mcp__claude-code-remote__delete_trigger` with `trigger_id`. A PR Monitor may have none.
 4. Call `mcp__claude-code-remote__archive_session` with `session_id`. Never rely on a Monitor to stop itself.
 5. Say what was torn down.
