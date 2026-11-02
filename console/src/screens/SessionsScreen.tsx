@@ -104,6 +104,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
+  const nudgesInFlight = useRef(new Set<string>());
   const [prNotices, setPrNotices] = useState<Record<string, string | null>>({});
   const [confirmNudge, setConfirmNudge] = useState<{ url: string; nudge: Nudge } | null>(null);
   const [prErrors, setPrErrors] = useState<Record<string, string | null>>({});
@@ -291,6 +292,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   // A nudge is an ordinary owner message to the Controller or the owning Builder, so sessions read it as the owner's.
   const sendNudge = async (url: string, nudge: Nudge) => {
     if (!nudge.to) return;
+    // One send at a time per PR and kind: a rapid double click must not message the session twice.
+    const key = `${url}|${nudge.kind}`;
+    if (nudgesInFlight.current.has(key)) return;
+    nudgesInFlight.current.add(key);
     setConfirmNudge(null);
     setPrErrors((e) => ({ ...e, [url]: null }));
     setPrNotices((n) => ({ ...n, [url]: null }));
@@ -300,6 +305,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       await onChanged();
     } catch (e) {
       setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      nudgesInFlight.current.delete(key);
     }
   };
   const pickNudge = (url: string, nudge: Nudge) => (nudge.confirm ? setConfirmNudge({ url, nudge }) : void sendNudge(url, nudge));

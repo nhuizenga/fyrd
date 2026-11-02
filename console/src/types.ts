@@ -59,6 +59,8 @@ export interface PullRequestStatus {
   crossRepository?: boolean;
   /** The repo's default branch; a PR whose head is that branch never links into a stack. */
   defaultBranch?: string;
+  /** Every failing check (older servers send only `failingCheck`). */
+  failingChecks?: { name: string; url: string | null }[];
   review: "none" | "commented" | "approved" | "changes_requested";
   mergeable: "mergeable" | "conflicting" | "unknown";
   /** GitHub's `mergeStateStatus`, lower-cased. */
