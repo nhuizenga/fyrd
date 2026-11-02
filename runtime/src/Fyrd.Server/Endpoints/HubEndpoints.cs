@@ -12,6 +12,7 @@ internal static class HubEndpoints
 {
     private const int MaxText = 20_000;
     private const string ResumeText = "Continue where you left off.";
+    private const int MaxTitle = 200;
     private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
     private const string NotPending = "This question is no longer waiting for an answer.";
     private const string SessionBlocked = "This session reached its daily spend limit.";
@@ -24,6 +25,7 @@ internal static class HubEndpoints
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
     private sealed record BudgetBody(JsonElement? AmountUsd);
+    private sealed record RenameBody(string? Title);
     private sealed record PrBody(string? Url);
     private sealed record AnswerBody(string? Choice, string? Text);
 
@@ -31,7 +33,7 @@ internal static class HubEndpoints
     {
         var group = app.MapGroup("/api/hub");
 
-        group.MapGet("/state", (HubState state, ControllerManager controller) => ApiErrors.Run(() =>
+        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending) => ApiErrors.Run(() =>
         {
             // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
             // after the last poll, which no poll has had the chance to list yet.
@@ -48,6 +50,7 @@ internal static class HubEndpoints
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
+                pendingMemory = pending.Count,
                 controller = id is null ? null : new { sessionId = id, url = "https://claude.ai/code/" + id },
             });
         }));
@@ -111,6 +114,22 @@ internal static class HubEndpoints
             InHub(id, state, () => Cloud(async () =>
             {
                 await cloud.ArchiveAsync(id, ct);
+                state.RequestPoll();
+                return Results.NoContent();
+            })));
+
+        // The console's pencil button: renames the session on claude.ai; the next poll shows the new title.
+        group.MapPost("/sessions/{id}/rename", (string id, RenameBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+            InHub(id, state, () => Cloud(async () =>
+            {
+                var title = body?.Title?.Trim();
+                if (string.IsNullOrEmpty(title))
+                    return Results.Problem("Title is required.", statusCode: StatusCodes.Status400BadRequest);
+                if (title.Length > MaxTitle)
+                    return Results.Problem($"Title is at most {MaxTitle} characters.", statusCode: StatusCodes.Status400BadRequest);
+                if (state.Sessions.First(s => s.Id == id).Role == "controller")
+                    return Results.Problem("The Controller can't be renamed.", statusCode: StatusCodes.Status409Conflict);
+                await cloud.RenameAsync(id, title, ct);
                 state.RequestPoll();
                 return Results.NoContent();
             })));
@@ -258,6 +277,23 @@ internal static class HubEndpoints
             scopes.AddRange(all.Keys.Where(k => !known.Contains(k)).Order(StringComparer.Ordinal)
                 .Select(k => new { scope = k, label = k, entries = all[k] }));
             return Results.Ok(new { scopes });
+        }));
+
+        group.MapGet("/memory/pending", (PendingMemory pending) => ApiErrors.Run(() => Results.Ok(pending.List())));
+
+        group.MapPost("/memory/pending/{id}/approve", (string id, TextBody? body, PendingMemory pending, TimeProvider time) =>
+            ApiErrors.Run(() =>
+            {
+                // Send {} to approve as proposed, or { text } to approve an edited version (same checks as any memory edit).
+                if (body?.Text is not null && (string.IsNullOrWhiteSpace(body.Text) || body.Text.Length > PendingMemory.MaxTextLength))
+                    return Bad($"Text must be 1 to {PendingMemory.MaxTextLength} characters.");
+                return Results.Ok(pending.Approve(id, body?.Text?.Trim(), time.GetUtcNow()));
+            }));
+
+        group.MapPost("/memory/pending/{id}/reject", (string id, PendingMemory pending) => ApiErrors.Run(() =>
+        {
+            pending.Reject(id);
+            return Results.NoContent();
         }));
 
         group.MapPost("/memory/{scope}", (string scope, TextBody? body, HubMemory memory, HubPersonas personas, TimeProvider time) =>

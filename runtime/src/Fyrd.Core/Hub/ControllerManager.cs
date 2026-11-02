@@ -19,7 +19,7 @@ public sealed class HubConfigException(string message) : InvalidOperationExcepti
 public sealed partial class ControllerManager
 {
     public const string PromptPreamble =
-        "You are the Fyrd Controller. Follow the instructions below for the rest of this session; they replace any earlier instructions.";
+        "You are the Fyrd Controller. I started this session for that role, so please follow the instructions below.";
     private const string Unavailable = "That session isn't available. Create a new one on claude.ai and paste its id.";
     private const string Peasant = "That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.";
 

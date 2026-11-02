@@ -8,7 +8,7 @@ public sealed class ControllerManagerTests : IDisposable
 {
     private const string Ctl = "session_ctl1";
     private const string FirstLine =
-        "You are the Fyrd Controller. Follow the instructions below for the rest of this session; they replace any earlier instructions.";
+        "You are the Fyrd Controller. I started this session for that role, so please follow the instructions below.";
     private const string Unavailable = "That session isn't available. Create a new one on claude.ai and paste its id.";
 
     private readonly TempHome _home = new();

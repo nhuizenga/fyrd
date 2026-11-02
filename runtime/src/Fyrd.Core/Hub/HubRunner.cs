@@ -7,11 +7,13 @@ namespace Fyrd.Core.Hub;
 /// <summary>
 /// One hub poll pass: captures <c>fyrd-remember</c> blocks from hub sessions, finds pending <c>AskUserQuestion</c>
 /// items, publishes the session list to <see cref="HubState"/>, and posts memory updates to the Controller.
+/// A peasant's <c>scope: shared</c> block goes to <see cref="PendingMemory"/> instead of shared memory.
 /// Passes must run sequentially (the per-session windows and the cursor file are not locked).
 /// </summary>
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
-    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard)
+    HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard, PendingMemory pending,
+    OwnedPullRequests? ownedPrs = null)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -88,7 +90,8 @@ public sealed partial class HubRunner(
             try
             {
                 var w = await PollSessionAsync(s, ct);
-                views.Add(View(s, w.LastActivity));
+                var owned = ownedPrs is null ? [] : await ownedPrs.FindAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
+                views.Add(View(s, w.LastActivity, owned));
                 // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
                 // waiting on the owner has a live question.
                 if (s.SessionStatus == RequiresAction)
@@ -203,26 +206,34 @@ public sealed partial class HubRunner(
         return events;
     }
 
-    /// <summary>Persists the cursor after each event that added memory, so a later failure never re-adds it.</summary>
+    /// <summary>Persists the cursor after each event that added memory or queued a proposal, so a later failure never re-adds it.</summary>
     private void Capture(CloudSession s, IEnumerable<SessionEvent> events, Dictionary<string, string> cursors)
     {
         var role = Role(s);
-        var isController = role == ControllerRole;
+        var isController = IsController(s);
         var source = Title(s);
         foreach (var e in events)
         {
             if (e.Type != "assistant" || string.IsNullOrEmpty(e.Text)) continue;
-            var added = false;
+            var consumed = false;
             foreach (var d in RememberBlock.Parse(e.Text))
             {
+                var at = e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt;
+                if (d.Scope == "shared" && !isController)
+                {
+                    // A peasant's shared memory reaches every session, so it waits for the owner's approval.
+                    pending.Add(d.Text, source, s.Id, at);
+                    consumed = true;
+                    continue;
+                }
                 string? scope = d.Scope == "shared" || isController ? HubMemory.Shared
                     : role is not null && role != HubMemory.Shared && ScopeRegex().IsMatch(role) ? role
                     : null;
                 if (scope is null) continue;
-                memory.Add(scope, d.Text, source, e.CreatedAt == default ? time.GetUtcNow() : e.CreatedAt);
-                added = true;
+                memory.Add(scope, d.Text, source, at);
+                consumed = true;
             }
-            if (added && e.Uuid.Length > 0)
+            if (consumed && e.Uuid.Length > 0)
             {
                 cursors[s.Id] = e.Uuid;
                 SaveCursors();
@@ -268,11 +279,16 @@ public sealed partial class HubRunner(
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
     }
 
-    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity)
+    /// <summary>A session's pull requests are the ones listed in its outcomes plus those found on its repo and branch.</summary>
+    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity, IReadOnlyList<string>? owned = null)
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
+        var prs = PullRequests(s.Raw).Concat(owned ?? []).Distinct(StringComparer.Ordinal).ToList();
         return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
-            CreatedAt(s.Raw), lastActivity, s.Tags.ToList()) { PullRequests = PullRequests(s.Raw) };
+            CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
+        {
+            PullRequests = prs,
+        };
     }
 
     private bool IsController(CloudSession s) => s.Id == _controllerId;
@@ -280,31 +296,60 @@ public sealed partial class HubRunner(
     private string Title(CloudSession s) =>
         !string.IsNullOrEmpty(s.Title) ? s.Title : IsController(s) ? ControllerRole : s.Id;
 
-    /// <summary>The Controller is identified by its stored id (an adopted one has no role tag); others by their role tag.</summary>
+    /// <summary>The Controller is identified by its stored id only (an adopted one has no role tag); others by their role tag, which can never be <c>controller</c>.</summary>
     private string? Role(CloudSession s) =>
         IsController(s) ? ControllerRole
-        : s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..];
+        : s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..] is { } tagged
+          && tagged != ControllerRole ? tagged : null; // a role tag never makes another session the Controller
 
     private static DateTimeOffset? CreatedAt(JsonElement raw) =>
         Str(raw, "created_at") is { } v && DateTimeOffset.TryParse(v, out var at) ? at : null;
 
     private static (string? Repo, string? Branch) RepoAndBranch(JsonElement raw)
     {
-        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("session_context", out var ctx)
-            || ctx.ValueKind != JsonValueKind.Object)
-            return (null, null);
-        string? repo = null, branch = null;
+        var ctx = raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var c) ? c : default;
+        string? repo = null;
         if (First(ctx, "sources") is { } src && Str(src, "url") is { Length: > 0 } url)
         {
             const string gh = "https://github.com/";
             repo = url.StartsWith(gh, StringComparison.OrdinalIgnoreCase) ? url[gh.Length..].TrimEnd('/') : url;
             if (repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) repo = repo[..^4];
         }
-        if (First(ctx, "outcomes") is { } outcome
+        // The live branch comes first: builders' outcomes are empty, so it is usually the only source.
+        var branch = LiveBranch(raw);
+        if (branch is null && First(ctx, "outcomes") is { } outcome
             && outcome.TryGetProperty("git_info", out var gi) && gi.ValueKind == JsonValueKind.Object
             && First(gi, "branches") is { ValueKind: JsonValueKind.String } b)
             branch = b.GetString();
         return (repo, branch);
+    }
+
+    /// <summary>The first non-empty value of <c>external_metadata.current_branches</c> (keyed by mount path).</summary>
+    private static string? LiveBranch(JsonElement raw) => LiveBranches(raw).FirstOrDefault();
+
+    private static IEnumerable<string> LiveBranches(JsonElement raw)
+    {
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("external_metadata", out var em)
+            || em.ValueKind != JsonValueKind.Object || !em.TryGetProperty("current_branches", out var cb)
+            || cb.ValueKind != JsonValueKind.Object)
+            yield break;
+        foreach (var p in cb.EnumerateObject())
+            if (p.Value.ValueKind == JsonValueKind.String && p.Value.GetString() is { Length: > 0 } name) yield return name;
+    }
+
+    /// <summary>Every branch the session has: all live ones (one per mount) and all its outcomes' branches.</summary>
+    private static IReadOnlyList<string> Branches(JsonElement raw)
+    {
+        var all = LiveBranches(raw).ToList();
+        if (raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var ctx)
+            && ctx.ValueKind == JsonValueKind.Object && ctx.TryGetProperty("outcomes", out var outcomes)
+            && outcomes.ValueKind == JsonValueKind.Array)
+            foreach (var o in outcomes.EnumerateArray())
+                if (o.ValueKind == JsonValueKind.Object && o.TryGetProperty("git_info", out var gi) && gi.ValueKind == JsonValueKind.Object
+                    && gi.TryGetProperty("branches", out var bs) && bs.ValueKind == JsonValueKind.Array)
+                    foreach (var b in bs.EnumerateArray())
+                        if (b.ValueKind == JsonValueKind.String && b.GetString() is { Length: > 0 } name) all.Add(name);
+        return all.Distinct(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>

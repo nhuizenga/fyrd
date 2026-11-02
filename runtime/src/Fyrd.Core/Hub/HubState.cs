@@ -13,7 +13,7 @@ public sealed record HubSessionView(
     DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags,
     HubCostView? Cost = null)
 {
-    /// <summary>URLs of the pull requests the session opened.</summary>
+    /// <summary>URLs of the pull requests the session owns (head is its branch). Only these accept PR actions.</summary>
     public IReadOnlyList<string> PullRequests { get; init; } = [];
 }
 
