@@ -113,9 +113,8 @@ public static class PullRequestStacks
         var open = statuses.Where(p => p.State == "open").ToList();
         var start = open.FirstOrDefault(p => p.Url == url);
         if (start is null) return null;
-        PullRequestStatus? Parent(PullRequestStatus p) => p.Base == "" ? null : open.FirstOrDefault(o => o.Url != p.Url && o.Head == p.Base);
-        List<PullRequestStatus> Kids(PullRequestStatus p) =>
-            p.Head == "" ? [] : open.Where(o => o.Url != p.Url && o.Base == p.Head).OrderBy(o => o.Number).ToList();
+        PullRequestStatus? Parent(PullRequestStatus p) => open.FirstOrDefault(o => Stacked(o, p));
+        List<PullRequestStatus> Kids(PullRequestStatus p) => open.Where(o => Stacked(p, o)).OrderBy(o => o.Number).ToList();
 
         var root = start;
         var seen = new HashSet<string>(StringComparer.Ordinal) { start.Url };

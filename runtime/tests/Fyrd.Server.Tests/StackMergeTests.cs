@@ -224,8 +224,8 @@ public sealed class StackMergeTests
     {
         var stack = Stack();
         foreach (var p in stack) _gh.Statuses[p.Url] = p;
-        var job = _jobs.Start(Repo, stack, out _)!;
         _gh.Fail = new GitHubException("GitHub refused the merge: Merge method not allowed");
+        var job = _jobs.Start(Repo, stack, out _)!;
         var after = await Finish(job);
 
         Assert.Equal(StackMergeStatus.Failed, after.Status);
