@@ -51,6 +51,7 @@ internal static partial class HubEndpoints
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
+                pullRequests = state.PullRequests,
                 gitHub = new { configured = gitHub.Configured, login = gitHub.Login, error = gitHub.Error },
                 pendingMemory = pending.Count,
                 // Each session's current live-only progress line (a tool in use, the reply so far), for sessions nobody has open.
@@ -181,16 +182,16 @@ internal static partial class HubEndpoints
                 }));
             }));
 
-        group.MapPost("/sessions/{id}/pull-requests/ready", (string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct) =>
-            PrAction(id, body, state, github, ct, async (url, current) =>
+        group.MapPost("/sessions/{id}/pull-requests/ready", (string id, PrBody? body, HubState state, IGitHub github, OwnedPullRequests owned, CancellationToken ct) =>
+            PrAction(id, body, state, github, owned, ct, async (url, current) =>
             {
                 if (!current.Draft || current.State != "open") return Results.Problem("That pull request is not a draft.", statusCode: StatusCodes.Status409Conflict);
                 await github.MarkReadyAsync(url, ct);
                 return Results.NoContent();
             }));
 
-        group.MapPost("/sessions/{id}/pull-requests/merge", (string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct) =>
-            PrAction(id, body, state, github, ct, async (url, current) =>
+        group.MapPost("/sessions/{id}/pull-requests/merge", (string id, PrBody? body, HubState state, IGitHub github, OwnedPullRequests owned, CancellationToken ct) =>
+            PrAction(id, body, state, github, owned, ct, async (url, current) =>
             {
                 // Re-checked here, not trusted from the console: the PR may have changed since it was listed.
                 if (!current.CanMerge) return Results.Problem("That pull request is not ready to merge (draft, checks not passing, merge conflicts, or not open).", statusCode: StatusCodes.Status409Conflict);
@@ -550,7 +551,7 @@ internal static partial class HubEndpoints
     }
 
     /// <summary>Runs a PR action on one of this session's own pull requests, with its freshly read status.</summary>
-    private static Task<IResult> PrAction(string id, PrBody? body, HubState state, IGitHub github, CancellationToken ct,
+    private static Task<IResult> PrAction(string id, PrBody? body, HubState state, IGitHub github, OwnedPullRequests owned, CancellationToken ct,
         Func<string, PullRequestStatus, Task<IResult>> action) =>
         InHub(id, state, async () =>
         {
@@ -560,7 +561,15 @@ internal static partial class HubEndpoints
                 return Bad("That is not one of this session's pull requests.");
             try
             {
-                return await action(url!, await github.GetAsync(url!, ct));
+                var result = await action(url!, await github.GetAsync(url!, ct));
+                // The next poll lists the repo again, so the new state shows without waiting for the cache.
+                if (result is IStatusCodeHttpResult { StatusCode: 204 })
+                {
+                    var (owner, repo, _) = PullRequestUrl.Parse(url!);
+                    owned.Invalidate($"{owner}/{repo}");
+                    state.RequestPoll();
+                }
+                return result;
             }
             catch (GitHubException e)
             {

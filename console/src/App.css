@@ -125,3 +125,11 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .pr-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .pr-line .pr-actions { flex: none; margin-left: auto; }
 .pr-badges { flex-wrap: wrap; }
+.pr-row-chip { display: inline-flex; align-items: center; gap: 3px; }
+.pr-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.pr-dot-failing { background: #d32f2f; }
+.pr-dot-pending { background: #f5a623; }
+.pr-dot-passing { background: #2e9e4f; }
+.pr-conflict { font-size: 12px; line-height: 1; color: #d32f2f; }
+.pr-also-on { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pr-also-on-link { background: none; border: 0; padding: 0; cursor: pointer; font-size: 12px; color: var(--a2-foreground-color-link, #0b5fff); text-decoration: underline; }

@@ -68,8 +68,21 @@ public sealed class GitHubToken(string? value)
     public override string ToString() => Present ? "GitHubToken(set)" : "GitHubToken(not set)";
 }
 
-/// <summary>A pull request and the branch it merges from.</summary>
-public sealed record PullRequestHead(string Url, string Branch);
+/// <summary>
+/// A pull request from a repo listing: the branch it merges from, plus what stacking needs (its base, state and whether the
+/// head is in a fork) and its status. Open PRs carry the full rollup; the rest only title, state and draft.
+/// </summary>
+public sealed record PullRequestHead(string Url, string Branch)
+{
+    public string Base { get; init; } = "";
+    /// <summary><c>open</c>, <c>merged</c> or <c>closed</c>; <c>unknown</c> when the listing did not say.</summary>
+    public string State { get; init; } = "unknown";
+    public bool CrossRepository { get; init; }
+    public PullRequestStatus? Status { get; init; }
+}
+
+/// <summary>A repo's recent pull requests (any state) and its default branch, which stacks never link through.</summary>
+public sealed record PullRequestListing(string? DefaultBranch, IReadOnlyList<PullRequestHead> Prs);
 
 /// <summary>What Fyrd does to a session's pull requests. Never sees a URL that failed <see cref="PullRequestUrl.IsValid"/>.</summary>
 public interface IGitHub
@@ -81,7 +94,7 @@ public interface IGitHub
     Task<string?> LoginAsync(CancellationToken ct = default);
 
     /// <summary>The repo's most recent pull requests (any state). Never sees a repo that failed <see cref="GitHubRepo.IsValid"/>.</summary>
-    Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default);
+    Task<PullRequestListing> ListAsync(string repo, CancellationToken ct = default);
     Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default);
     Task MarkReadyAsync(string url, CancellationToken ct = default);
     Task MergeAsync(string url, CancellationToken ct = default);

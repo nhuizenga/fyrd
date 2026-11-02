@@ -14,11 +14,13 @@ public sealed class FakeGitHub : IGitHub
         Fail is not null ? throw Fail : Task.FromResult<string?>(Configured ? "octo" : null);
 
     public List<PullRequestHead> Heads { get; } = [];
+    public int Listings { get; private set; }
 
-    public Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default)
+    public Task<PullRequestListing> ListAsync(string repo, CancellationToken ct = default)
     {
         if (Fail is not null) throw Fail;
-        return Task.FromResult<IReadOnlyList<PullRequestHead>>(Heads.ToList());
+        Listings++;
+        return Task.FromResult(new PullRequestListing("main", Heads.ToList()));
     }
 
     public Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default)

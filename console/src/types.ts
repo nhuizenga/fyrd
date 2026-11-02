@@ -29,6 +29,8 @@ export interface HubSessionView {
   tags: string[];
   /** URLs of the pull requests the session owns (head is its branch). Only these accept PR actions. */
   pullRequests: string[];
+  /** The subset of `pullRequests` owned only through a stack. */
+  stackedPullRequests?: string[];
   cost?: HubCostView | null;
 }
 
@@ -110,6 +112,8 @@ export interface HubState {
   controller: ControllerInfo | null;
   budget?: HubBudgetView | null;
   gitHub?: GitHubStatus;
+  /** Each owned PR's last listed status, by URL (held once however many sessions own it). */
+  pullRequests?: Record<string, PullRequestStatus>;
   /** Peasant shared-memory proposals waiting for the owner. */
   pendingMemory?: number;
   /** Each session's current live-only progress line, kept by the server (so sessions nobody has open still have one). */

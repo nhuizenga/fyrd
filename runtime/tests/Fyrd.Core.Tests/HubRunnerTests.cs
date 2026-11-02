@@ -652,6 +652,50 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Equal(["https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
     }
 
+    private static PullRequestHead OpenHead(int n, string head, string @base, string checks = "passing") =>
+        new($"https://github.com/acme/widgets/pull/{n}", head)
+        {
+            Base = @base, State = "open",
+            Status = new PullRequestStatus($"https://github.com/acme/widgets/pull/{n}", n, $"PR {n}", "open", false, checks),
+        };
+
+    [Fact]
+    public async Task Poll_PullRequestStatuses_AreInHubState_OncePerPr_EvenWhenSeveralSessionsOwnIt()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main", "failing")];
+        _cloud.SetByTag("fyrd-hub",
+            Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw),
+            Hub("s2", "validator-pr-9", "idle", role: "validator", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var map = _state.PullRequests;
+        var (url, status) = Assert.Single(map);
+        Assert.Equal("https://github.com/acme/widgets/pull/9", url);
+        Assert.Equal("failing", status.Checks);
+        Assert.All(_state.Sessions, s => Assert.Equal([url], s.PullRequests));
+    }
+
+    [Fact]
+    public async Task Poll_StackedPrsAreOwned_AndMarkedStacked()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            OpenHead(8, "fyrd/base", "main"), OpenHead(9, "fyrd/shared-memory", "fyrd/base"), OpenHead(10, "fyrd/top", "fyrd/shared-memory"),
+            OpenHead(20, "fyrd/unrelated", "main"),
+        ];
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9", "https://github.com/acme/widgets/pull/10"], v.PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/10"], v.StackedPullRequests);
+        Assert.Equal(3, _state.PullRequests.Count);
+    }
+
     [Fact]
     public async Task Poll_SessionView_APrMapsToEverySessionOnItsBranch()
     {

@@ -10,11 +10,13 @@ public sealed class StubGitHub : IGitHub
     public bool Configured { get; set; } = true;
     public Task<string?> LoginAsync(CancellationToken ct = default) => Task.FromResult<string?>(Configured ? "me" : null);
 
-    public Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default)
+    public string DefaultBranch { get; set; } = "main";
+
+    public Task<PullRequestListing> ListAsync(string repo, CancellationToken ct = default)
     {
         Listed.Add(repo);
         if (Fail is not null) throw Fail;
-        return Task.FromResult<IReadOnlyList<PullRequestHead>>(ByRepo.TryGetValue(repo, out var l) ? l : []);
+        return Task.FromResult(new PullRequestListing(DefaultBranch, ByRepo.TryGetValue(repo, out var l) ? l : []));
     }
 
     public Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default) => throw new NotSupportedException();
@@ -130,5 +132,69 @@ public sealed class OwnedPullRequestsTests
         _gh.Fail = null;
         await owned.FindAsync(Repo, ["fyrd/a"]);
         Assert.Equal(3, _gh.Listed.Count);
+    }
+
+    [Fact]
+    public void Ttl_IsSixtySeconds() => Assert.Equal(TimeSpan.FromSeconds(60), OwnedPullRequests.Ttl);
+
+    private static PullRequestHead Open(int n, string head, string @base, string checks = "passing") =>
+        new(Pr(n), head)
+        {
+            Base = @base, State = "open",
+            Status = new PullRequestStatus(Pr(n), n, $"PR {n}", "open", false, checks) { Base = @base, Head = head },
+        };
+
+    [Fact]
+    public async Task Status_ReadsTheCachedSummaryOfAListedPr()
+    {
+        _gh.ByRepo[Repo] = [Open(5, "fyrd/a", "main", "failing")];
+        var owned = new OwnedPullRequests(_gh, _time);
+
+        Assert.Null(owned.Status(Pr(5)));
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+
+        Assert.Equal("failing", owned.Status(Pr(5))!.Checks);
+        Assert.Null(owned.Status(Pr(6)));
+    }
+
+    [Fact]
+    public async Task Invalidate_MakesTheNextFindListAgain_BeforeTheTtl()
+    {
+        _gh.ByRepo[Repo] = [Open(5, "fyrd/a", "main")];
+        var owned = new OwnedPullRequests(_gh, _time);
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        Assert.Single(_gh.Listed);
+
+        owned.Invalidate(Repo);
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+
+        Assert.Equal(2, _gh.Listed.Count);
+    }
+
+    [Fact]
+    public async Task Invalidate_ThenAFailedListing_KeepsTheLastGoodStatuses()
+    {
+        _gh.ByRepo[Repo] = [Open(5, "fyrd/a", "main", "passing")];
+        var owned = new OwnedPullRequests(_gh, _time);
+        await owned.FindAsync(Repo, ["fyrd/a"]);
+        owned.Invalidate(Repo);
+        _gh.Fail = new GitHubException("GitHub answered 502");
+
+        Assert.Equal([Pr(5)], await owned.FindAsync(Repo, ["fyrd/a"]));
+        Assert.Equal("passing", owned.Status(Pr(5))!.Checks);
+    }
+
+    [Fact]
+    public async Task FindOwned_AddsTheStackedPrs_AndMarksThemStacked()
+    {
+        _gh.ByRepo[Repo] = [Open(11, "fyrd/a", "main"), Open(12, "fyrd/b", "fyrd/a"), Open(13, "fyrd/c", "fyrd/b")];
+        var owned = new OwnedPullRequests(_gh, _time);
+
+        var set = await owned.FindOwnedAsync(Repo, ["fyrd/b"]);
+
+        Assert.Equal([Pr(11), Pr(12), Pr(13)], set.Urls);
+        Assert.Equal([Pr(11), Pr(13)], set.Stacked);
+        Assert.Equal([Pr(11), Pr(12), Pr(13)], await owned.FindAsync(Repo, ["fyrd/b"]));
     }
 }
