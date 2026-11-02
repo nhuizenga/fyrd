@@ -52,4 +52,40 @@ public static class PullRequestStacks
     }
 
     public static int Number(string url) => int.TryParse(url[(url.LastIndexOf('/') + 1)..], out var n) ? n : 0;
+
+    /// <summary>
+    /// The open PRs stacked above <paramref name="current"/> among <paramref name="open"/> (its children, their children, ...).
+    /// <c>Children</c> are the direct ones; <c>TopDown</c> lists every descendant from the top of the stack down, so merging in
+    /// that order never leaves a PR targeting a merged branch.
+    /// </summary>
+    public static (IReadOnlyList<PullRequestStatus> Children, IReadOnlyList<PullRequestStatus> TopDown) Above(
+        IEnumerable<PullRequestStatus> open, PullRequestStatus current)
+    {
+        var candidates = open.Where(p => p.State == "open" && p.Url != current.Url).ToList();
+        var children = candidates.Where(p => p.Base != "" && p.Base == current.Head).OrderBy(p => p.Number).ToList();
+        var levels = new List<List<PullRequestStatus>>();
+        var seen = new HashSet<string>(StringComparer.Ordinal) { current.Url };
+        var frontier = children;
+        while (frontier.Count > 0)
+        {
+            var level = frontier.Where(p => seen.Add(p.Url)).ToList();
+            if (level.Count == 0) break;
+            levels.Add(level);
+            frontier = candidates.Where(c => c.Base != "" && level.Any(l => l.Head == c.Base)).ToList();
+        }
+        levels.Reverse();
+        return (children, levels.SelectMany(l => l.OrderBy(p => p.Number)).ToList());
+    }
+
+    /// <summary>The merge-order warning for a PR that has open PRs stacked on it, or null when it has none.</summary>
+    public static string? MergeOrderWarning(IEnumerable<PullRequestStatus> open, PullRequestStatus current)
+    {
+        var (children, topDown) = Above(open, current);
+        if (children.Count == 0) return null;
+        static string N(PullRequestStatus p) => $"#{p.Number}";
+        var kids = children.Count == 1 ? $"{N(children[0])} is" : $"{string.Join(", ", children.Select(N))} are";
+        var order = string.Join(", then ", topDown.Select(N)) + ", then this";
+        return $"{kids} stacked on this PR. Merge from the top of the stack down: merge {order}. " +
+               $"Merging this first leaves {string.Join(", ", children.Select(N))} targeting a merged branch.";
+    }
 }

@@ -120,4 +120,50 @@ public class PullRequestStacksTests
         Assert.Equal([Url(1), Url(2)], set.Urls);
         Assert.Empty(set.Stacked);
     }
+
+    private static PullRequestStatus St(int n, string head, string @base, string state = "open") =>
+        new(Url(n), n, $"PR {n}", state, false, "passing") { Head = head, Base = @base };
+
+    [Fact]
+    public void Warning_NamesTheChildAndTheTopDownOrder()
+    {
+        var prs = new[] { St(11, "a", "main"), St(12, "b", "a"), St(13, "c", "b") };
+        Assert.Equal(
+            "#12 is stacked on this PR. Merge from the top of the stack down: merge #13, then #12, then this. Merging this first leaves #12 targeting a merged branch.",
+            PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+    }
+
+    [Fact]
+    public void Warning_IsNullForThePrAtTheTop_AndForAPrWithNoStack()
+    {
+        var prs = new[] { St(11, "a", "main"), St(12, "b", "a"), St(20, "x", "main") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[1]));
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[2]));
+    }
+
+    [Fact]
+    public void Warning_IgnoresMergedClosedChildren()
+    {
+        var prs = new[] { St(11, "a", "main"), St(12, "b", "a", "merged"), St(13, "c", "a", "closed") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+    }
+
+    [Fact]
+    public void Above_ForkListsEveryChild_AndEveryDescendantTopDown()
+    {
+        var prs = new[] { St(1, "a", "main"), St(2, "b", "a"), St(3, "c", "a"), St(4, "d", "b") };
+        var (children, topDown) = PullRequestStacks.Above(prs, prs[0]);
+        Assert.Equal([2, 3], children.Select(c => c.Number));
+        Assert.Equal([4, 2, 3], topDown.Select(c => c.Number));
+        Assert.Equal("#2, #3 are stacked on this PR. Merge from the top of the stack down: merge #4, then #2, then #3, then this. Merging this first leaves #2, #3 targeting a merged branch.",
+            PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+    }
+
+    [Fact]
+    public void Above_NeverLoopsOnACycle()
+    {
+        var prs = new[] { St(1, "a", "b"), St(2, "b", "a") };
+        var (_, topDown) = PullRequestStacks.Above(prs, prs[0]);
+        Assert.Equal([2], topDown.Select(c => c.Number));
+    }
 }

@@ -757,7 +757,7 @@ it("a ready PR with passing checks gets a merge button that confirms first", asy
   expect(api.mergePr).not.toHaveBeenCalled();
   expect(within(details).getByText("Merge #12 Fix it?")).toBeInTheDocument();
   await userEvent.click(within(details).getByRole("button", { name: "Merge pull request" }));
-  expect(api.mergePr).toHaveBeenCalledWith("a", PR12);
+  expect(api.mergePr).toHaveBeenCalledWith("a", PR12, false);
 });
 
 it("merging can be cancelled", async () => {
@@ -1157,5 +1157,70 @@ describe("PR nudges", () => {
     vi.mocked(api.sendMessage).mockRejectedValue(new Error("Controller is busy"));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Request validation" }));
     expect(await within(details).findByText("Controller is busy")).toBeInTheDocument();
+  });
+});
+
+describe("stacked PRs", () => {
+  const PR11 = "https://github.com/acme/widgets/pull/11";
+  const PR13 = "https://github.com/acme/widgets/pull/13";
+  const stack = [
+    prStatus({ url: PR11, number: 11, title: "Base", head: "a", base: "main" }),
+    prStatus({ url: PR12, number: 12, title: "Middle", head: "b", base: "a" }),
+    prStatus({ url: PR13, number: 13, title: "Top", head: "c", base: "b" }),
+  ];
+  const openStack = async () => {
+    vi.mocked(api.pullRequests).mockResolvedValue(stack);
+    const st = hubState({
+      sessions: [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR11, PR12, PR13], stackedPullRequests: [PR11, PR13] })],
+      pullRequests: Object.fromEntries(stack.map((p) => [p.url, p])),
+    });
+    renderScreen(st);
+    await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+    const details = screen.getByRole("complementary", { name: "Session details" });
+    await within(details).findByRole("button", { name: "Open #11" });
+    return details;
+  };
+
+  it("shows the chain line and the stacked-on links", async () => {
+    const details = await openStack();
+    expect(within(details).getByText("main ← #11 ← #12 ← #13 (top)")).toBeInTheDocument();
+    expect(within(details).getByRole("button", { name: "Stacked on #11" })).toBeInTheDocument();
+    expect(within(details).getByRole("button", { name: "#13 stacked on this" })).toBeInTheDocument();
+    expect(within(details).getByRole("button", { name: "#12 stacked on this" })).toBeInTheDocument();
+  });
+
+  it("a row in a stack gets the stack glyph; an unstacked PR does not", () => {
+    const lone = prStatus({ url: "https://github.com/acme/widgets/pull/50", number: 50, head: "z", base: "main" });
+    const st = hubState({
+      sessions: [
+        session({ id: "a", title: "alpha-1", pullRequests: [PR11, PR12, PR13] }),
+        session({ id: "b", title: "beta-2", pullRequests: [lone.url] }),
+      ],
+      pullRequests: { ...Object.fromEntries(stack.map((p) => [p.url, p])), [lone.url]: lone },
+    });
+    renderScreen(st);
+    const rowFor = (n: string) => screen.getByRole("button", { name: new RegExp(`^(?!Archive|Rename|Export).*${n}`) });
+    expect(within(rowFor("alpha-1")).getByRole("img", { name: "Stacked PR" })).toBeInTheDocument();
+    expect(within(rowFor("beta-2")).queryByRole("img", { name: "Stacked PR" })).not.toBeInTheDocument();
+  });
+
+  it("merging a PR with one stacked on it warns, and only 'Merge this only anyway' sends force", async () => {
+    vi.mocked(api.mergePr).mockResolvedValue(undefined);
+    const details = await openStack();
+    await userEvent.click(within(details).getByRole("button", { name: "Merge #11" }));
+    expect(within(details).getByRole("alert", { name: "" })).toHaveTextContent(
+      "#12 is stacked on this PR. Merge from the top of the stack down: merge #13, then #12, then this. Merging this first leaves #12 targeting a merged branch.",
+    );
+    expect(within(details).queryByRole("button", { name: "Merge pull request" })).not.toBeInTheDocument();
+    await userEvent.click(within(details).getByRole("button", { name: "Merge this only anyway" }));
+    expect(api.mergePr).toHaveBeenCalledWith("a", PR11, true);
+  });
+
+  it("the top of a stack merges with the plain confirm and no force", async () => {
+    vi.mocked(api.mergePr).mockResolvedValue(undefined);
+    const details = await openStack();
+    await userEvent.click(within(details).getByRole("button", { name: "Merge #13" }));
+    await userEvent.click(within(details).getByRole("button", { name: "Merge pull request" }));
+    expect(api.mergePr).toHaveBeenCalledWith("a", PR13, false);
   });
 });

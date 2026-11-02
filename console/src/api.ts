@@ -47,8 +47,9 @@ export const pullRequests = (sessionId: string) =>
   call<PullRequestStatus[]>("GET", `/api/hub/sessions/${enc(sessionId)}/pull-requests`);
 export const markPrReady = (sessionId: string, url: string) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/ready`, { url });
-export const mergePr = (sessionId: string, url: string) =>
-  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/merge`, { url });
+/** `force` skips the stack merge-order guard ("Merge this only anyway"); the server refuses a PR with PRs stacked on it without it. */
+export const mergePr = (sessionId: string, url: string, force = false) =>
+  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/merge`, force ? { url, force: true } : { url });
 export const resume = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/resume`);
 /** Raise one session's limit for today; the server accepts 25 or 100 once the session is at 90% of its limit. */
 export const addBudget = (sessionId: string, amountUsd: 25 | 100) =>
