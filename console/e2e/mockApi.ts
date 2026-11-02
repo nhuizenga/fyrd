@@ -5,7 +5,7 @@ const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString(
 
 export const session = (o: Partial<HubSessionView>): HubSessionView => ({
   id: "session_x", title: "builder-x", role: "builder", status: "idle", repo: null, branch: null,
-  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), tags: ["fyrd-hub", "fyrd-role-builder"], ...o,
+  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), tags: ["fyrd-hub", "fyrd-role-builder"], pullRequests: [], ...o,
 });
 
 export const SESSIONS: HubSessionView[] = [
