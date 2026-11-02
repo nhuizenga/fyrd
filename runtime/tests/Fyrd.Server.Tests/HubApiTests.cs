@@ -626,6 +626,119 @@ public class HubApiTests
         Assert.Empty(f.GitHub.Merged);
     }
 
+    private const string Pr11 = "https://github.com/acme/widgets/pull/11";
+    private const string Pr13 = "https://github.com/acme/widgets/pull/13";
+
+    private static PullRequestStatus Open(string url, int n, string head, string @base, string checks = "passing") =>
+        new(url, n, $"PR {n}", "open", false, checks) { Head = head, Base = @base, Mergeable = "mergeable" };
+
+    private static void SeedChain(FyrdFactory f, params PullRequestStatus[] prs)
+    {
+        f.Services.GetRequiredService<HubState>().Publish([View() with { PullRequests = prs.Select(p => p.Url).ToList() }], []);
+        foreach (var p in prs) f.GitHub.Statuses[p.Url] = p;
+    }
+
+    private static Task<HttpResponseMessage> MergeStack(FyrdFactory f, string url) =>
+        f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge-stack", new { url });
+
+    [Fact]
+    public async Task MergeStack_StartsAJob_202_MergesTopDown_AndShowsInState()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"), Open(Pr13, 13, "c", "b"));
+
+        var r = await MergeStack(f, Pr);
+
+        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);
+        var jobId = (await ReadJson(r)).GetProperty("jobId").GetString()!;
+        var jobs = f.Services.GetRequiredService<StackMergeJobs>();
+        await jobs.Completion(jobId)!.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal([Pr13, Pr, Pr11], f.GitHub.Merged);
+        var job = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("stackMerges").EnumerateArray().Single();
+        Assert.Equal(jobId, job.GetProperty("id").GetString());
+        Assert.Equal("done", job.GetProperty("status").GetString());
+        Assert.Equal([Pr13, Pr, Pr11], job.GetProperty("prs").EnumerateArray().Select(e => e.GetString()));
+    }
+
+    [Fact]
+    public async Task MergeStack_ASecondRequestOnARunningChain_409_AndCancelStopsIt()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"), Open(Pr13, 13, "c", "b"));
+        // The top is pending: the job waits (the first pre-check allows pending below the top only, so make #12 pending instead).
+        f.GitHub.Sequences[Pr] = new Queue<PullRequestStatus>([Open(Pr, 12, "b", "a", "pending")]);
+
+        var first = await MergeStack(f, Pr13);
+        Assert.Equal(HttpStatusCode.Accepted, first.StatusCode);
+        var jobId = (await ReadJson(first)).GetProperty("jobId").GetString()!;
+        var second = await MergeStack(f, Pr11);
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+        Assert.Contains("already running", await second.Content.ReadAsStringAsync());
+
+        var cancel = await f.CreateClient().PostAsync($"/api/hub/stack-merges/{jobId}/cancel", null);
+        Assert.Equal(HttpStatusCode.NoContent, cancel.StatusCode);
+        var jobs = f.Services.GetRequiredService<StackMergeJobs>();
+        await jobs.Completion(jobId)!.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(StackMergeStatus.Cancelled, jobs.Snapshot().Single().Status);
+    }
+
+    [Fact]
+    public async Task MergeStack_CancelOfAnUnknownJob_404()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PostAsync("/api/hub/stack-merges/nope/cancel", null);
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task MergeStack_NotStacked_409()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr, 12, "b", "main"));
+        var r = await MergeStack(f, Pr);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task MergeStack_AFork_409()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"), Open(Pr13, 13, "c", "a"));
+        var r = await MergeStack(f, Pr11);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Contains("forks", await r.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task MergeStack_FailingChecksOrADraft_409_NothingMerged()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main", "failing"), Open(Pr, 12, "b", "a"));
+        Assert.Equal(HttpStatusCode.Conflict, (await MergeStack(f, Pr)).StatusCode);
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a", "pending"));
+        Assert.Equal(HttpStatusCode.Conflict, (await MergeStack(f, Pr)).StatusCode); // the top cannot merge yet
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task MergeStack_APrOutsideTheSession_400()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+        var r = await MergeStack(f, OtherPr);
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task MergeStack_WithoutAToken_503()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+        f.GitHub.Configured = false;
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await MergeStack(f, Pr)).StatusCode);
+    }
+
     [Fact]
     public async Task PullRequests_NotHubSession_404()
     {

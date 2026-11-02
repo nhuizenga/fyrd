@@ -34,6 +34,13 @@ interface Props {
   /** "Sent to <session>" after a nudge went out. */
   notice?: string | null;
   /** The open PR this one is stacked on, and the open PRs stacked on this one (all in the same list). */
+  /** Offer "Merge stack" (the PR is in a linear chain of two or more open PRs and no job is running on it). */
+  canMergeStack?: boolean;
+  onMergeStack?: () => void;
+  /** The stack-merge step line for this PR, and Cancel while this PR is the step being worked on. */
+  jobLine?: string | null;
+  jobFailed?: boolean;
+  onCancelJob?: () => void;
   stackedOn?: PullRequestStatus;
   stackedAbove?: PullRequestStatus[];
 }
@@ -42,7 +49,7 @@ interface Props {
 const jumpTo = (number: number) =>
   document.getElementById(`pr-item-${number}`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
 
-export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession, nudges = [], onNudge, notice, stackedOn, stackedAbove = [] }: Props) {
+export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession, nudges = [], onNudge, notice, stackedOn, stackedAbove = [], canMergeStack, onMergeStack, jobLine, jobFailed, onCancelJob }: Props) {
   const label = prLabel(url);
   const known = st && st.state !== "unknown";
   const title = known ? st.title : "";
@@ -66,8 +73,9 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
               className="pr-ready" onClick={onReady}
             />
           )}
-          {!actionsHidden && nudges.length > 0 && (
+          {!actionsHidden && (nudges.length > 0 || canMergeStack) && (
             <Menu appearance="secondary" size="small" icon={MoreIcon} label="" aria-label={`Ask for help with ${label}`} title="Ask a session to do something about this PR">
+              {canMergeStack && <Menu.Item label="Merge stack" onClick={onMergeStack} title="Squash-merge the whole stack, top down" />}
               {nudges.map((n) => (
                 <Menu.Item
                   key={n.kind} label={n.label} disabled={!!n.disabledReason}
@@ -133,6 +141,12 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
               {o.title} · {o.status}
             </button>
           ))}
+        </span>
+      )}
+      {jobLine && (
+        <span className="pr-job-line">
+          <Text size="small" role="status" className={jobFailed ? "pr-job-failed" : undefined}>{jobLine}</Text>
+          {onCancelJob && <Button appearance="secondary" size="small" onClick={onCancelJob}>Cancel stack merge</Button>}
         </span>
       )}
       {notice && <Text size="small" role="status">{notice}</Text>}

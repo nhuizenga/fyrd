@@ -11,6 +11,7 @@ import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
 import PullRequestItem, { prLabel } from "../components/PullRequestItem";
+import { confirmLine, jobFor, running, stepLine } from "../stackMerge";
 import { chainLine, chainOf, childrenOf, mergeOrderWarning, parentOf, type Chain } from "../stacks";
 import { nudgesFor, type Nudge } from "../prNudges";
 import { HEALTH_LABEL, anyPending, healthOf, stateColor, worstHealth } from "../prStatus";
@@ -105,6 +106,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
   const [prNotices, setPrNotices] = useState<Record<string, string | null>>({});
+  const [confirmStack, setConfirmStack] = useState<{ url: string; top: number[]; rootBase: string } | null>(null);
   const [confirmNudge, setConfirmNudge] = useState<{ url: string; nudge: Nudge } | null>(null);
   const [prErrors, setPrErrors] = useState<Record<string, string | null>>({});
   const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
@@ -153,6 +155,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   useEffect(() => {
     setConfirmMerge(null);
     setConfirmNudge(null);
+    setConfirmStack(null);
     void loadPrs();
   }, [loadPrs]);
 
@@ -166,6 +169,22 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     const c = chainOf(p, sessionPrs);
     return c && !acc.some((x) => x.prs[0].url === c.prs[0].url) ? [...acc, c] : acc;
   }, []);
+
+  // Merge stack: offered on a PR in a linear chain of two or more open PRs, unless a job already runs on it.
+  const stackProps = (u: string) => {
+    const st = sessionPrs.find((p) => p.url === u);
+    const job = jobFor(u, state?.stackMerges);
+    const chain = st ? chainOf(st, sessionPrs) : null;
+    const busy = job !== undefined && running(job);
+    const atStep = job !== undefined && running(job) && job.prs[job.index] === u;
+    return {
+      canMergeStack: !!chain && !chain.fork && !busy,
+      onMergeStack: () => chain && setConfirmStack({ url: u, top: [...chain.prs].reverse().map((p) => p.number), rootBase: chain.rootBase }),
+      jobLine: job ? stepLine(job, u) : null,
+      jobFailed: job?.status === "failed" && job.prs[job.index] === u,
+      onCancelJob: atStep && job ? () => void cancelJob(job.id, u) : undefined,
+    };
+  };
 
   // While a selected session has a PR with running checks, re-read it every 30 s so Merge appears soon after CI goes green.
   const pendingNow = selected
@@ -302,6 +321,24 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
     }
   };
+  const startStack = async (url: string) => {
+    setConfirmStack(null);
+    setPrErrors((e) => ({ ...e, [url]: null }));
+    try {
+      await api.mergeStack(selected!.id, url);
+      await onChanged();
+    } catch (e) {
+      setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
+    }
+  };
+  const cancelJob = async (jobId: string, url: string) => {
+    try {
+      await api.cancelStackMerge(jobId);
+      await onChanged();
+    } catch (e) {
+      setPrErrors((errs) => ({ ...errs, [url]: e instanceof Error ? e.message : String(e) }));
+    }
+  };
   const pickNudge = (url: string, nudge: Nudge) => (nudge.confirm ? setConfirmNudge({ url, nudge }) : void sendNudge(url, nudge));
 
   const replaceController = () =>
@@ -403,6 +440,12 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       : null;
   };
 
+  // A spinner on the chips of a session whose PR is in a running stack merge.
+  const mergingGlyph = (urls: string[]) =>
+    urls.some((u) => (state?.stackMerges ?? []).some((j) => running(j) && j.prs.includes(u)))
+      ? <span className="pr-spinner" role="img" aria-label="Merging stack" title="A stack merge is running">⟳</span>
+      : null;
+
   // One PR: its number, coloured by state, a checks dot and a conflict marker. Several: the count, with the worst status.
   const prChip = (s: HubSessionView) => {
     if (s.pullRequests.length === 0) return null;
@@ -416,6 +459,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
           <Chip label={prLabel(url)} size="small" color={stateColor(st)} title={st?.title ? `${prLabel(url)} ${st.title} (${st.draft ? "draft" : st.state})` : url} />
           {healthDot(health === "conflicts" ? "none" : health)}
           {stackGlyph(statuses)}
+          {mergingGlyph(s.pullRequests)}
           {st?.state === "open" && st.mergeable === "conflicting" && (
             <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>
           )}
@@ -434,6 +478,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <Chip label={`${s.pullRequests.length} PRs`} size="small" title={tip} />
         {healthDot(worst === "conflicts" ? "none" : worst)}
         {stackGlyph(statuses)}
+        {mergingGlyph(s.pullRequests)}
         {worst === "conflicts" && <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>}
       </span>
     );
@@ -733,6 +778,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                         return st ? nudgesFor(st, all, controller) : [];
                       })()}
                       onNudge={(n) => pickNudge(u, n)}
+                      {...stackProps(u)}
                       stackedOn={(() => { const st = sessionPrs.find((p) => p.url === u); return st ? parentOf(st, sessionPrs) : undefined; })()}
                       stackedAbove={(() => { const st = sessionPrs.find((p) => p.url === u); return st ? childrenOf(st, sessionPrs) : []; })()}
                       onReady={() => prAction(u, () => api.markPrReady(selected.id, u))}
@@ -740,6 +786,15 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     />
                   ))}
                 </ul>
+              )}
+              {confirmStack && (
+                <Alert status="warning" title="Merge the whole stack?">
+                  <Text>{confirmLine(confirmStack.top, confirmStack.rootBase)}</Text>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button appearance="primary" size="small" onClick={() => void startStack(confirmStack.url)}>Merge stack</Button>
+                    <Button appearance="ghost" size="small" onClick={() => setConfirmStack(null)}>Cancel</Button>
+                  </div>
+                </Alert>
               )}
               {confirmNudge && (
                 <Alert status="warning" title={confirmNudge.nudge.confirm ?? "Send this request?"}>

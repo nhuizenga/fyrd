@@ -136,3 +136,8 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .pr-stack-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .pr-chain { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
 .pr-stack { font-size: 12px; line-height: 1; color: var(--a2-foreground-color-subdued); }
+.pr-job-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pr-job-failed { color: #d32f2f; }
+.pr-spinner { display: inline-block; font-size: 12px; line-height: 1; animation: pr-spin 1.2s linear infinite; }
+@keyframes pr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pr-spinner { animation: none; } }

@@ -50,6 +50,10 @@ export const markPrReady = (sessionId: string, url: string) =>
 /** `force` skips the stack merge-order guard ("Merge this only anyway"); the server refuses a PR with PRs stacked on it without it. */
 export const mergePr = (sessionId: string, url: string, force = false) =>
   call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/merge`, force ? { url, force: true } : { url });
+/** Starts a job that merges the whole chain the PR is in, top down, waiting for checks between steps. */
+export const mergeStack = (sessionId: string, url: string) =>
+  call<{ jobId: string }>("POST", `/api/hub/sessions/${enc(sessionId)}/pull-requests/merge-stack`, { url });
+export const cancelStackMerge = (jobId: string) => call<void>("POST", `/api/hub/stack-merges/${enc(jobId)}/cancel`);
 export const resume = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/resume`);
 /** Raise one session's limit for today; the server accepts 25 or 100 once the session is at 90% of its limit. */
 export const addBudget = (sessionId: string, amountUsd: 25 | 100) =>

@@ -46,6 +46,9 @@ builder.Services.AddSingleton<IGitHub>(sp =>
 builder.Services.AddSingleton<GitHubSignIn>();
 builder.Services.AddSingleton<IOwnerMessages, ClaudeCliOwnerMessages>();
 builder.Services.AddSingleton<OwnedPullRequests>();
+builder.Services.AddSingleton(sp => new StackMergeJobs(sp.GetRequiredService<IGitHub>(), sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<OwnedPullRequests>(), sp.GetRequiredService<HubState>(),
+    sp.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
 builder.Services.AddSingleton<RunnerState>();
 builder.Services.AddSingleton<SpecRunner>();
 builder.Services.AddSingleton<LeadRelay>();

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, TranscriptItem } from "../src/types";
+import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, PullRequestStatus, StackMergeView, TranscriptItem } from "../src/types";
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
@@ -18,6 +18,19 @@ export const SESSIONS: HubSessionView[] = [
   session({ id: "session_b3", title: "reviewer-api", role: "reviewer" }),
   session({ id: "session_b4", title: "validator-web", role: "validator", status: "archived" }),
 ];
+
+const PR = (n: number) => `https://github.com/acme/stack/pull/${n}`;
+const prStatus = (n: number, head: string, base: string): PullRequestStatus => ({
+  url: PR(n), number: n, title: `Stacked change ${n}`, state: "open", draft: false, checks: "passing", canMerge: true, head, base,
+  checksPassed: 3, checksFailed: 0, checksPending: 0, failingCheck: null, review: "none", mergeable: "mergeable", mergeState: "clean",
+});
+
+/** A builder whose three open PRs are stacked: main ← #11 ← #12 ← #13 (top). */
+export const STACK_SESSION = session({
+  id: "session_stack", title: "builder-stack", repo: "acme/stack", branch: "fyrd/b",
+  pullRequests: [PR(11), PR(12), PR(13)], stackedPullRequests: [PR(11), PR(13)],
+});
+export const STACK_PRS: PullRequestStatus[] = [prStatus(11, "fyrd/a", "main"), prStatus(12, "fyrd/b", "fyrd/a"), prStatus(13, "fyrd/c", "fyrd/b")];
 
 export const QUESTION: HubQuestion = {
   id: "session_b2:req1:0", sessionId: "session_b2", sessionTitle: "builder-docs", question: "Which docs format?",
@@ -60,6 +73,9 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Adds a builder with a three-PR stack, and serves its PR statuses. */
+  stack?: boolean;
+  stackMerges?: StackMergeView[];
   /** Peasant shared-memory proposals waiting for approval. */
   pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
 }
@@ -68,12 +84,15 @@ export interface MockOptions {
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
   const state: HubState = {
-    sessions: SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
+    sessions: opts.stack ? [...SESSIONS, STACK_SESSION] : SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     gitHub: { configured: true, login: "octocat", error: null },
     controller: { sessionId: "session_ctl", url: "https://claude.ai/code/session_ctl" },
     pendingMemory: opts.pending?.length ?? 0,
+    gitHub: { configured: true, login: "octocat", error: null },
+    pullRequests: opts.stack ? Object.fromEntries(STACK_PRS.map((p) => [p.url, p])) : {},
+    stackMerges: opts.stackMerges ?? [],
   };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -97,6 +116,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
       });
     }
+    if (/^\/api\/hub\/sessions\/session_stack\/pull-requests$/.test(path)) return route.fulfill({ json: STACK_PRS });
     if (path === "/api/hub/state") return route.fulfill({ json: state });
     if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
