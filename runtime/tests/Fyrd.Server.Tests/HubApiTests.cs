@@ -306,6 +306,27 @@ public class HubApiTests
         Assert.Empty(f.Cloud.Archived);
     }
 
+    [Fact]
+    public async Task Rename_HubSession_RenamesIt_204()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  New name " });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal((SessionId, "New name"), Assert.Single(f.Cloud.Renamed));
+    }
+
+    [Fact]
+    public async Task Rename_BlankTitle_400_NotHubSession_404()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/rename", new { title = "  " })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsJsonAsync("/api/hub/sessions/session_other/rename", new { title = "x" })).StatusCode);
+        Assert.Empty(f.Cloud.Renamed);
+    }
+
     private const string Pr = "https://github.com/acme/widgets/pull/12";
     private const string OtherPr = "https://github.com/acme/widgets/pull/99";
 

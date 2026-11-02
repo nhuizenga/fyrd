@@ -13,6 +13,7 @@ public interface ICloudSessions
     Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default);
     Task InterruptAsync(string sessionId, CancellationToken ct = default);
     Task ArchiveAsync(string sessionId, CancellationToken ct = default);
+    Task RenameAsync(string sessionId, string title, CancellationToken ct = default);
 
     /// <summary>
     /// Answers a pending <c>AskUserQuestion</c> by posting a <c>control_response</c> to its <c>can_use_tool</c> request.

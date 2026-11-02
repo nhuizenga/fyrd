@@ -258,6 +258,18 @@ public sealed class CloudSessionClientTests : IDisposable
     }
 
     [Fact]
+    public async Task Rename_PatchesTitleToCodeSessionsPath()
+    {
+        var h = new FakeHandler();
+        await Client(h).RenameAsync("session_1", "New name");
+
+        var r = h.Requests[0];
+        Assert.Equal(HttpMethod.Patch, r.Request.Method);
+        Assert.Equal("/v1/code/sessions/session_1", r.Request.RequestUri!.AbsolutePath);
+        Assert.Equal("New name", JsonDocument.Parse(r.Body!).RootElement.GetProperty("title").GetString());
+    }
+
+    [Fact]
     public async Task Get_NonJson2xx_ThrowsApiException()
     {
         var h = new FakeHandler(HttpStatusCode.OK, "<html>");
