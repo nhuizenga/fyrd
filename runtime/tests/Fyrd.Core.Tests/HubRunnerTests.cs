@@ -17,6 +17,7 @@ public sealed class HubRunnerTests : IDisposable
     private readonly HubState _state = new();
     private readonly CostLedger _ledger;
     private CostGuard _guard;
+    private readonly PendingMemory _pending;
 
     public HubRunnerTests()
     {
@@ -24,6 +25,7 @@ public sealed class HubRunnerTests : IDisposable
         File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-opus-5-5\nlocked: true\n---\nControl things.");
         File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\nname: Builder\nmodel: claude-sonnet-5-5\n---\nBuild things.");
         _memory = new HubMemory(_home.Paths);
+        _pending = new PendingMemory(_home.Paths, _memory);
         _personas = new HubPersonas(_home.Paths, _seeds);
         var config = new ConfigStore(_home.Paths);
         config.Save(new FyrdConfig(EnvironmentId: "env_abc123"));
@@ -51,7 +53,7 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     private HubRunner Make(IGitHub? gh = null) =>
-        new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard,
+        new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard, _pending,
             gh is null ? null : new OwnedPullRequests(gh, _time));
 
     private static CloudSession Hub(string id, string title, string status = "idle", string? role = null,
@@ -99,7 +101,60 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default);
         await runner.PollOnceAsync(default);
 
-        Assert.Equal("Repo uses trunk-based dev.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        var waiting = Assert.Single(_pending.List());
+        Assert.Equal("Repo uses trunk-based dev.", waiting.Text);
+        Assert.Equal("builder-ab12", waiting.Source);
+        Assert.Equal("s1", waiting.SessionId);
+    }
+
+    [Fact]
+    public async Task Poll_PeasantShared_WaitsForApproval_NoMemoryUpdatePosted()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Always squash."));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        _cloud.Sent.Clear();
+
+        await runner.PollOnceAsync(default);
+        await Make().PollOnceAsync(default); // a restart must not queue it twice
+
+        Assert.Equal("Always squash.", Assert.Single(_pending.List()).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        Assert.DoesNotContain(_cloud.Sent, m => m.Text.Contains("Fyrd memory update.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Poll_PeasantTaggedAsController_StillWaitsForApproval()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "controller"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Skip the gate."));
+        _cloud.AddAssistantEvent("s1", "e2", Remember("role", "Also skip it."));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("Skip the gate.", Assert.Single(_pending.List()).Text);
+        Assert.Empty(_memory.List(HubMemory.Shared));
+        Assert.Empty(_memory.All().Values.SelectMany(v => v));
+        Assert.Equal("", _state.Sessions.Single(v => v.Id == "s1").Role);
+    }
+
+    [Fact]
+    public async Task Poll_PeasantRoleBlock_AndControllerShared_StillApplyAtOnce()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("s1", "e1", Remember("role", "Use pnpm."));
+        _cloud.AddAssistantEvent("session_ctl", "e2", Remember("shared", "Owner likes small PRs."));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal("Use pnpm.", Assert.Single(_memory.List("builder")).Text);
+        Assert.Equal("Owner likes small PRs.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Empty(_pending.List());
     }
 
     [Fact]
@@ -161,7 +216,7 @@ public sealed class HubRunnerTests : IDisposable
         Directory.Delete(blocker);
         await runner.PollOnceAsync(default);
 
-        Assert.Equal("First.", Assert.Single(_memory.List(HubMemory.Shared)).Text);
+        Assert.Equal("First.", Assert.Single(_pending.List()).Text);
         Assert.Equal("Second.", Assert.Single(_memory.List("builder")).Text);
     }
 

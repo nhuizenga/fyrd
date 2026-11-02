@@ -92,6 +92,8 @@ export interface HubState {
   lastPollAt: string | null;
   controller: ControllerInfo | null;
   budget?: HubBudgetView | null;
+  /** Peasant shared-memory proposals waiting for the owner. */
+  pendingMemory?: number;
 }
 
 export interface TranscriptOption {
@@ -141,6 +143,14 @@ export interface MemoryScopeView {
   scope: MemoryScope;
   label: string;
   entries: MemoryEntry[];
+}
+
+export interface PendingMemoryEntry {
+  id: string;
+  text: string;
+  source: string;
+  sessionId: string;
+  at: string;
 }
 
 export interface HubMemory {
