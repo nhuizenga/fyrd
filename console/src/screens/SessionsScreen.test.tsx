@@ -827,6 +827,19 @@ it("shows the branch as a chip in the session list and in the details", async ()
   expect(within(details).getByText("fyrd/alpha")).toBeInTheDocument();
 });
 
+it("shows a workers-running chip and a collapsed worker result card", async () => {
+  renderScreen(hubState({ sessions: [session({ id: "a", title: "alpha-1", status: "idle", tags: ["fyrd-hub", "fyrd-workers-running"], workersRunning: true })] }));
+  expect(screen.getByText("workers running")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+  expect(screen.getByText("Working (background)")).toBeInTheDocument();
+  FakeEventSource.latest().emit("item", item({ kind: "worker", text: "build: initial task", detail: "fork", toolUseId: "tw1" }));
+  FakeEventSource.latest().emit("item", item({ key: "2:0", seq: 2, kind: "worker-result", text: "Status: done", status: "completed", toolUseId: "tw1" }));
+  expect(screen.getByText("build: initial task")).toBeInTheDocument();
+  const card = screen.getByText("Worker result (completed)").closest("details") as HTMLElement;
+  expect(card).not.toHaveAttribute("open");
+  expect(within(card).getByText("Status: done")).toBeInTheDocument();
+});
+
 describe("export", () => {
   const okResponse = () =>
     new Response("{}\n", { status: 200, headers: { "Content-Disposition": 'attachment; filename="alpha-1-a-20261102-201000.jsonl"' } });
@@ -1158,4 +1171,16 @@ describe("PR nudges", () => {
     await userEvent.click(await screen.findByRole("menuitem", { name: "Request validation" }));
     expect(await within(details).findByText("Controller is busy")).toBeInTheDocument();
   });
+});
+
+it("the in-progress bubble lists running workers with their latest tool", async () => {
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+  FakeEventSource.latest().emit("progress", item({
+    key: "ephemeral", seq: 0, kind: "progress", text: "", status: "Waiting for workers",
+    workers: [{ id: "tw1", description: "build: initial task", line: "Running Bash · 42s" }],
+  }));
+  const list = screen.getByRole("list", { name: "Running workers" });
+  expect(within(list).getByText("build: initial task")).toBeInTheDocument();
+  expect(within(list).getByText(/Running Bash · 42s/)).toBeInTheDocument();
 });
