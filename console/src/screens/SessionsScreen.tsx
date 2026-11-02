@@ -307,6 +307,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
           {(s.repo || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
+              {s.repo && s.branch && <Chip label={s.branch} size="small" title={`Branch ${s.branch}`} />}
               {s.pullRequests.length === 1 && <Chip label={prLabel(s.pullRequests[0])} size="small" title={s.pullRequests[0]} />}
               {s.pullRequests.length > 1 && <Chip label={`${s.pullRequests.length} PRs`} size="small" title={s.pullRequests.map(prLabel).join(", ")} />}
             </span>
@@ -531,6 +532,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               <dl className="details">
                 <dt>Role</dt><dd>{isController(selected) ? "Controller" : selected.role}</dd>
                 <dt>Repository</dt><dd>{selected.repo ?? "None attached"}</dd>
+                <dt>Branch</dt><dd>{selected.branch ?? "None"}</dd>
                 <dt>Started</dt><dd title={fullTime(selected.createdAt)}>{relativeTime(selected.createdAt)}</dd>
                 <dt>Last activity</dt><dd title={fullTime(selected.lastActivity)}>{relativeTime(selected.lastActivity)}</dd>
               </dl>
@@ -577,9 +579,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                             appearance="secondary" size="small" icon={OpenIcon}
                             aria-label={`Open ${label}`} title="Open pull request on GitHub"
                             onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
-                          >
-                            Open
-                          </Button>
+                          />
                           {st?.state === "open" && st.draft && (
                             <Button
                               appearance="secondary" size="small" icon={ReadyIcon}
@@ -594,10 +594,9 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                             <Button
                               appearance="secondary" size="small" icon={MergeIcon}
                               aria-label={`Merge ${label}`} title="Merge pull request"
+                              className="pr-merge"
                               onClick={() => setConfirmMerge(st)}
-                            >
-                              Merge
-                            </Button>
+                            />
                           )}
                         </span>
                       </li>

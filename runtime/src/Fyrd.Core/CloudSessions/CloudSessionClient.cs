@@ -157,7 +157,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
     public async Task RenameAsync(string sessionId, string title, CancellationToken ct = default)
     {
         ValidateSessionId(sessionId);
-        using var _ = await SendAsync(HttpMethod.Patch, $"/v1/code/sessions/{sessionId}", new JsonObject { ["title"] = title }, ct);
+        using var _ = await SendAsync(HttpMethod.Patch, $"/v1/sessions/{sessionId}", new JsonObject { ["title"] = title }, ct);
     }
 
     public async Task AnswerQuestionAsync(
