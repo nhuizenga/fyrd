@@ -5,6 +5,7 @@ import ShiftIcon from "@servicetitan/anvil2/assets/icons/material/round/arrow_up
 import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
+import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
@@ -88,6 +89,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
   const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
   const [confirmArchive, setConfirmArchive] = useState<HubSessionView | null>(null);
+  const [renaming, setRenaming] = useState<{ session: HubSessionView; title: string } | null>(null);
   const [raising, setRaising] = useState(false);
   // A raise's response, shown until the poll catches up (the server only requests a poll, so the next state can be stale).
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
@@ -209,6 +211,16 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       setConfirmArchive(null);
       await api.archiveSession(s.id);
       if (s.id === selectedId) navigate("sessions");
+      await onChanged();
+    });
+
+  const renameSession = () =>
+    run(async () => {
+      if (!renaming) return;
+      const title = renaming.title.trim();
+      setRenaming(null);
+      if (title === "" || title === renaming.session.title) return;
+      await api.renameSession(renaming.session.id, title);
       await onChanged();
     });
 
@@ -340,9 +352,31 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               </div>
             </Alert>
           )}
+          {renaming && (
+            <form
+              className="rename-form"
+              aria-label={`Rename ${renaming.session.title}`}
+              onSubmit={(e) => { e.preventDefault(); void renameSession(); }}
+            >
+              <TextField
+                label="Session name"
+                autoFocus
+                value={renaming.title}
+                onChange={(e) => setRenaming({ ...renaming, title: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Escape") setRenaming(null); }}
+              />
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button type="submit" appearance="primary" size="small" disabled={renaming.title.trim() === ""}>Save name</Button>
+                <Button appearance="ghost" size="small" onClick={() => setRenaming(null)}>Cancel</Button>
+              </div>
+            </form>
+          )}
           <ul className="session-list pane-scroll">
             {sessions.map((s) => row(s, (
-              <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
+              <>
+                <Button appearance="ghost" size="small" icon={EditIcon} aria-label={`Rename ${s.title}`} title="Rename session" onClick={() => setRenaming({ session: s, title: s.title })} />
+                <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
+              </>
             )))}
           </ul>
         </aside>

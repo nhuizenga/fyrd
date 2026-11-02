@@ -143,6 +143,15 @@ public sealed class FakeCloudSessions : ICloudSessions
         return Task.CompletedTask;
     }
 
+    public List<(string Id, string Title)> Renamed { get; } = [];
+
+    public Task RenameAsync(string sessionId, string title, CancellationToken ct = default)
+    {
+        MaybeThrow();
+        Renamed.Add((sessionId, title));
+        return Task.CompletedTask;
+    }
+
     public Task AnswerQuestionAsync(
         string sessionId, Fyrd.Core.Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default)
     {

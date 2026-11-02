@@ -24,6 +24,7 @@ internal static class HubEndpoints
     private sealed record TextBody(string? Text);
     private sealed record AdoptBody(string? SessionId);
     private sealed record BudgetBody(JsonElement? AmountUsd);
+    private sealed record RenameBody(string? Title);
     private sealed record PrBody(string? Url);
     private sealed record AnswerBody(string? Choice, string? Text);
 
@@ -111,6 +112,18 @@ internal static class HubEndpoints
             InHub(id, state, () => Cloud(async () =>
             {
                 await cloud.ArchiveAsync(id, ct);
+                state.RequestPoll();
+                return Results.NoContent();
+            })));
+
+        // The console's pencil button: renames the session on claude.ai; the next poll shows the new title.
+        group.MapPost("/sessions/{id}/rename", (string id, RenameBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+            InHub(id, state, () => Cloud(async () =>
+            {
+                var title = body?.Title?.Trim();
+                if (string.IsNullOrEmpty(title))
+                    return Results.Problem("Title is required.", statusCode: StatusCodes.Status400BadRequest);
+                await cloud.RenameAsync(id, title, ct);
                 state.RequestPoll();
                 return Results.NoContent();
             })));

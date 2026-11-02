@@ -105,3 +105,4 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .md table { border-collapse: collapse; }
 .md th, .md td { border: 1px solid var(--a2-border-color-default); padding: 4px 8px; }
 .md blockquote { padding-left: 12px; border-left: 3px solid var(--a2-border-color-default); }
+.rename-form { display: flex; flex-direction: column; gap: 6px; }
