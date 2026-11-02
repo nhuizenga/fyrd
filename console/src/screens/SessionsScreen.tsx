@@ -6,6 +6,7 @@ import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_ci
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
+import DownloadIcon from "@servicetitan/anvil2/assets/icons/material/round/download.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
@@ -102,6 +103,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
   const [confirmMerge, setConfirmMerge] = useState<PullRequestStatus | null>(null);
+  const [exporting, setExporting] = useState<string[]>([]);
   const [confirmArchive, setConfirmArchive] = useState<HubSessionView | null>(null);
   const [renaming, setRenaming] = useState<{ session: HubSessionView; title: string } | null>(null);
   const [raising, setRaising] = useState(false);
@@ -184,7 +186,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     autoTop.current = el.scrollTop;
   }, []);
 
-  useLayoutEffect(stickToBottom, [stickToBottom, transcript.items.length, selectedId, hasThread]);
+  useLayoutEffect(stickToBottom, [stickToBottom, transcript.items.length + transcript.hiddenCount, selectedId, hasThread]);
 
   // Content keeps growing after a render (fonts, markdown tables, a deep link's thread appearing late): keep following it.
   useEffect(() => {
@@ -298,12 +300,51 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     });
   };
 
+  /** Fetches the export first so a 404 or 502 shows in the console, then saves the blob as a file. */
+  const exportSession = (s: HubSessionView) =>
+    run(async () => {
+      setExporting((ids) => [...ids, s.id]);
+      try {
+        const res = await fetch(api.exportUrl(s.id));
+        if (!res.ok) {
+          let detail: string | undefined;
+          try { detail = (await res.json())?.detail; } catch { /* non-JSON error body */ }
+          throw new Error(detail ?? `Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? `${s.id}.jsonl`;
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } finally {
+        setExporting((ids) => ids.filter((id) => id !== s.id));
+      }
+    });
+
+  const exportButton = (s: HubSessionView) => (
+    <Button
+      appearance="ghost" size="small" icon={DownloadIcon} aria-label={`Export ${s.title}`} title="Export raw events (JSONL)"
+      disabled={exporting.includes(s.id)} aria-busy={exporting.includes(s.id)} onClick={() => exportSession(s)}
+    />
+  );
+
+  // What each session is doing right now, kept by the server so it shows for sessions that are not selected.
+  const liveLine = (id: string) => {
+    const p = state?.progress?.[id];
+    if (!p) return null;
+    const text = p.status || p.text.trim().split("\n").filter(Boolean).pop() || "";
+    return text || null;
+  };
+
   const row = (s: HubSessionView, actions?: ReactNode) => (
     <li key={s.id} className="session-item">
       <button type="button" className="row-btn session-row" aria-current={s.id === selectedId} onClick={() => navigate("sessions", s.id)}>
         <StatusIcon status={s.status} />
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
+          {liveLine(s.id) && <span className="session-row-progress" title={liveLine(s.id) ?? undefined}>{liveLine(s.id)}</span>}
           {(s.repo || s.branch || s.pullRequests.length > 0) && (
             <span className="session-row-chips">
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
@@ -334,6 +375,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
             <ul className="session-list">
               {row(controller, (
                 <>
+                  {exportButton(controller)}
                   <Button appearance="ghost" size="small" icon={OpenIcon} aria-label="Open Controller" title="Open Controller in claude.ai" onClick={openController} />
                   <Button appearance="ghost" size="small" icon={ReplaceIcon} aria-label="Replace Controller" title="Replace Controller" onClick={() => setConfirmReplace(true)} />
                 </>
@@ -395,6 +437,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
           <ul className="session-list pane-scroll">
             {sessions.map((s) => row(s, (
               <>
+                {exportButton(s)}
                 <Button appearance="ghost" size="small" icon={EditIcon} aria-label={`Rename ${s.title}`} title="Rename session" onClick={() => setRenaming({ session: s, title: s.title })} />
                 <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
               </>
@@ -448,6 +491,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 <div className="thread-items" ref={itemsRef}>
                 {transcript.items.length === 0 && !transcript.progress && unshown.length === 0 && (
                   <Text subdued>{transcript.connected ? "No messages yet." : "Loading…"}</Text>
+                )}
+                {transcript.hiddenCount > 0 && (
+                  <Button appearance="ghost" size="small" onClick={transcript.loadMore}>
+                    Load earlier messages ({transcript.hiddenCount})
+                  </Button>
                 )}
                 {transcript.items.map((item) => (
                   <ThreadItem

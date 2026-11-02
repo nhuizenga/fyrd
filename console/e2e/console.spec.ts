@@ -45,7 +45,7 @@ test.describe("Sessions", () => {
     await expect(page.getByText("Step 1:")).toBeVisible();
     for (const l of [
       page.getByText("Step 1:"),
-      page.getByRole("button", { name: /builder-prime-sieve/ }).locator(".session-row-title"),
+      page.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-prime-sieve/ }).locator(".session-row-title"),
       page.getByLabel("Message this session"),
       page.getByRole("button", { name: "Send" }),
     ]) {
@@ -88,14 +88,22 @@ test.describe("Sessions", () => {
     expect(sent).toContainEqual({ url: "/api/hub/sessions/session_b1/message", body: { text: "first\nsecond" } });
   });
 
+  test("Export downloads the session's events as .jsonl", async ({ page }) => {
+    await page.goto("/#/sessions");
+    const list = page.getByRole("complementary", { name: "Session list" });
+    const download = page.waitForEvent("download");
+    await list.getByRole("button", { name: "Export builder-docs" }).click();
+    expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
+  });
+
   test("list: Controller, its controls, search, then others with status icons; rows highlight on hover", async ({ page }) => {
     await page.goto("/#/sessions");
     const list = page.getByRole("complementary", { name: "Session list" });
     const y = async (l: Locator) => (await box(l)).y;
-    const ctl = list.getByRole("button", { name: /Controller role/ });
+    const ctl = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*Controller role/ });
     const open = list.getByRole("button", { name: "Open Controller" });
     const search = list.getByLabel("Search sessions");
-    const first = list.getByRole("button", { name: /builder-prime-sieve/ });
+    const first = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-prime-sieve/ });
     // Open/Replace are icons on the Controller's row, to the right of its name.
     const replace = list.getByRole("button", { name: "Replace Controller" });
     for (const b of [open, replace]) {
@@ -105,16 +113,16 @@ test.describe("Sessions", () => {
       await expect(b.locator("svg")).toBeVisible();
     }
     expect(await y(open)).toBeLessThan(await y(search));
-    // Rows carry only the status icon, title and role.
-    await expect(first).toHaveText(/^builder-prime-sievebuilder$/);
+    // Rows carry the status icon, title and repo chip.
+    await expect(first).toHaveText(/^builder-prime-sievesieve$/);
     expect(await y(search)).toBeLessThan(await y(first));
     await expect(first.getByRole("img", { name: "Running" })).toBeVisible();
-    await expect(list.getByRole("button", { name: /builder-docs/ }).getByRole("img", { name: "Waiting for you" })).toBeVisible();
+    await expect(list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-docs/ }).getByRole("img", { name: "Waiting for you" })).toBeVisible();
     const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
     const rows = list.locator(".session-list.pane-scroll .row-btn");
     const bgs = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor));
     expect(new Set(bgs).size).toBe(1); // no zebra stripes
-    const docs = list.getByRole("button", { name: /builder-docs/ });
+    const docs = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-docs/ });
     const resting = await bg(docs);
     await docs.hover();
     await expect.poll(() => bg(docs)).not.toBe(resting);
@@ -128,9 +136,9 @@ test.describe("Sessions", () => {
     await page.goto("/#/sessions/session_b1");
     const pane = page.getByRole("complementary", { name: "Session details" });
     await expect(pane.locator("h4")).toHaveText(["Details", "Estimated cost", "Tags", "Pull requests"]);
-    await expect(pane.locator("dt")).toHaveText(["Role", "Repository", "Started", "Last activity"]);
-    await expect(pane.locator("dd").nth(2)).toHaveText("1 day ago");
-    await expect(pane.locator("dd").nth(3)).toHaveText("5 minutes ago");
+    await expect(pane.locator("dt")).toHaveText(["Role", "Repository", "Branch", "Started", "Last activity"]);
+    await expect(pane.locator("dd").nth(3)).toHaveText("1 day ago");
+    await expect(pane.locator("dd").nth(4)).toHaveText("5 minutes ago");
   });
 
   test("cost block shows spend against the limit and +$25 posts a raise", async ({ page }) => {

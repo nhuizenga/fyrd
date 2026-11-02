@@ -110,6 +110,33 @@ public class HubStreamTests
         Assert.Equal("", cleared.GetProperty("text").GetString());
     }
 
+    private static TranscriptItem Live(string status) =>
+        new("ephemeral", 0, "agent", "progress", "", DateTimeOffset.UnixEpoch, Status: status);
+
+    [Fact]
+    public async Task Stream_StartsWithTheProgressKeptWhileNobodyWasConnected()
+    {
+        using var f = Hub();
+        f.Services.GetRequiredService<SessionProgress>().Set(SessionId, Live("Using Bash"));
+
+        var (frames, _, _) = await ReadFrames(f.CreateClient(), 2);
+
+        Assert.Equal(["progress", "item"], frames.Select(fr => fr.Event));
+        Assert.Equal("Using Bash", JsonDocument.Parse(frames[0].Data!).RootElement.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task State_ListsEachSessionsKeptProgress()
+    {
+        using var f = Hub();
+        f.Services.GetRequiredService<SessionProgress>().Set(SessionId, Live("Using Bash"));
+
+        var json = await f.CreateClient().GetStringAsync("/api/hub/state");
+
+        var progress = JsonDocument.Parse(json).RootElement.GetProperty("progress");
+        Assert.Equal("Using Bash", progress.GetProperty(SessionId).GetProperty("status").GetString());
+    }
+
     [Fact]
     public async Task Stream_RelaysTranscriptItems()
     {

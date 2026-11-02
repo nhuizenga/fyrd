@@ -19,6 +19,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
 
     public FakeGitHub GitHub { get; } = new();
 
+    public FakeOwnerMessages Owner { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("Fyrd:Home", Home.Paths.Root);
@@ -31,6 +33,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
             s.AddSingleton<ICloudSessions>(Cloud);
             s.RemoveAll<IGitHub>();
             s.AddSingleton<IGitHub>(GitHub);
+            s.RemoveAll<IOwnerMessages>();
+            s.AddSingleton<IOwnerMessages>(Owner);
         });
     }
 
