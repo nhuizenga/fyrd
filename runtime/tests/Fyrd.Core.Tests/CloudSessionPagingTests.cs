@@ -80,6 +80,7 @@ public class CloudSessionPagingTests
         public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => throw new NotImplementedException();
         public Task InterruptAsync(string sessionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ArchiveAsync(string sessionId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task RenameAsync(string sessionId, string title, CancellationToken ct = default) => throw new NotImplementedException();
         public Task AnswerQuestionAsync(string sessionId, Fyrd.Core.Hub.HubQuestion question, IReadOnlyDictionary<string, string> answers, CancellationToken ct = default) => throw new NotImplementedException();
         public IAsyncEnumerable<StreamedEvent> StreamEventsAsync(string sessionId, long? afterSequence, CancellationToken ct = default) => throw new NotImplementedException();
     }
