@@ -54,6 +54,20 @@ public static class PullRequestStacks
     public static int Number(string url) => int.TryParse(url[(url.LastIndexOf('/') + 1)..], out var n) ? n : 0;
 
     /// <summary>
+    /// <paramref name="child"/> is stacked on <paramref name="parent"/>: its base is the parent's head, in the same repo, with
+    /// neither head in a fork and the parent's head not the default branch (PRs that merely target <c>main</c> are not stacked).
+    /// </summary>
+    public static bool Stacked(PullRequestStatus parent, PullRequestStatus child) =>
+        parent.Url != child.Url && child.Base != "" && child.Base == parent.Head
+        && !parent.CrossRepository && !child.CrossRepository
+        && (parent.DefaultBranch == "" || parent.Head != parent.DefaultBranch)
+        && SameRepo(parent.Url, child.Url);
+
+    private static bool SameRepo(string a, string b) =>
+        string.Equals(a[..a.LastIndexOf("/pull/", StringComparison.Ordinal)], b[..b.LastIndexOf("/pull/", StringComparison.Ordinal)],
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// The open PRs stacked above <paramref name="current"/> among <paramref name="open"/> (its children, their children, ...).
     /// <c>Children</c> are the direct ones; <c>TopDown</c> lists every descendant from the top of the stack down, so merging in
     /// that order never leaves a PR targeting a merged branch.
@@ -62,7 +76,7 @@ public static class PullRequestStacks
         IEnumerable<PullRequestStatus> open, PullRequestStatus current)
     {
         var candidates = open.Where(p => p.State == "open" && p.Url != current.Url).ToList();
-        var children = candidates.Where(p => p.Base != "" && p.Base == current.Head).OrderBy(p => p.Number).ToList();
+        var children = candidates.Where(p => Stacked(current, p)).OrderBy(p => p.Number).ToList();
         var levels = new List<List<PullRequestStatus>>();
         var seen = new HashSet<string>(StringComparer.Ordinal) { current.Url };
         var frontier = children;
@@ -71,7 +85,7 @@ public static class PullRequestStacks
             var level = frontier.Where(p => seen.Add(p.Url)).ToList();
             if (level.Count == 0) break;
             levels.Add(level);
-            frontier = candidates.Where(c => c.Base != "" && level.Any(l => l.Head == c.Base)).ToList();
+            frontier = candidates.Where(c => level.Any(l => Stacked(l, c))).ToList();
         }
         levels.Reverse();
         return (children, levels.SelectMany(l => l.OrderBy(p => p.Number)).ToList());

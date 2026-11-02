@@ -166,4 +166,47 @@ public class PullRequestStacksTests
         var (_, topDown) = PullRequestStacks.Above(prs, prs[0]);
         Assert.Equal([2], topDown.Select(c => c.Number));
     }
+
+    private static PullRequestStatus In(string repo, int n, string head, string @base, bool fork = false, string def = "main") =>
+        new($"https://github.com/{repo}/pull/{n}", n, $"PR {n}", "open", false, "passing")
+        { Head = head, Base = @base, CrossRepository = fork, DefaultBranch = def };
+
+    [Fact]
+    public void Links_OnlyWithinOneRepo()
+    {
+        var prs = new[] { In("acme/a", 1, "feat", "main"), In("acme/b", 2, "other", "feat") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+        Assert.Empty(PullRequestStacks.Above(prs, prs[0]).Children);
+        Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
+
+    [Fact]
+    public void Links_ThroughAnIdenticalRepoNameInDifferentCase()
+    {
+        var prs = new[] { In("Acme/Widgets", 1, "feat", "main"), In("acme/widgets", 2, "other", "feat") };
+        Assert.True(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
+
+    [Fact]
+    public void AForkPrWhoseHeadIsTheDefaultBranch_NeverMakesEverythingStacked()
+    {
+        // Fork PR "main → release" must not make every PR that targets main look stacked on it.
+        var prs = new[] { In("acme/a", 1, "main", "release", fork: true), In("acme/a", 2, "x", "main"), In("acme/a", 3, "y", "main") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+        Assert.Empty(PullRequestStacks.Above(prs, prs[0]).Children);
+    }
+
+    [Fact]
+    public void ASameRepoPrWhoseHeadIsTheDefaultBranch_NeverLinks()
+    {
+        var prs = new[] { In("acme/a", 1, "main", "dev"), In("acme/a", 2, "x", "main") };
+        Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
+
+    [Fact]
+    public void ForkHeadsNeverLink_EvenWithMatchingBranchNames()
+    {
+        var prs = new[] { In("acme/a", 1, "feat", "main"), In("acme/a", 2, "other", "feat", fork: true) };
+        Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
 }

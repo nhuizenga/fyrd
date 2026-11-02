@@ -417,4 +417,15 @@ public class GitHubApiTests
         Assert.Equal("blocked", blocked.MergeState);
         Assert.True(blocked.CanMerge);
     }
+
+    [Fact]
+    public void ParseStatus_ReadsTheForkFlagAndTheDefaultBranch()
+    {
+        var s = Parse(Pr().Replace("\"mergeable\"", "\"isCrossRepository\":true,\"baseRepository\":{\"defaultBranchRef\":{\"name\":\"trunk\"}},\"mergeable\""));
+        Assert.True(s.CrossRepository);
+        Assert.Equal("trunk", s.DefaultBranch);
+        var plain = Parse(Pr());
+        Assert.False(plain.CrossRepository);
+        Assert.Equal("", plain.DefaultBranch);
+    }
 }

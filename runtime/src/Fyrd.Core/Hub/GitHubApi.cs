@@ -16,7 +16,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
 
     /// <summary>The fields one pull request is read with (the node's <c>id</c> is what mark-ready needs).</summary>
     internal const string PrFields = """
-        id url number title state isDraft headRefName baseRefName reviewDecision mergeable mergeStateStatus
+        id url number title state isDraft headRefName baseRefName isCrossRepository baseRepository{defaultBranchRef{name}} reviewDecision mergeable mergeStateStatus
         latestReviews(first:10){nodes{state}}
         commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename
           ... on CheckRun{name status conclusion detailsUrl}
@@ -177,6 +177,8 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
             Review = review,
             Mergeable = mergeable,
             MergeState = Str(r, "mergeStateStatus")?.ToLowerInvariant() ?? "unknown",
+            CrossRepository = r.TryGetProperty("isCrossRepository", out var xr) && xr.ValueKind == JsonValueKind.True,
+            DefaultBranch = Path(r, "baseRepository", "defaultBranchRef", "name", out var db) && db.ValueKind == JsonValueKind.String ? db.GetString()! : "",
         };
     }
 

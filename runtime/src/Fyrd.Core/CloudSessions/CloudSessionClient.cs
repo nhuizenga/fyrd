@@ -276,8 +276,9 @@ public sealed partial class CloudSessionClient : ICloudSessions
 
     /// <summary>
     /// An <c>ephemeral_event</c> frame as a progress event, or null for noise and bad JSON. Kept: <c>system</c> <c>task_summary</c>
-    /// and <c>post_turn_summary</c>, <c>tool_progress</c> heartbeats, and the main agent's <c>stream_event</c>s that start a message or block or carry text.
-    /// Dropped: <c>status</c>, <c>thinking_tokens</c>, hooks, tool-input and signature deltas, and subagent output.
+    /// and <c>post_turn_summary</c>, <c>tool_progress</c> heartbeats, and the main agent's <c>stream_event</c>s that start a message or block or carry text,
+    /// plus a subagent's tool-call starts (a running worker's latest tool).
+    /// Dropped: <c>status</c>, <c>thinking_tokens</c>, hooks, tool-input and signature deltas, and other subagent output.
     /// </summary>
     private static StreamedEvent? ParseEphemeralFrame(string data)
     {
@@ -292,10 +293,12 @@ public sealed partial class CloudSessionClient : ICloudSessions
             {
                 "tool_progress" => Str(payload, "tool_name") is not null,
                 "system" => Str(payload, "subtype") is "task_summary" or "post_turn_summary",
-                "stream_event" => !(payload.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String)
-                    && payload.TryGetProperty("event", out var ev) && ev.ValueKind == JsonValueKind.Object
-                    && (Str(ev, "type") is "message_start" or "content_block_start"
-                        || (Str(ev, "type") == "content_block_delta" && ev.TryGetProperty("delta", out var d) && Str(d, "type") == "text_delta")),
+                "stream_event" => payload.TryGetProperty("event", out var ev) && ev.ValueKind == JsonValueKind.Object
+                    && (payload.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String
+                        // A subagent's stream: only the start of a tool call of its own, shown as that worker's latest line.
+                        ? Str(ev, "type") == "content_block_start" && ev.TryGetProperty("content_block", out var cb) && Str(cb, "type") == "tool_use"
+                        : Str(ev, "type") is "message_start" or "content_block_start"
+                            || (Str(ev, "type") == "content_block_delta" && ev.TryGetProperty("delta", out var d) && Str(d, "type") == "text_delta")),
                 _ => false,
             };
             if (!keep) return null;
