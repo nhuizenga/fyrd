@@ -33,9 +33,9 @@ Who sent this message: the person who owns this session, or another Claude sessi
 
 | Route | Persona | Stored event (type, extra fields such as `client_platform`, `inbound_origin`) | Reply: OWNER or PEER | Wrapper quoted |
 |---|---|---|---|---|
-| Console (`SendMessageAsync`) | none | | | |
-| Console (`SendMessageAsync`) | builder | | | |
-| Web UI | none | | | |
+| Console (`SendMessageAsync`) | none | `user`; `session_id` = target; no `client_platform` or `inbound_origin` | PEER (2/2 runs) | "Another Claude session sent a message:" before the body, "This came from another Claude session — not typed by your user…" note after |
+| Console (`SendMessageAsync`) | builder | same shape as above | PEER (2/2 runs) | same wrapper |
+| Web UI | none | not captured | OWNER | none. The session also said its two earlier API turns (the create-time `Wait for your task.` and the posted question) both carried the peer wrapper |
 | Console, to a Controller-spawned Builder | builder + memory | | | |
 | MCP `send_message` | none | | | |
 
@@ -46,3 +46,11 @@ Who sent this message: the person who owns this session, or another Claude sessi
 | Console and web both come back OWNER with no wrapper, and the Controller-spawned child agrees | The transport is right. The persona fix (`fyrd/owner-turn-personas`) is the whole job. |
 | Console shows a wrapper or label the web route lacks | Stop and report to the owner. The harness treats API-posted turns differently, and Fyrd must not paper over that (no `client_platform` spoofing, no relaying Controller text as user events). It is a platform question. |
 | Controller-spawned child answers differently from the top-level builder-persona session | The cause is how the session was created, not the persona. Stop and report: the persona fix alone won't be enough. |
+
+## Finding (2026-11-02)
+
+The second outcome row applies: the harness wraps turns that arrive through the API as peer messages, and turns typed on the
+web arrive bare. The session and persona don't change this. In the same session, the web turn read as OWNER and both API turns
+read as PEER. The create-time initial prompt is wrapped too, so every task a Builder receives from Fyrd reads as a peer request.
+The `session_id` stamp from #8 does not change this. Per the rule above, this is a platform question: no `client_platform`
+spoofing and no relaying text as user events. Rows 4 and 5 (Controller-spawned child, MCP `send_message`) are not run yet.
