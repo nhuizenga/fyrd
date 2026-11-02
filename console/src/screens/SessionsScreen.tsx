@@ -184,7 +184,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     autoTop.current = el.scrollTop;
   }, []);
 
-  useLayoutEffect(stickToBottom, [stickToBottom, transcript.items.length, selectedId, hasThread]);
+  useLayoutEffect(stickToBottom, [stickToBottom, transcript.items.length + transcript.hiddenCount, selectedId, hasThread]);
 
   // Content keeps growing after a render (fonts, markdown tables, a deep link's thread appearing late): keep following it.
   useEffect(() => {
@@ -457,6 +457,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 <div className="thread-items" ref={itemsRef}>
                 {transcript.items.length === 0 && !transcript.progress && unshown.length === 0 && (
                   <Text subdued>{transcript.connected ? "No messages yet." : "Loading…"}</Text>
+                )}
+                {transcript.hiddenCount > 0 && (
+                  <Button appearance="ghost" size="small" onClick={transcript.loadMore}>
+                    Load earlier messages ({transcript.hiddenCount})
+                  </Button>
                 )}
                 {transcript.items.map((item) => (
                   <ThreadItem
