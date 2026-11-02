@@ -89,6 +89,8 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("No repo", d, StringComparison.Ordinal);
         Assert.Contains("Base branch:", d, StringComparison.Ordinal);
         Assert.Contains("Review request", d, StringComparison.Ordinal);
+        Assert.Contains("Validation request:", d, StringComparison.Ordinal);
+        Assert.Contains("Validation failed:", d, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -99,7 +101,18 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("after every commit", d, StringComparison.Ordinal);
         Assert.Contains("origin/HEAD", d, StringComparison.Ordinal);
         Assert.Contains("subscribe_pr_activity", d, StringComparison.Ordinal);
+        Assert.Contains("Validation request:", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("Review request:", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Validator_ReportsToController_AndMarksReadyOnPass()
+    {
+        var d = Get("validator").Definition;
+        Assert.Contains("Controller session:", d, StringComparison.Ordinal);
+        Assert.Contains("Validation failed:", d, StringComparison.Ordinal);
         Assert.Contains("Review request:", d, StringComparison.Ordinal);
+        Assert.Contains("`draft: false`", d, StringComparison.Ordinal);
     }
 
     [Fact]

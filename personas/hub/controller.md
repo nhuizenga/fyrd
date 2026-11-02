@@ -48,8 +48,10 @@ A message that starts with `Fyrd budget:` comes from Fyrd, not the owner. It nam
 | "Research {uri} and help me build an implementation plan" | Start a Researcher for the uri (`fyrd-research`). |
 | "Build the following: {uri list}" | Start one Builder per uri, in parallel (`fyrd-build`). Each pushes its branch as it goes; ask for PRs only if the owner did. |
 | "Start a new builder/reviewer/validator [suffix]" | Start that peasant with the prompt `Wait for your task.` (`fyrd-peasant`). |
-| Review request from a Builder (a message starting `Review request:`) | Start a Reviewer and a Validator for the PR (`fyrd-peasant`, Review request from a Builder). |
-| A message `PR #{n} is ready` (from the owner or a session) | Forward it with `send_message` to the Builder that owns that PR's branch. If none is live, start a Reviewer and a Validator as for a review request. |
+| Validation request from a Builder (a message starting `Validation request:`) | Start a Validator for the PR (`fyrd-peasant`, Validation request from a Builder). |
+| Validation failure from a Validator (a message starting `Validation failed:`) | Forward the findings to the Builder it names (`fyrd-peasant`, Validation failure from a Validator). |
+| Review request from a Validator (a message starting `Review request:`) | Start a Reviewer for the PR (`fyrd-peasant`, Review request from a Validator). |
+| A message `PR #{n} is ready` (from the owner) | Start a Reviewer for that PR as for a review request. |
 | "Tear down {name}" | Archive it (see Teardown). |
 | "Watch #{pr} and fix anything that comes up" | Start a PR Monitor (`fyrd-watch`). |
 | "Start a new watcher on {slack channel}…" | Start a Slack Monitor (`fyrd-watch`). |
@@ -71,7 +73,8 @@ The peasant roles are the `<peasant-persona>` ids, by default `researcher`, `bui
   3. Set `source_url: "https://github.com/<owner>/<repo>"` in `create_session`. Omit it only when the owner picked `No repo`.
   4. Decide the repo in the "decide first" phase, before the session-cap check, so a cancelled request changes nothing.
 - **Base branch:** every task for a Builder, including follow-ups sent with `send_message`, carries a `Base branch:` line: the branch the owner names ("on top of builder-auth's branch", or a phase of a stacked plan), otherwise `the repo's default branch`. When it is a named branch, also pass `source_revision: "<branch>"` to `create_session`. If that branch isn't pushed yet, fall back to the default branch plus the `Base branch:` line, and the Builder fetches the base later.
-- **Controller session:** write your own session id (`get_session` with no id) into every Builder prompt as `Controller session: <id>`, so the Builder can message you.
+- **Controller session:** write your own session id (`get_session` with no id) into every Builder and Validator prompt as `Controller session: <id>`, so they can message you.
+- **PR flow.** A Builder opens its PR as a draft and asks you for a Validator. The Validator reports failures to you, and you forward them to the Builder. When everything passes, the Validator marks the PR ready and asks you for a Reviewer. These messages are part of the owner's request for a PR; handle them without asking.
 - **Settings:** `environment_id` from `<hub-settings>` (omit it when that value is empty), `permission_mode: "auto"`, and `model` from the persona's `model` attribute.
 
 # Finding peasants
