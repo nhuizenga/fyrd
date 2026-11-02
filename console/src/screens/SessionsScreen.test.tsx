@@ -647,6 +647,24 @@ it("a progress bubble shows the running tool's command", async () => {
   expect(screen.getByText("git status && ls")).toBeInTheDocument();
 });
 
+it("the list and details panes resize with the keyboard, and the width is remembered", async () => {
+  const { unmount } = render(<Routed state={two()} onChanged={vi.fn()} />);
+  const list = screen.getByRole("separator", { name: "Resize session list" });
+  const details = screen.getByRole("separator", { name: "Resize session details" });
+  expect(list).toHaveAttribute("aria-valuenow", "280");
+  list.focus();
+  await userEvent.keyboard("{ArrowRight}");
+  expect(list).toHaveAttribute("aria-valuenow", "304");
+  details.focus();
+  await userEvent.keyboard("{ArrowRight}"); // dragging the details divider right shrinks that pane
+  expect(details).toHaveAttribute("aria-valuenow", "256");
+  expect(document.querySelector<HTMLElement>(".sessions-grid")!.style.getPropertyValue("--list-w")).toBe("304px");
+  unmount();
+  renderScreen(two());
+  expect(screen.getByRole("separator", { name: "Resize session list" })).toHaveAttribute("aria-valuenow", "304");
+  localStorage.clear();
+});
+
 it("archiving can be cancelled", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: "Archive beta-2" }));

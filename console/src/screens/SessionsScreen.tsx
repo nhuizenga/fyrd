@@ -9,6 +9,7 @@ import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
+import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
 import QuestionGroup from "../components/QuestionGroup";
 import ThreadItem from "../components/ThreadItem";
@@ -24,6 +25,11 @@ const COMPOSER_KEY = "fyrd.composerHeight";
 const COMPOSER_MIN = 72;
 const COMPOSER_MAX = 480;
 const COMPOSER_DEFAULT = 96;
+const LIST_KEY = "fyrd.listWidth";
+const ATTRS_KEY = "fyrd.attrsWidth";
+const SIDE_MIN = 200;
+const SIDE_MAX = 560;
+const SIDE_DEFAULT = 280;
 
 const readStored = (key: string): string | null => {
   try { return localStorage.getItem(key); } catch { return null; }
@@ -82,6 +88,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     setComposerHeight(next);
     writeStored(COMPOSER_KEY, String(next));
   };
+  const storedWidth = (key: string) => {
+    const n = Number(readStored(key));
+    return n >= SIDE_MIN && n <= SIDE_MAX ? n : SIDE_DEFAULT;
+  };
+  const [listWidth, setListWidth] = useState(() => storedWidth(LIST_KEY));
+  const [attrsWidth, setAttrsWidth] = useState(() => storedWidth(ATTRS_KEY));
+  const resizeList = (w: number) => { setListWidth(w); writeStored(LIST_KEY, String(w)); };
+  const resizeAttrs = (w: number) => { setAttrsWidth(w); writeStored(ATTRS_KEY, String(w)); };
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
@@ -312,7 +326,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         </div>
         {error && <Alert status="danger" title={error} role="alert" />}
       </div>
-      <div className="sessions-grid">
+      <div className="sessions-grid" style={{ "--list-w": `${listWidth}px`, "--attrs-w": `${attrsWidth}px` } as React.CSSProperties}>
         <aside className="pane pane-list" aria-label="Session list">
           {controller && (
             <ul className="session-list">
@@ -385,6 +399,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
             )))}
           </ul>
         </aside>
+        <ColumnDivider label="Resize session list" width={listWidth} min={SIDE_MIN} max={SIDE_MAX} direction={1} onChange={resizeList} />
         <section className="pane pane-thread" aria-label="Conversation">
           {!selected ? (
             <Text subdued>Select a session to see its details.</Text>
@@ -507,6 +522,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
             </>
           )}
         </section>
+        <ColumnDivider label="Resize session details" width={attrsWidth} min={SIDE_MIN} max={SIDE_MAX} direction={-1} onChange={resizeAttrs} />
         <aside className="pane pane-attrs" aria-label="Session details">
           {selected && (
             <>
