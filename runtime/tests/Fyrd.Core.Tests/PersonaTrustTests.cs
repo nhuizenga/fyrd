@@ -44,6 +44,14 @@ public sealed class PersonaTrustTests : IDisposable
     }
 
     [Fact]
+    public void PeasantsKnowSharedMemoryWaitsForTheOwner()
+    {
+        foreach (var id in Peasants)
+            Assert.Contains("waits for the owner's approval", Def(id), StringComparison.Ordinal);
+        Assert.Contains("waits for the owner's approval", Def("controller"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ControllerNamesTheFyrdServicePrefixes()
     {
         var d = Def("controller");

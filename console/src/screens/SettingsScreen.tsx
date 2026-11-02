@@ -4,7 +4,8 @@ import DeleteIcon from "@servicetitan/anvil2/assets/icons/material/round/delete.
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import * as api from "../api";
 import { navigate } from "../route";
-import type { HubBudgetView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView } from "../types";
+import { relativeTime } from "../time";
+import type { HubBudgetView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
 const MODELS = [
@@ -96,7 +97,7 @@ function EnvironmentCard(_: CardProps) {
 }
 
 /** What the Settings screen hands every section card. */
-type CardProps = { budget?: HubBudgetView | null };
+type CardProps = { budget?: HubBudgetView | null; pendingMemory?: number; onChanged?: () => void | Promise<void> };
 
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -397,8 +398,64 @@ function ScopeGroup({ scope, onChanged, setError }: { scope: MemoryScopeView; on
   );
 }
 
-function MemoryCard(_: CardProps) {
+function PendingMemoryGroup({ entries, onChanged, setError }: { entries: PendingMemoryEntry[]; onChanged: () => Promise<void>; setError: (s: string | null) => void }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // One request at a time: a second click would hit an entry that is already gone and show a 404.
+  const attempt = async (fn: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      setEditingId(null);
+      await onChanged();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <Text variant="headline" el="h4" size="small">Waiting for your approval</Text>
+      <Text size="small" subdued>Agents proposed these for shared memory. Other sessions see them only after you approve.</Text>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {entries.map((e) => (
+          <li key={e.id} style={{ display: "flex", flexDirection: "column", gap: 6, padding: "6px 0" }}>
+            {editingId === e.id ? (
+              <Textarea label="Edit proposed memory" rows={2} value={editText} onChange={(ev) => setEditText(ev.target.value)} />
+            ) : (
+              <Text>{e.text}</Text>
+            )}
+            <Text size="small" subdued>From {e.source} · {relativeTime(e.at)}</Text>
+            <div style={{ display: "flex", gap: 8 }}>
+              {editingId === e.id ? (
+                <>
+                  <Button appearance="primary" size="small" disabled={busy} onClick={() => attempt(() => api.approvePendingMemory(e.id, editText.trim()))}>Save &amp; approve</Button>
+                  <Button appearance="ghost" size="small" disabled={busy} onClick={() => setEditingId(null)}>Cancel</Button>
+                </>
+              ) : (
+                <>
+                  <Button appearance="primary" size="small" disabled={busy} onClick={() => attempt(() => api.approvePendingMemory(e.id))}>Approve</Button>
+                  <Button appearance="secondary" size="small" disabled={busy} onClick={() => { setEditingId(e.id); setEditText(e.text); }}>Edit</Button>
+                  <Button appearance="ghost" size="small" disabled={busy} onClick={() => attempt(() => api.rejectPendingMemory(e.id))}>Reject</Button>
+                </>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MemoryCard({ onChanged, pendingMemory }: CardProps) {
   const [memory, setMemory] = useState<HubMemory>({ scopes: [] });
+  const [pending, setPending] = useState<PendingMemoryEntry[]>([]);
   const [scope, setScope] = useState("shared");
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -406,11 +463,15 @@ function MemoryCard(_: CardProps) {
   const load = useCallback(async () => {
     try {
       setMemory((await api.getHubMemory()) ?? { scopes: [] });
+      setPending((await api.getPendingMemory()) ?? []);
     } catch (e) {
       setError(errText(e));
     }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  // Approving or rejecting changes the count on the nav badge, so refresh the hub state too.
+  const loadAll = useCallback(async () => { await load(); await onChanged?.(); }, [load, onChanged]);
+  // The nav badge follows the polled count, so reload when it changes: a proposal that arrives while this card is open shows up.
+  useEffect(() => { void load(); }, [load, pendingMemory]);
 
   const scopes = [...memory.scopes].sort((a, b) => Number(b.scope === "shared") - Number(a.scope === "shared"));
   // The Controller's memory is Shared memory, so it is not offered as a scope of its own.
@@ -445,6 +506,7 @@ function MemoryCard(_: CardProps) {
       <Textarea label="New memory entry" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
       <div><Button appearance="primary" onClick={add}>Add entry</Button></div>
       <Text size="small" subdued>{APPLY_NOTE}</Text>
+      {pending.length > 0 && <PendingMemoryGroup entries={pending} onChanged={loadAll} setError={setError} />}
       {total === 0 ? (
         <Text subdued>No entries yet. Agents add entries as they work, or add one above.</Text>
       ) : (
@@ -461,7 +523,7 @@ const SECTIONS = [
   { id: "memory", label: "Agent memory", Card: MemoryCard },
 ] as const;
 
-export default function SettingsScreen({ state, routeId }: ScreenProps) {
+export default function SettingsScreen({ state, onChanged, routeId }: ScreenProps) {
   const { id: section, Card } = SECTIONS.find((s) => s.id === routeId) ?? SECTIONS[0];
   return (
     <>
@@ -481,7 +543,7 @@ export default function SettingsScreen({ state, routeId }: ScreenProps) {
             </button>
           ))}
         </nav>
-        <div className="settings-body"><Card budget={state?.budget} /></div>
+        <div className="settings-body"><Card budget={state?.budget} pendingMemory={state?.pendingMemory} onChanged={onChanged} /></div>
       </div>
     </>
   );
