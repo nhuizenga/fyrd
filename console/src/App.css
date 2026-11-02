@@ -47,7 +47,8 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .composer-input textarea { height: 100%; resize: none; }
 .composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-hints { display: inline-flex; align-items: center; gap: 12px; }
-.composer-hint { display: inline-flex; align-items: center; }
+.composer-hint { display: inline-flex; align-items: center; gap: 4px; }
+.composer-hint-label { font-size: 12px; color: var(--a2-foreground-color-subdued); }
 .session-row-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .pr-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .pr-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
