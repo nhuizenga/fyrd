@@ -53,7 +53,9 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .pr-actions { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 .pr-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pr-badges { display: inline-flex; gap: 4px; }
-.pr-merge, .pr-ready { --a2-button-color: var(--a2-border-color-success); color: var(--a2-border-color-success); }
+/* Anvil's secondary button sets its own color, so raise specificity and colour the icon itself. */
+.pr-actions .pr-merge, .pr-actions .pr-ready { --a2-button-color: var(--a2-border-color-success); color: var(--a2-border-color-success); }
+.pr-actions .pr-merge svg, .pr-actions .pr-ready svg { fill: var(--a2-border-color-success); color: var(--a2-border-color-success); }
 .pr-list { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 1100px) { .sessions-grid { grid-template-columns: var(--list-w, 240px) 12px minmax(0, 1fr); } .pane-attrs, .column-divider-attrs { display: none; } }
 
