@@ -904,6 +904,18 @@ describe("sending a message", () => {
     d.resolve();
   });
 
+  it("matches the echo despite whitespace differences, from seq 0, one echo per message", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const box = await open();
+    await userEvent.type(box, "a  b{Enter}");
+    await userEvent.type(box, "a  b{Enter}");
+    expect(screen.getAllByLabelText("Sending")).toHaveLength(2);
+    FakeEventSource.latest().emit("item", item({ seq: 0, key: "e0", role: "user", text: "a b" }));
+    expect(screen.getAllByLabelText("Sending")).toHaveLength(1);
+    FakeEventSource.latest().emit("item", item({ seq: 1, key: "e1", role: "user", text: "a b" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
   it("typing does not re-render the transcript", async () => {
     const box = await open();
     FakeEventSource.latest().emit("item", item({ text: "first" }));

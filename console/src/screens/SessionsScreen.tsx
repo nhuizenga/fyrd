@@ -94,12 +94,19 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
   const [adoptId, setAdoptId] = useState("");
   const transcript = useTranscript(selectedId);
-  // Optimistic messages show until the transcript has a newer user item with the same text.
-  const outgoing = useMemo(
-    () => outbox.filter((m) => m.sessionId === selectedId
-      && !transcript.items.some((i) => i.seq > m.seqAtSend && i.role === "user" && i.kind !== "question" && i.text.trim() === m.text)),
-    [outbox, selectedId, transcript.items],
-  );
+  // Optimistic messages show until the transcript has a newer user item with the same text (whitespace-normalised);
+  // each echo answers only one message, so sending the same text twice keeps the second bubble until its own echo.
+  const outgoing = useMemo(() => {
+    const norm = (t: string) => t.replace(/\s+/g, " ").trim();
+    const taken = new Set<string>();
+    return outbox.filter((m) => {
+      if (m.sessionId !== selectedId) return false;
+      const echo = transcript.items.find((i) => i.seq > m.seqAtSend && i.role === "user" && i.kind !== "question"
+        && !taken.has(i.key) && norm(i.text) === norm(m.text));
+      if (echo) taken.add(echo.key);
+      return !echo;
+    });
+  }, [outbox, selectedId, transcript.items]);
 
   const logRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<HTMLDivElement>(null);
@@ -253,8 +260,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const blocked = cost?.blocked ?? null;
   const sending = selected ? sendingIds.includes(selected.id) : false;
   // The newest loaded item's seq (not an index: the thread shows only a window of the items, which shifts as new ones arrive).
-  const latestSeq = useRef(0);
-  latestSeq.current = transcript.items.reduce((m, i) => Math.max(m, i.seq), 0);
+  const latestSeq = useRef(-1);
+  latestSeq.current = transcript.items.reduce((m, i) => Math.max(m, i.seq), -1);
   const send = async (text: string): Promise<boolean> => {
     if (!selected) return false;
     const sentTo = selected.id;
