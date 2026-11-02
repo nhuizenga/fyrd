@@ -81,6 +81,15 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Controller_RoutesTheConsoleNudges()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("\"Validate PR <url>\" (from the owner)", d, StringComparison.Ordinal);
+        Assert.Contains("PR #{n} is ready: <url>", d, StringComparison.Ordinal);
+        Assert.Contains("Watch <url> and fix anything that comes up", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Controller_MayCloneOnlyToRead()
     {
         var d = Get("controller").Definition;
