@@ -4,6 +4,7 @@ import { vi } from "vitest";
 import * as api from "../api";
 import { config, hubState } from "../test/fixtures";
 import { useRoute } from "../route";
+import { getItemLimit } from "../useTranscript";
 import type { HubMemory, HubPersona, HubState, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SettingsScreen from "./SettingsScreen";
@@ -48,7 +49,7 @@ beforeEach(() => {
   vi.mocked(api.deletePersona).mockResolvedValue(undefined);
 });
 
-const renderSettings = async (section: "Environment" | "Spend limits" | "Personas" | "Agent memory" = "Personas", state = hubState()) => {
+const renderSettings = async (section: "Environment" | "Spend limits" | "Display" | "Personas" | "Agent memory" = "Personas", state = hubState()) => {
   render(<Routed state={state} onChanged={vi.fn()} />);
   await userEvent.click(screen.getByRole("button", { name: section }));
   if (section === "Personas") await screen.findByRole("button", { name: /^Builder/ });
@@ -58,7 +59,7 @@ const renderSettings = async (section: "Environment" | "Spend limits" | "Persona
 it("settings sections are a left nav showing one section at a time", async () => {
   render(<Routed state={hubState()} onChanged={vi.fn()} />);
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
-  expect(nav).toHaveTextContent("EnvironmentSpend limitsPersonasAgent memory");
+  expect(nav).toHaveTextContent("EnvironmentSpend limitsDisplayPersonasAgent memory");
   expect(screen.getByRole("heading", { name: "Environment" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Personas" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
@@ -255,6 +256,24 @@ it("spend limits load, validate and save both limits", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Save fyrd limit" }));
   expect(api.updateConfig).toHaveBeenCalledWith({ fyrdDailyLimitUsd: 900 });
   expect(await screen.findByText("Fyrd limit saved.")).toBeInTheDocument();
+});
+
+it("display: the messages-per-conversation limit loads, validates and saves to this browser", async () => {
+  localStorage.clear();
+  await renderSettings("Display");
+  const field = screen.getByLabelText("Messages shown per conversation");
+  expect(field).toHaveValue("100");
+  await userEvent.clear(field);
+  await userEvent.type(field, "5");
+  await userEvent.click(screen.getByRole("button", { name: "Save message limit" }));
+  expect(screen.getByText("Enter a whole number from 10 to 5000.")).toBeInTheDocument();
+  expect(getItemLimit()).toBe(100);
+  await userEvent.clear(field);
+  await userEvent.type(field, " 250 ");
+  await userEvent.click(screen.getByRole("button", { name: "Save message limit" }));
+  expect(await screen.findByText(/Message limit saved/)).toBeInTheDocument();
+  expect(getItemLimit()).toBe(250);
+  localStorage.clear();
 });
 
 const budget = (o: Partial<NonNullable<HubState["budget"]>> = {}) => ({

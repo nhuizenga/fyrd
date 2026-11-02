@@ -250,6 +250,7 @@ public class HubApiTests
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_other/message", new { text = "hi" });
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -259,7 +260,21 @@ public class HubApiTests
         Seed(f);
         var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "hello" });
         Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
-        Assert.Equal((SessionId, "hello"), Assert.Single(f.Cloud.Sent));
+        // The owner's own CLI sends composer turns, so the session reads them as the owner's, not a peer's.
+        Assert.Equal((SessionId, "hello"), Assert.Single(f.Owner.Sent));
+        Assert.Empty(f.Cloud.Sent);
+    }
+
+    [Fact]
+    public async Task Message_CliFails_502WithItsError()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        f.Owner.Fail = new OwnerMessageException("cloud session x is archived and cannot accept new messages");
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "hello" });
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Equal("cloud session x is archived and cannot accept new messages",
+            (await ReadJson(r)).GetProperty("detail").GetString());
     }
 
     [Fact]
@@ -273,6 +288,7 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.BadRequest,
             (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = new string('x', 20_001) })).StatusCode);
         Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -812,6 +828,7 @@ public class HubApiTests
         Assert.Equal(detail, (await ReadJson(m)).GetProperty("detail").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/hub/sessions/{SessionId}/resume", null)).StatusCode);
         Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
         // Pause stays available so the owner can still stop a running session.
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/pause", null)).StatusCode);
     }

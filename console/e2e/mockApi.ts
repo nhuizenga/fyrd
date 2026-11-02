@@ -5,7 +5,7 @@ const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString(
 
 export const session = (o: Partial<HubSessionView>): HubSessionView => ({
   id: "session_x", title: "builder-x", role: "builder", status: "idle", repo: null, branch: null,
-  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), tags: ["fyrd-hub", "fyrd-role-builder"], pullRequests: [], ...o,
+  createdAt: minutesAgo(60 * 26), lastActivity: minutesAgo(5), pullRequests: [], tags: ["fyrd-hub", "fyrd-role-builder"], ...o,
 });
 
 export const SESSIONS: HubSessionView[] = [
@@ -81,8 +81,9 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     if (req.method() !== "GET") sent.push({ url: path, body: req.postData() ? req.postDataJSON() : null });
     const stream = /^\/api\/hub\/sessions\/([^/]+)\/stream$/.exec(path);
     if (stream) {
+      const after = Number(url.searchParams.get("after") ?? -1); // like the server: resume after this seq
       return route.fulfill({
-        status: 200, headers: { "content-type": "text/event-stream" }, body: sse(opts.transcripts?.[stream[1]] ?? []),
+        status: 200, headers: { "content-type": "text/event-stream" }, body: sse((opts.transcripts?.[stream[1]] ?? []).filter((i) => i.seq > after)),
       });
     }
     const exp = /^\/api\/hub\/sessions\/([^/]+)\/export$/.exec(path);
