@@ -116,48 +116,42 @@ public class HubTranscriptTests
     public void OtherOrMalformedPayloads_NoItemsNoThrow(string payload) =>
         Assert.Empty(HubTranscript.Map(Event(1, payload)));
 
+    private static IReadOnlyList<TranscriptItem> MapFixture(string name, ISet<string> ids) =>
+        FixtureEvents.Load(name).SelectMany((ev, i) => HubTranscript.Map(new StreamedEvent(100 + i, ev), ids)).ToList();
+
     [Fact]
-    public void Assistant_AgentToolUse_WorkerItemWithDescription()
+    public void RealForkEvents_WorkerStartedThenResultFromTaskNotification_AndNothingElse()
     {
+        // Captured from a cloud session: background_tasks_changed, task_started (local_agent), the "launched" tool_result,
+        // the fork's own assistant message (parent_tool_use_id set), task_updated, task_notification, background_tasks_changed.
         var ids = new HashSet<string>();
-        var items = HubTranscript.Map(Event(11, """
-            {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_w1","name":"Agent","input":{"description":"build: initial task","subagent_type":"fork","run_in_background":true,"prompt":"You are a worker for Builder b-1"}}]}}
-            """), ids);
-        var w = Assert.Single(items);
-        Assert.Equal(("11:0", "agent", "worker", "build: initial task"), (w.Key, w.Role, w.Kind, w.Text));
-        Assert.Equal(("toolu_w1", "fork"), (w.ToolUseId, w.Detail));
-        Assert.Contains("toolu_w1", ids);
+        var items = MapFixture("fork-worker-events.json", ids);
+        Assert.Equal(["worker", "worker-result"], items.Select(i => i.Kind));
+        Assert.Equal("Fork of this session", items[0].Text);
+        Assert.Equal("fork", items[0].Detail);
+        Assert.Equal("toolu_011Z6kMxGHdjM8Pymjn3LFcC", items[0].ToolUseId);
+        Assert.Equal(items[0].ToolUseId, items[1].ToolUseId);
+        Assert.Equal("completed", items[1].Status);
+        Assert.StartsWith("Task: acknowledge the fork", items[1].Text);
     }
 
     [Fact]
-    public void Assistant_SubagentAgentToolUse_Ignored()
+    public void BashTaskNotification_IsNotAWorkerResult()
     {
-        var items = HubTranscript.Map(Event(12, """
-            {"type":"assistant","parent_tool_use_id":"toolu_w1","message":{"content":[{"type":"tool_use","id":"toolu_x","name":"Agent","input":{"description":"nested"}}]}}
+        var items = HubTranscript.Map(Event(20, """
+            {"type":"system","subtype":"task_notification","status":"completed","summary":"ls","task_id":"b1","tool_use_id":"toolu_bash"}
             """), new HashSet<string>());
         Assert.Empty(items);
+        Assert.Empty(HubTranscript.Map(Event(21, """
+            {"type":"system","subtype":"task_started","task_type":"local_bash","description":"ls","task_id":"b1","tool_use_id":"toolu_bash"}
+            """), new HashSet<string>()));
     }
 
     [Fact]
-    public void User_ToolResultForWorker_WorkerResultItem_OthersIgnored()
+    public void Assistant_WithParentToolUse_IsAWorkersMessage_NotTheAgents()
     {
-        var ids = new HashSet<string> { "toolu_w1" };
-        var items = HubTranscript.Map(Event(13, """
-            {"type":"user","parent_tool_use_id":null,"message":{"content":[
-              {"type":"tool_result","tool_use_id":"toolu_w1","content":[{"type":"text","text":"Status: done\nHand-off: pushed abc123"}]},
-              {"type":"tool_result","tool_use_id":"toolu_other","content":"ignored"}]}}
-            """), ids);
-        var r = Assert.Single(items);
-        Assert.Equal(("agent", "worker-result", "toolu_w1"), (r.Role, r.Kind, r.ToolUseId));
-        Assert.Equal("Status: done\nHand-off: pushed abc123", r.Text);
-    }
-
-    [Fact]
-    public void User_SubagentPromptWithWorkerIds_StillIgnored()
-    {
-        var items = HubTranscript.Map(Event(14, """
-            {"type":"user","parent_tool_use_id":"toolu_w1","message":{"content":"You are a worker for Builder b-1"}}
-            """), new HashSet<string> { "toolu_w1" });
-        Assert.Empty(items);
+        Assert.Empty(HubTranscript.Map(Event(22, """
+            {"type":"assistant","parent_tool_use_id":"toolu_w1","agent_id":"a1","message":{"content":[{"type":"text","text":"worker chatter"}]}}
+            """)));
     }
 }

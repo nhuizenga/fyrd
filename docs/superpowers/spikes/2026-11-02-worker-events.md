@@ -1,23 +1,29 @@
 # Spike: how forked background workers appear in session events
 
-**Status: not captured.** The Builder session that implemented Phase 2 had no cloud-session credentials or `spikes/cloud-sessions` harness access, so no live capture was made and no sanitised fixtures were saved. The console work follows the plan's fallback ("if worker events never reach the events API, keep the chip, the `Agent` description and the result card"), with the shapes below **assumed, not verified**. Tests use synthetic payloads built from them.
+**Status: captured** from an exported session (a Builder that forked one worker with `Agent`, `subagent_type: "fork"`). Sanitised events: `runtime/tests/Fyrd.Core.Tests/Fixtures/fork-worker-events.json`.
 
-## Assumed shapes (verify against a live Phase 1 peasant)
+## Findings (saved events)
 
-- Parent `assistant` event: `tool_use` block, `name: "Agent"`, `input: { description, subagent_type: "fork", run_in_background: true, prompt }`.
-- Immediate `tool_result` in a later `user` event (`parent_tool_use_id: null`) carrying the agent id; the finished worker's result arrives as another `tool_result` or a task notification. `HubTranscript` shows any `tool_result` whose `tool_use_id` is a known `Agent` call as a collapsed `worker-result`.
-- Worker-internal events carry `parent_tool_use_id` and are still dropped everywhere (`HubTranscript`, `ParseEphemeralFrame`), so worker prompts never look like the owner.
+| Event | Shape |
+|---|---|
+| Parent `assistant` | `tool_use` `name: "Agent"`, `input: { description, prompt, subagent_type: "fork" }` (plus `run_in_background` when the persona sets it). |
+| `system/background_tasks_changed` | `tasks: [{ task_id, task_type: "local_agent", subagent_type: "fork", description, run_id }]`; `tasks: []` once none is left. A ready-made "workers running" list. |
+| `system/task_started` | `task_type: "local_agent"`, `subagent_type`, `description`, `prompt`, `is_backgrounded`, `spawn_depth`, `task_id`, `tool_use_id` (the `Agent` call's id). Bash tasks are `task_type: "local_bash"`. |
+| Parent `user` tool_result | Only `"Async agent launched successfully … agentId …"`, **not** the result. |
+| Worker's own messages | `assistant` events with `parent_tool_use_id` = the `Agent` call's id, `agent_id`, `subagent_type`, `task_description`. Saved, so a transcript must skip them. |
+| `system/task_updated` | `patch: { status, end_time }`. |
+| `system/task_notification` | `status`, `summary` (= the worker's final reply), `output_file`, `task_id`, `tool_use_id`. This is the completion signal. |
+| `tool_progress` (from another export) | A main-agent Bash heartbeat carries `parent_tool_use_id` = the Bash call's own id, so don't treat "has a parent" as "is a worker". |
 
-## What to capture
+## What the console does with it
 
-1. The `Agent` `tool_use` input and the first `tool_result`.
-2. Whether worker events reach saved events, the ephemeral stream, or neither; whether `tool_progress` heartbeats name the worker.
-3. The completion event on the parent (`task_notification`?) and whether it is a `tool_result` or user text.
-4. How `set_session_tags` shows in `get_session` and the list response.
-5. Whether `CostGuard` counts subagent usage.
+- `worker` item from `task_started` with `task_type: "local_agent"`; `worker-result` item from `task_notification` for a known worker (its `summary` and `status`). Bash tasks are ignored.
+- Assistant events with `parent_tool_use_id` are skipped (previously a worker's reply would have shown as the peasant's text).
+- The "workers running" chip uses the session tag; `background_tasks_changed` is a possible second source, not used yet.
 
-## Not done because of this
+## Still unverified
 
-- Per-worker "latest tool" line (needs worker `tool_progress`/stream events in the ephemeral stream).
+- Whether worker `stream_event`/`tool_progress` frames reach the ephemeral stream (no per-worker "latest tool" line yet).
+- Whether `CostGuard` counts subagent usage.
 - Playwright `console/e2e` mock for the chip and cards (Vitest covers them).
-- Stateless limitation: `workerToolIds` lives for one SSE stream, so after a client reconnect with `Last-Event-ID` the result of a worker started before the reconnect is not shown as a `worker-result`.
+- `workerToolIds` lives for one SSE stream, so after a client reconnect the result of a worker started earlier is not shown as a `worker-result`.

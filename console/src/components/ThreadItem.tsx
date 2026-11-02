@@ -31,7 +31,7 @@ export default function ThreadItem({ item, pending, onChanged }: {
   if (item.kind === "worker-result") {
     return (
       <details className="msg msg-agent msg-worker-result">
-        <summary>Worker result</summary>
+        <summary>Worker result{item.status ? ` (${item.status})` : ""}</summary>
         <Markdown text={item.text} />
       </details>
     );

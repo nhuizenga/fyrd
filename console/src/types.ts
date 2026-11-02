@@ -118,7 +118,7 @@ export interface TranscriptItem {
   at: string;
   questions?: TranscriptQuestion[] | null;
   toolUseId?: string | null;
-  /** `worker` items: `text` is the worker's description, `detail` its subagent type. `worker-result` items: `text` is the returned result, `toolUseId` links it to its `worker`. */
+  /** `worker` items: `text` is the worker's description, `detail` its subagent type. `worker-result` items: `text` is the worker's final reply (the `task_notification` summary), `status` how it ended, `toolUseId` links it to its `worker`. */
   /** Progress frames only: what the agent is doing now (a tool, "Thinking…"); `text` is the reply streamed so far. Both empty = nothing in progress. */
   status?: string | null;
   /** Progress frames only: the running tool's main argument, such as the Bash command. */
