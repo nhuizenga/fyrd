@@ -1,9 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { FakeEventSource, item } from "./test/fakeEventSource";
-import { clearTranscriptCache, DEFAULT_ITEM_LIMIT, useTranscript } from "./useTranscript";
+import { clearTranscriptCache, DEFAULT_ITEM_LIMIT, getItemLimit, setItemLimit, useTranscript } from "./useTranscript";
 
 beforeEach(() => {
+  localStorage.clear();
   FakeEventSource.instances = [];
   clearTranscriptCache();
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -69,4 +70,24 @@ it("resets the window when switching sessions", () => {
   rerender({ id: "a" });
   expect(result.current.items).toHaveLength(DEFAULT_ITEM_LIMIT);
   expect(result.current.hiddenCount).toBe(10);
+});
+
+it("uses the configured limit for the window and for each load-more page", () => {
+  setItemLimit(20);
+  const { result } = renderHook(() => useTranscript("a"));
+  for (let i = 0; i < 50; i++) FakeEventSource.latest().emit("item", item());
+  expect(result.current.items).toHaveLength(20);
+  expect(result.current.hiddenCount).toBe(30);
+  act(() => result.current.loadMore());
+  expect(result.current.items).toHaveLength(40);
+});
+
+it("falls back to the default for a missing or invalid stored limit", () => {
+  expect(getItemLimit()).toBe(DEFAULT_ITEM_LIMIT);
+  localStorage.setItem("fyrd.transcriptItemLimit", "3");
+  expect(getItemLimit()).toBe(DEFAULT_ITEM_LIMIT);
+  localStorage.setItem("fyrd.transcriptItemLimit", "abc");
+  expect(getItemLimit()).toBe(DEFAULT_ITEM_LIMIT);
+  setItemLimit(250);
+  expect(getItemLimit()).toBe(250);
 });

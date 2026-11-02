@@ -5,6 +5,7 @@ import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?
 import * as api from "../api";
 import { navigate } from "../route";
 import { relativeTime } from "../time";
+import { getItemLimit, MAX_ITEM_LIMIT, MIN_ITEM_LIMIT, setItemLimit } from "../useTranscript";
 import type { HubBudgetView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
@@ -207,6 +208,43 @@ function SpendLimitsCard({ budget }: CardProps) {
         </Button>
       </div>
       <Text size="small" subdued>The Controller is never interrupted or blocked by these limits.</Text>
+    </section>
+  );
+}
+
+function DisplayCard(_: CardProps) {
+  const [limit, setLimit] = useState(() => String(getItemLimit()));
+  const [limitError, setLimitError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  return (
+    <section className="card" aria-labelledby="display-h">
+      <Text variant="headline" el="h3" size="medium" id="display-h">Display</Text>
+      <Text subdued>Stored in this browser only.</Text>
+      {saved && <Text role="status">{saved}</Text>}
+      <TextField
+        label="Messages shown per conversation"
+        description={`The newest messages rendered when a session opens; "Load earlier messages" adds this many more. Whole number, ${MIN_ITEM_LIMIT} to ${MAX_ITEM_LIMIT}.`}
+        inputMode="numeric"
+        value={limit}
+        error={limitError ?? undefined}
+        onChange={(e) => setLimit(e.target.value)}
+      />
+      <div>
+        <Button
+          appearance="primary"
+          aria-label="Save message limit"
+          onClick={() => {
+            const n = parseWholeNumber(limit, MIN_ITEM_LIMIT, MAX_ITEM_LIMIT);
+            if (n === null) { setSaved(null); return setLimitError(rangeMessage(MIN_ITEM_LIMIT, MAX_ITEM_LIMIT)); }
+            setLimitError(null);
+            setLimit(String(n));
+            setItemLimit(n);
+            setSaved("Message limit saved. It applies the next time you open a session.");
+          }}
+        >
+          Save
+        </Button>
+      </div>
     </section>
   );
 }
@@ -519,6 +557,7 @@ function MemoryCard({ onChanged, pendingMemory }: CardProps) {
 const SECTIONS = [
   { id: "environment", label: "Environment", Card: EnvironmentCard },
   { id: "limits", label: "Spend limits", Card: SpendLimitsCard },
+  { id: "display", label: "Display", Card: DisplayCard },
   { id: "personas", label: "Personas", Card: PersonasCard },
   { id: "memory", label: "Agent memory", Card: MemoryCard },
 ] as const;

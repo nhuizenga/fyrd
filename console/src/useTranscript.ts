@@ -1,8 +1,28 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TranscriptItem } from "./types";
 
-/** How many of the newest items are rendered at first; "load more" widens the window by this much. */
+/** How many of the newest items are rendered at first, unless the owner changed it in Settings; "load more" widens the window by this much. */
 export const DEFAULT_ITEM_LIMIT = 100;
+export const MIN_ITEM_LIMIT = 10;
+export const MAX_ITEM_LIMIT = 5000;
+const LIMIT_KEY = "fyrd.transcriptItemLimit";
+
+/** The configured render limit (a per-browser setting), or the default when unset or invalid. */
+export function getItemLimit(): number {
+  try {
+    const n = Number(window.localStorage.getItem(LIMIT_KEY));
+    if (Number.isInteger(n) && n >= MIN_ITEM_LIMIT && n <= MAX_ITEM_LIMIT) return n;
+  } catch { /* storage unavailable: use the default */ }
+  return DEFAULT_ITEM_LIMIT;
+}
+
+/** Saves the render limit; takes effect the next time a session is selected. */
+export function setItemLimit(n: number) {
+  try {
+    if (n === DEFAULT_ITEM_LIMIT) window.localStorage.removeItem(LIMIT_KEY);
+    else window.localStorage.setItem(LIMIT_KEY, String(n));
+  } catch { /* storage unavailable: the setting just won't stick */ }
+}
 /** Sessions whose loaded conversations are kept for instant re-selection; the least recently used is dropped past this. */
 const MAX_CACHED_SESSIONS = 20;
 
@@ -48,11 +68,11 @@ const empty: State = { items: [], progress: null, connected: false, fault: null 
  */
 export function useTranscript(sessionId: string | null): Transcript {
   const [transcript, setTranscript] = useState<State>(empty);
-  const [limit, setLimit] = useState(DEFAULT_ITEM_LIMIT);
-  const loadMore = useCallback(() => setLimit((l) => l + DEFAULT_ITEM_LIMIT), []);
+  const [limit, setLimit] = useState(getItemLimit);
+  const loadMore = useCallback(() => setLimit((l) => l + getItemLimit()), []);
 
   useEffect(() => {
-    setLimit(DEFAULT_ITEM_LIMIT);
+    setLimit(getItemLimit());
     const cached = sessionId ? cache.get(sessionId) ?? [] : [];
     setTranscript(sessionId ? { ...empty, items: cached, progress: lastProgress.get(sessionId) ?? null } : empty);
     if (!sessionId) return;
