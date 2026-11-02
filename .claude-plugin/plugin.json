@@ -1,11 +1,7 @@
 {
   "name": "fyrd",
   "description": "Build software with an army of specialized agents, managed from a one-click console.",
-<<<<<<< HEAD
   "version": "0.2.9",
-=======
-  "version": "0.2.9",
->>>>>>> fyrd/owner-turn-personas
   "author": {
     "name": "nhuizenga",
     "email": "nhuizenga@servicetitan.com"
