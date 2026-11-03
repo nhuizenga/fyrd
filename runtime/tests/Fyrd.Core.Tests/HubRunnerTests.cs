@@ -10,6 +10,7 @@ public sealed class HubRunnerTests : IDisposable
     private readonly TempHome _home = new();
     private readonly string _seeds = Path.Combine(Path.GetTempPath(), "fyrd-seeds-" + Guid.NewGuid());
     private readonly FakeCloudSessions _cloud = new();
+    private readonly FakeOwnerMessages _owner = new();
     private readonly FixedTime _time = new(DateTimeOffset.Parse("2026-10-31T12:00:00Z"));
     private readonly HubMemory _memory;
     private readonly HubPersonas _personas;
@@ -53,7 +54,7 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     private HubRunner Make(IGitHub? gh = null) =>
-        new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard, _pending,
+        new(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard, _pending, _owner,
             gh is null ? null : new OwnedPullRequests(gh, _time));
 
     private static CloudSession Hub(string id, string title, string status = "idle", string? role = null,
@@ -123,7 +124,7 @@ public sealed class HubRunnerTests : IDisposable
 
         Assert.Equal("Always squash.", Assert.Single(_pending.List()).Text);
         Assert.Empty(_memory.List(HubMemory.Shared));
-        Assert.DoesNotContain(_cloud.Sent, m => m.Text.Contains("Fyrd memory update.", StringComparison.Ordinal));
+        Assert.DoesNotContain(_owner.Sent, m => m.Text.Contains("Fyrd memory update.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -364,13 +365,13 @@ public sealed class HubRunnerTests : IDisposable
         _cloud.SetByTag("fyrd-hub");
         var runner = Make();
         await runner.PollOnceAsync(default);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
 
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
         await runner.PollOnceAsync(default);
         await runner.PollOnceAsync(default);
 
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.Equal("session_ctl", sent.SessionId);
         Assert.StartsWith(ControllerManager.PromptPreamble, sent.Text);
         Assert.Contains("<controller-skill name=\"fyrd-build\"", sent.Text);
@@ -390,11 +391,11 @@ public sealed class HubRunnerTests : IDisposable
         _cloud.SetSession(new CloudSession("session_ctl", "controller", status, "connected", null, [], FakeCloudSessions.Empty));
         var runner = Make();
         await runner.PollOnceAsync(default);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
 
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "idle", "connected", null, [], FakeCloudSessions.Empty));
         await runner.PollOnceAsync(default);
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
     }
 
     [Fact]
@@ -406,7 +407,7 @@ public sealed class HubRunnerTests : IDisposable
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
         await Make().PollOnceAsync(default);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
     }
 
     [Fact]
@@ -418,7 +419,7 @@ public sealed class HubRunnerTests : IDisposable
         var runner = Make();
         await runner.PollOnceAsync(default);
         await runner.PollOnceAsync(default);
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.StartsWith(ControllerManager.PromptPreamble, sent.Text);
     }
 
@@ -430,7 +431,7 @@ public sealed class HubRunnerTests : IDisposable
         _cloud.SetByTag("fyrd-hub");
         Directory.Delete(Path.Combine(_seeds, "skills"), true);
         await Make().PollOnceAsync(default);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
     }
 
     [Fact]
@@ -441,7 +442,7 @@ public sealed class HubRunnerTests : IDisposable
         _cloud.SetByTag("fyrd-hub");
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "half written, no front matter");
         await Make().PollOnceAsync(default);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
         Assert.Contains("controller update", _state.LastError);
     }
 
@@ -453,15 +454,15 @@ public sealed class HubRunnerTests : IDisposable
         _memory.Add(HubMemory.Shared, "Remember me.", "owner", _time.GetUtcNow());
         var runner = Make();
         await runner.PollOnceAsync(default); // posts the memory update
-        _cloud.Sent.Clear();
+        _cloud.Sent.Clear(); _owner.Sent.Clear();
 
         _personas.Save(_personas.Get("builder")! with { Definition = "Build differently." });
         await runner.PollOnceAsync(default);
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.Contains("Build differently.", sent.Text);
         Assert.Contains("Remember me.", sent.Text);
         await runner.PollOnceAsync(default);
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
     }
 
     [Fact]
@@ -471,16 +472,18 @@ public sealed class HubRunnerTests : IDisposable
         _cloud.SetByTag("fyrd-hub");
         var runner = Make();
         await runner.PollOnceAsync(default);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
 
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
         await runner.PollOnceAsync(default);
         await runner.PollOnceAsync(default);
 
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.Equal("session_ctl", sent.SessionId);
         Assert.StartsWith("Fyrd memory update.", sent.Text);
         Assert.Contains("Ship on Fridays is fine.", sent.Text);
+        // A running session rejects peer-wrapped text: the update must take the typed-message path only.
+        Assert.DoesNotContain(_cloud.Sent, m => m.Text.StartsWith("Fyrd memory update.", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -503,6 +506,7 @@ public sealed class HubRunnerTests : IDisposable
         // Only the new Controller's adoption prompt was sent; the pass neither posted to the old one nor took its hash.
         var sent = Assert.Single(_cloud.Sent);
         Assert.Equal("session_new", sent.SessionId);
+        Assert.Empty(_owner.Sent);
         Assert.Equal(adoptedHash, _controller.PostedMemoryHash);
     }
 
@@ -516,7 +520,7 @@ public sealed class HubRunnerTests : IDisposable
 
         await Make().PollOnceAsync(default);
 
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
     }
 
     [Fact]

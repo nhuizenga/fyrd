@@ -13,7 +13,7 @@ namespace Fyrd.Core.Hub;
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
     HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard, PendingMemory pending,
-    OwnedPullRequests? ownedPrs = null)
+    IOwnerMessages owner, OwnedPullRequests? ownedPrs = null)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -249,7 +249,8 @@ public sealed partial class HubRunner(
         var (prompt, instructionsHash, memoryHash) = controller.BuildPrompt();
         // An adoption during this pass replaced the Controller: post nothing to the old one.
         if (controller.CurrentId != controllerId || instructionsHash == controller.PostedInstructionsHash) return;
-        await cloud.SendMessageAsync(controllerId, prompt, ct);
+        // Sent as the owner's own turn: a running session rejects a peer-wrapped message for this.
+        await owner.SendAsync(controllerId, prompt, ct);
         controller.MarkPosted(instructionsHash, memoryHash);
     }
 
@@ -262,7 +263,8 @@ public sealed partial class HubRunner(
         var hash = ControllerManager.Hash(text);
         // An adoption during this pass replaced the Controller (and set its own hash): post nothing to the old one.
         if (controller.CurrentId != controllerId || hash == controller.PostedMemoryHash) return;
-        await cloud.SendMessageAsync(controllerId, text, ct);
+        // Same path as a typed message: a running session rejects a peer-wrapped memory update.
+        await owner.SendAsync(controllerId, text, ct);
         controller.PostedMemoryHash = hash;
     }
 
