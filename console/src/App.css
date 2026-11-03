@@ -156,7 +156,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Session list chips: workers, repo, and one PR chip ({status icon} {stack icon} {count}). */
-.chip-workers svg { fill: var(--a2-foreground-color-subdued); }
+.anvil2 .chip-workers.chip-workers svg { fill: var(--a2-foreground-color-subdued); }
 .pr-chip { display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; height: 20px; border-radius: 10px; font-size: 12px;
   background: var(--a2-background-color-secondary, #eee); }
 .pr-status-icon { display: inline-flex; }
@@ -168,9 +168,9 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .pr-stack { font-size: 12px; line-height: 1; }
 /* Details: one chip per kind of check, with a coloured icon. */
 .pr-checks { display: inline-flex; gap: 4px; }
-.chip-check svg { fill: #8a8f98; }
-.chip-check-pass svg { fill: #2e9e4f; }
-.chip-check-fail svg { fill: #d32f2f; }
+.anvil2 .chip-check.chip-check svg { fill: #8a8f98; }
+.anvil2 .chip-check.chip-check-pass svg { fill: #2e9e4f; }
+.anvil2 .chip-check.chip-check-fail svg { fill: #d32f2f; }
 .detail-list { margin: 0; padding: 0; list-style: none; }
 .cost-meter { display: flex; align-items: center; gap: 8px; }
 .cost-meter-bar { flex: 1 1 auto; min-width: 0; }

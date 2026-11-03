@@ -393,6 +393,10 @@ test.describe("Pull request details", () => {
     await expect(details.getByTitle("8 checks passed")).toBeVisible();
     await expect(details.getByTitle(/^1 check failed/)).toBeVisible();
     await expect(details.getByTitle("2 checks pending")).toBeVisible();
+    const fill = (title: string | RegExp) => details.getByTitle(title).locator("svg").first().evaluate((el) => getComputedStyle(el).fill);
+    expect(await fill("8 checks passed")).toBe("rgb(46, 158, 79)");
+    expect(await fill(/^1 check failed/)).toBe("rgb(211, 47, 47)");
+    expect(await fill("2 checks pending")).toBe("rgb(138, 143, 152)");
     for (const t of ["Draft", "Conflicts", "Behind base", "Reviewed", "→ fyrd/github-api"]) await expect(details.getByText(t, { exact: true })).toBeVisible();
     await expect(details.getByRole("button", { name: "Merge #20" })).toHaveCount(0);
     await expect(details.getByRole("button", { name: "Merge #21" })).toBeVisible();

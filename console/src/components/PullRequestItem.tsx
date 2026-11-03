@@ -106,7 +106,6 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
                   label={String(n)}
                   size="small"
                   className={`chip-check chip-check-${n > 0 ? kind : "none"}`}
-                  color={kind === "fail" && n > 0 ? DANGER : kind === "pending" && n > 0 ? WARNING : undefined}
                   aria-label={`${n} ${word}`}
                   title={`${n} check${n === 1 ? "" : "s"} ${word}${kind === "fail" && st.failingCheck ? `: ${st.failingCheck.name}` : ""}`}
                   {...(kind === "fail" && st.failingCheck?.url
