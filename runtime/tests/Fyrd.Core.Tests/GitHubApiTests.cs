@@ -143,27 +143,41 @@ public class GitHubApiTests
     }
 
     [Fact]
-    public async Task List_ParsesTheAllAlias_SkippingBadEntries()
+    public async Task List_JoinsTheLightAndHeavyAliasesByUrl_AndReadsTheDefaultBranch()
     {
         var (api, graph, _) = Make();
         graph.Then("""
             {"data":{"repository":{"defaultBranchRef":{"name":"main"},
               "all":{"nodes":[
-                {"url":"https://github.com/acme/widgets/pull/13","headRefName":"fyrd/a","state":"MERGED"},
-                {"url":"https://github.com/acme/widgets/pull/14","headRefName":"fyrd/b","state":"OPEN"},
+                {"url":"https://github.com/acme/widgets/pull/13","number":13,"title":"old","state":"MERGED","isDraft":false,"headRefName":"fyrd/a","baseRefName":"main","isCrossRepository":false},
+                {"url":"https://github.com/acme/widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":true,"headRefName":"fyrd/b","baseRefName":"fyrd/a","isCrossRepository":false},
+                {"url":"https://github.com/acme/widgets/pull/16","number":16,"title":"fork","state":"OPEN","isDraft":false,"headRefName":"fyrd/f","baseRefName":"main","isCrossRepository":true},
                 {"url":"not a url","headRefName":"fyrd/c"},
                 {"url":"https://github.com/acme/widgets/pull/15","headRefName":""}]},
-              "open":{"nodes":[]}}}}
+              "open":{"nodes":[
+                {"url":"https://github.com/acme/widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":true,"headRefName":"fyrd/b","baseRefName":"fyrd/a",
+                 "mergeable":"CONFLICTING","commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"nodes":[{"__typename":"CheckRun","name":"b","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://ci/b"}]}}}}]}}]}}}}
             """);
 
         var list = await api.ListAsync("acme/widgets");
 
-        Assert.Equal([new PullRequestHead("https://github.com/acme/widgets/pull/13", "fyrd/a"),
-                      new PullRequestHead("https://github.com/acme/widgets/pull/14", "fyrd/b")], list);
+        Assert.Equal("main", list.DefaultBranch);
+        Assert.Equal(["https://github.com/acme/widgets/pull/13", "https://github.com/acme/widgets/pull/14", "https://github.com/acme/widgets/pull/16"],
+            list.Prs.Select(p => p.Url));
+        var merged = list.Prs[0];
+        Assert.Equal(("fyrd/a", "main", "merged", false), (merged.Branch, merged.Base, merged.State, merged.CrossRepository));
+        Assert.Equal("none", merged.Status!.Checks); // light: no rollup for non-open PRs
+        var open = list.Prs[1];
+        Assert.Equal(("fyrd/b", "fyrd/a", "open"), (open.Branch, open.Base, open.State));
+        Assert.Equal("failing", open.Status!.Checks); // heavy: joined by URL
+        Assert.Equal("conflicting", open.Status.Mergeable);
+        Assert.True(open.Status.Draft);
+        Assert.True(list.Prs[2].CrossRepository);
         using var body = JsonDocument.Parse(Assert.Single(graph.Requests).Body!);
         var q = body.RootElement.GetProperty("query").GetString()!;
         Assert.Contains("all:pullRequests(first:100", q);
         Assert.Contains("open:pullRequests(first:50,states:OPEN)", q);
+        Assert.Contains("defaultBranchRef{name}", q);
     }
 
     [Fact]

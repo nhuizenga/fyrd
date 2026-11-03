@@ -54,22 +54,41 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
         catch (Exception e) when (e is ApiException or HttpRequestException) { throw Map(e, "GitHub"); }
     }
 
-    public async Task<IReadOnlyList<PullRequestHead>> ListAsync(string repo, CancellationToken ct = default)
+    public async Task<PullRequestListing> ListAsync(string repo, CancellationToken ct = default)
     {
         var parts = (GitHubRepo.IsValid(repo) ? repo : throw new GitHubException("Not a GitHub repo.")).Split('/');
         using var data = await QueryAsync(ListQuery, new { owner = parts[0], name = parts[1] }, repo, ct);
         return ParseList(Data(data));
     }
 
-    /// <summary>Maps the <c>all</c> alias of the listing, skipping entries without a plain PR URL or a head branch.</summary>
-    public static IReadOnlyList<PullRequestHead> ParseList(JsonElement data)
+    /// <summary>
+    /// Maps the listing: the light <c>all</c> alias joined with the heavy <c>open</c> alias by URL. Entries without a plain PR
+    /// URL or a head branch are skipped. Only open PRs carry the check rollup, which keeps the query's point cost down.
+    /// </summary>
+    public static PullRequestListing ParseList(JsonElement data)
     {
-        if (!Path(data, "repository", "all", "nodes", out var nodes) || nodes.ValueKind != JsonValueKind.Array) return [];
-        return nodes.EnumerateArray()
-            .Select(e => (Url: Str(e, "url"), Branch: Str(e, "headRefName")))
-            .Where(p => PullRequestUrl.IsValid(p.Url) && !string.IsNullOrEmpty(p.Branch))
-            .Select(p => new PullRequestHead(p.Url!, p.Branch!))
-            .ToList();
+        var open = new Dictionary<string, PullRequestStatus>(StringComparer.Ordinal);
+        if (Path(data, "repository", "open", "nodes", out var openNodes) && openNodes.ValueKind == JsonValueKind.Array)
+            foreach (var e in openNodes.EnumerateArray())
+                if (Str(e, "url") is { } u && PullRequestUrl.IsValid(u)) open[u] = ParseStatus(u, e);
+        var heads = new List<PullRequestHead>();
+        if (Path(data, "repository", "all", "nodes", out var nodes) && nodes.ValueKind == JsonValueKind.Array)
+            foreach (var e in nodes.EnumerateArray())
+            {
+                var url = Str(e, "url");
+                var branch = Str(e, "headRefName");
+                if (!PullRequestUrl.IsValid(url) || string.IsNullOrEmpty(branch)) continue;
+                var light = ParseStatus(url!, e);
+                heads.Add(new PullRequestHead(url!, branch!)
+                {
+                    Base = Str(e, "baseRefName") ?? "",
+                    State = light.State,
+                    CrossRepository = e.TryGetProperty("isCrossRepository", out var x) && x.ValueKind == JsonValueKind.True,
+                    Status = open.TryGetValue(url!, out var rich) ? rich : light,
+                });
+            }
+        var def = Path(data, "repository", "defaultBranchRef", "name", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
+        return new PullRequestListing(def, heads);
     }
 
     public async Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default)

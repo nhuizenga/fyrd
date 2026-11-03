@@ -9,6 +9,7 @@ import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
 import PullRequestItem, { prLabel } from "../components/PullRequestItem";
+import { HEALTH_LABEL, anyPending, healthOf, stateColor, worstHealth } from "../prStatus";
 import Composer, { DRAFT_KEY, readStored, writeStored } from "../components/Composer";
 import Thread from "../components/Thread";
 import StatusIcon from "../components/StatusIcon";
@@ -23,6 +24,7 @@ const COMPOSER_MIN = 72;
 const COMPOSER_MAX = 480;
 const COMPOSER_DEFAULT = 96;
 const LIST_KEY = "fyrd.listWidth";
+const PR_REFRESH_MS = 30_000;
 const ATTRS_KEY = "fyrd.attrsWidth";
 const SIDE_MIN = 200;
 const SIDE_MAX = 560;
@@ -149,6 +151,19 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     setConfirmMerge(null);
     void loadPrs();
   }, [loadPrs]);
+
+  // A PR's status as the last hub poll saw it; the details pane also re-reads live.
+  const listed = (url: string) => state?.pullRequests?.[url];
+
+  // While a selected session has a PR with running checks, re-read it every 30 s so Merge appears soon after CI goes green.
+  const pendingNow = selected
+    ? anyPending(selected.pullRequests.map((u) => prStatuses.find((p) => p.url === u) ?? listed(u)))
+    : false;
+  useEffect(() => {
+    if (!pendingNow) return;
+    const t = setInterval(() => void loadPrs(), PR_REFRESH_MS);
+    return () => clearInterval(t);
+  }, [pendingNow, loadPrs]);
 
   const run = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -362,6 +377,45 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     return text || null;
   };
 
+  const healthDot = (health: ReturnType<typeof worstHealth>) =>
+    health === "none" ? null : (
+      <span className={`pr-dot pr-dot-${health}`} role="img" aria-label={HEALTH_LABEL[health]} title={HEALTH_LABEL[health]} />
+    );
+
+  // One PR: its number, coloured by state, a checks dot and a conflict marker. Several: the count, with the worst status.
+  const prChip = (s: HubSessionView) => {
+    if (s.pullRequests.length === 0) return null;
+    const statuses = s.pullRequests.map(listed);
+    if (s.pullRequests.length === 1) {
+      const [url] = s.pullRequests;
+      const st = statuses[0];
+      const health = healthOf(st);
+      return (
+        <span className="pr-row-chip">
+          <Chip label={prLabel(url)} size="small" color={stateColor(st)} title={st?.title ? `${prLabel(url)} ${st.title} (${st.draft ? "draft" : st.state})` : url} />
+          {healthDot(health === "conflicts" ? "none" : health)}
+          {st?.state === "open" && st.mergeable === "conflicting" && (
+            <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>
+          )}
+        </span>
+      );
+    }
+    const worst = worstHealth(statuses);
+    const tip = s.pullRequests.map((u, i) => {
+      const st = statuses[i];
+      if (!st) return prLabel(u);
+      const health = healthOf(st);
+      return `${prLabel(u)} (${st.draft ? "draft" : st.state}${health !== "none" ? `, ${HEALTH_LABEL[health].toLowerCase()}` : ""})`;
+    }).join(", ");
+    return (
+      <span className="pr-row-chip">
+        <Chip label={`${s.pullRequests.length} PRs`} size="small" title={tip} />
+        {healthDot(worst === "conflicts" ? "none" : worst)}
+        {worst === "conflicts" && <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>}
+      </span>
+    );
+  };
+
   const row = (s: HubSessionView, actions?: ReactNode) => (
     <li key={s.id} className="session-item">
       <button type="button" className="row-btn session-row" aria-current={s.id === selectedId} onClick={() => navigate("sessions", s.id)}>
@@ -374,8 +428,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               {s.workersRunning && <Chip label="workers running" size="small" title="A background worker is running for this session" className="chip-workers" />}
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
               {s.branch && <Chip label={s.branch} size="small" title={`Branch ${s.branch}`} className="chip-branch" />}
-              {s.pullRequests.length === 1 && <Chip label={prLabel(s.pullRequests[0])} size="small" title={s.pullRequests[0]} />}
-              {s.pullRequests.length > 1 && <Chip label={`${s.pullRequests.length} PRs`} size="small" title={s.pullRequests.map(prLabel).join(", ")} />}
+              {prChip(s)}
             </span>
           )}
         </span>
@@ -609,11 +662,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                     <PullRequestItem
                       key={u}
                       url={u}
-                      status={prStatuses.find((p) => p.url === u)}
+                      status={prStatuses.find((p) => p.url === u) ?? listed(u)}
+                      stacked={selected.stackedPullRequests?.includes(u) ?? false}
+                      alsoOn={all.filter((o) => o.id !== selected.id && o.pullRequests.includes(u))}
+                      onOpenSession={(id) => navigate("sessions", id)}
                       actionsHidden={gitHubNote !== null}
                       error={prErrors[u]}
                       onReady={() => prAction(u, () => api.markPrReady(selected.id, u))}
-                      onMerge={() => setConfirmMerge(prStatuses.find((p) => p.url === u) ?? null)}
+                      onMerge={() => setConfirmMerge(prStatuses.find((p) => p.url === u) ?? listed(u) ?? null)}
                     />
                   ))}
                 </ul>

@@ -1,29 +1,38 @@
 namespace Fyrd.Core.Hub;
 
 /// <summary>
-/// The pull requests a session owns: those whose head is any of the session's branches. Not 1:1: every session on a
-/// PR's branch gets it. The cloud sessions API carries no PR
-/// links, so each repo's recent PRs are listed from GitHub, at most once per <see cref="Ttl"/>. A failed listing keeps
-/// the last good one and is not retried until the TTL passes; a rate-limited one is not retried before GitHub's reset time.
-/// With no GitHub token there is no listing at all, so no session owns any PR.
+/// The pull requests a session owns (see <see cref="PullRequestStacks"/>): those whose head is one of its branches, plus every
+/// open PR stacked with them. Not 1:1: every session on a PR's branch gets it. The cloud sessions API carries no PR links, so
+/// each repo's recent PRs are listed from GitHub (one GraphQL request, with statuses), at most once per <see cref="Ttl"/>. A
+/// failed listing keeps the last good one and is not retried until the TTL passes; a rate-limited one is not retried before
+/// GitHub's reset time. With no GitHub token there is no listing, so no session owns any PR.
 /// Not thread safe: used by the sequential hub poll.
 /// </summary>
 public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
 {
-    public static readonly TimeSpan Ttl = TimeSpan.FromMinutes(2);
+    public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(60);
 
-    private sealed record Listing(DateTimeOffset At, IReadOnlyList<PullRequestHead> Prs);
+    private sealed record Listing(DateTimeOffset At, PullRequestListing Value);
 
     private readonly Dictionary<string, Listing> _byRepo = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _notBefore = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _gate = new();
 
-    public async Task<IReadOnlyList<string>> FindAsync(string? repo, IEnumerable<string?> branches, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> FindAsync(string? repo, IEnumerable<string?> branches, CancellationToken ct = default) =>
+        (await FindOwnedAsync(repo, branches, ct)).Urls;
+
+    /// <summary>The session's PRs and, among them, those owned only through a stack.</summary>
+    public async Task<OwnedSet> FindOwnedAsync(string? repo, IEnumerable<string?> branches, CancellationToken ct = default)
     {
-        var wanted = branches.Where(b => !string.IsNullOrEmpty(b)).ToHashSet(StringComparer.Ordinal);
-        if (wanted.Count == 0 || !GitHubRepo.IsValid(repo) || !github.Configured) return [];
+        var wanted = branches.Where(b => !string.IsNullOrEmpty(b)).ToList();
+        if (wanted.Count == 0 || !GitHubRepo.IsValid(repo) || !github.Configured) return OwnedSet.Empty;
         var now = time.GetUtcNow();
-        if ((!_byRepo.TryGetValue(repo!, out var listing) || now - listing.At > Ttl)
-            && (!_notBefore.TryGetValue(repo!, out var until) || now >= until))
+        Listing? listing;
+        lock (_gate) _byRepo.TryGetValue(repo!, out listing);
+        DateTimeOffset until;
+        bool limited;
+        lock (_gate) limited = _notBefore.TryGetValue(repo!, out until) && now < until;
+        if ((listing is null || now - listing.At > Ttl) && !limited)
         {
             try
             {
@@ -31,22 +40,29 @@ public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
             }
             catch (GitHubRateLimitException e)
             {
-                _notBefore[repo!] = e.ResetAt;
-                listing = new Listing(now, listing?.Prs ?? []);
+                lock (_gate) _notBefore[repo!] = e.ResetAt;
+                listing = new Listing(now, listing?.Value ?? new PullRequestListing(null, []));
             }
             catch (GitHubException)
             {
-                listing = new Listing(now, listing?.Prs ?? []);
+                listing = new Listing(now, listing?.Value ?? new PullRequestListing(null, []));
             }
-            _byRepo[repo!] = listing;
+            lock (_gate) _byRepo[repo!] = listing;
         }
-        return (_byRepo.TryGetValue(repo!, out listing) ? listing.Prs : [])
-            .Where(p => wanted.Contains(p.Branch))
-            .Select(p => p.Url)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(Number)
-            .ToList();
+        return listing is null ? OwnedSet.Empty : PullRequestStacks.Owned(listing.Value, wanted);
     }
 
-    private static int Number(string url) => int.TryParse(url[(url.LastIndexOf('/') + 1)..], out var n) ? n : 0;
+    /// <summary>The last listed status of a PR, or null when no listing has it.</summary>
+    public PullRequestStatus? Status(string url)
+    {
+        lock (_gate)
+            return _byRepo.Values.SelectMany(l => l.Value.Prs).FirstOrDefault(p => p.Url == url)?.Status;
+    }
+
+    /// <summary>Makes the repo's next poll list again (after a console action). The old listing stays as the fallback if that fails.</summary>
+    public void Invalidate(string repo)
+    {
+        lock (_gate)
+            if (_byRepo.TryGetValue(repo, out var l)) _byRepo[repo] = l with { At = DateTimeOffset.MinValue };
+    }
 }

@@ -2,7 +2,7 @@ import { Alert, Button, Chip, Text } from "@servicetitan/anvil2";
 import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
-import type { PullRequestStatus } from "../types";
+import type { HubSessionView, PullRequestStatus } from "../types";
 
 export const prLabel = (url: string) => (/\/pull\/(\d+)/.exec(url)?.[1] ? `#${/\/pull\/(\d+)/.exec(url)![1]}` : url);
 
@@ -21,10 +21,15 @@ interface Props {
   error?: string | null;
   onReady: () => void;
   onMerge: () => void;
+  /** Owned through a stack rather than on one of this session's own branches. */
+  stacked?: boolean;
+  /** The other hub sessions that own this PR, directly or through a stack. */
+  alsoOn?: HubSessionView[];
+  onOpenSession?: (id: string) => void;
 }
 
 /** One pull request in the details pane: title line, status badges, actions and its own inline error. */
-export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge }: Props) {
+export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession }: Props) {
   const label = prLabel(url);
   const known = st && st.state !== "unknown";
   const title = known ? st.title : "";
@@ -33,6 +38,7 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
     <li className="pr-item">
       <div className="pr-line">
         <Chip label={label} size="small" title={title ? `${label} ${title}` : url} />
+        {stacked && <Chip label="stacked" size="small" title="Owned through a stack with this session's own PRs" />}
         {title && <span className="pr-title" title={title}>{title}</span>}
         <span className="pr-actions">
           <Button
@@ -78,6 +84,19 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
         </span>
       )}
       {st?.state === "unknown" && st.error && <Text size="small" subdued>{st.error}</Text>}
+      {alsoOn.length > 0 && (
+        <span className="pr-also-on">
+          <Text size="small" subdued>Also on:</Text>
+          {alsoOn.map((o) => (
+            <button
+              key={o.id} type="button" className="pr-also-on-link"
+              aria-label={`Open ${o.title}`} onClick={() => onOpenSession?.(o.id)}
+            >
+              {o.title} · {o.status}
+            </button>
+          ))}
+        </span>
+      )}
       {error && <Alert status="danger" title={error} role="alert" />}
     </li>
   );

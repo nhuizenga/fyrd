@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, vi } from "vitest";
+import { afterEach, describe, vi } from "vitest";
 import * as api from "../api";
 import { FakeEventSource, item } from "../test/fakeEventSource";
 import { cost, hubState, question, session } from "../test/fixtures";
@@ -1145,6 +1145,136 @@ describe("pull request details", () => {
     const { details } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
     await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
     expect(await within(details).findByText("GitHub refused")).toBeInTheDocument();
+  });
+});
+
+describe("live PR statuses", () => {
+  const listedStatus = (o: Partial<PullRequestStatus> = {}) => prStatus(o);
+  const PR40 = "https://github.com/acme/widgets/pull/40";
+  const stateWith = (sessions: HubState["sessions"], pullRequests: Record<string, PullRequestStatus>) =>
+    hubState({ sessions, pullRequests });
+  const rowOf = (name: string) => screen.getByRole("button", { name: new RegExp(`^(?!Archive|Rename|Export).*${name}`) });
+
+  it("a row with one PR shows its number, a checks dot and a conflict marker from hub state", () => {
+    renderScreen(stateWith(
+      [session({ id: "a", title: "alpha-1", pullRequests: [PR12] })],
+      { [PR12]: listedStatus({ checks: "failing", mergeable: "conflicting", canMerge: false }) },
+    ));
+    const row = rowOf("alpha-1");
+    expect(within(row).getByText("#12")).toBeInTheDocument();
+    expect(within(row).getByRole("img", { name: "Checks failing" })).toHaveClass("pr-dot-failing");
+    expect(within(row).getByRole("img", { name: "Merge conflicts" })).toBeInTheDocument();
+  });
+
+  it("a merged PR shows no checks dot; a draft shows neither dot nor marker unless open with checks", () => {
+    renderScreen(stateWith(
+      [session({ id: "a", title: "alpha-1", pullRequests: [PR12] })],
+      { [PR12]: listedStatus({ state: "merged", checks: "passing", canMerge: false }) },
+    ));
+    expect(rowOf("alpha-1").querySelector(".pr-dot, .pr-conflict")).toBeNull();
+  });
+
+  it("several PRs show the count with the worst status: failing > conflicts > pending > passing", () => {
+    const urls = [PR12, PR40, "https://github.com/acme/widgets/pull/41"];
+    renderScreen(stateWith(
+      [session({ id: "a", title: "alpha-1", pullRequests: urls })],
+      {
+        [urls[0]]: listedStatus({ checks: "passing" }),
+        [urls[1]]: listedStatus({ url: urls[1], number: 40, checks: "pending", canMerge: false }),
+        [urls[2]]: listedStatus({ url: urls[2], number: 41, checks: "passing", mergeable: "conflicting", canMerge: false }),
+      },
+    ));
+    const row = rowOf("alpha-1");
+    expect(within(row).getByText("3 PRs")).toBeInTheDocument();
+    expect(within(row).getByTitle(/#40 \(open, checks running\)/)).toBeInTheDocument();
+    expect(within(row).getByRole("img", { name: "Merge conflicts" })).toBeInTheDocument();
+    expect(within(row).queryByRole("img", { name: "Checks failing" })).not.toBeInTheDocument();
+  });
+
+  it("the details pane shows hub-state statuses at once, with a stacked tag", async () => {
+    vi.mocked(api.pullRequests).mockImplementation(() => new Promise(() => {})); // the live read has not answered yet
+    const st = stateWith(
+      [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12, PR40], stackedPullRequests: [PR40] })],
+      {
+        [PR12]: listedStatus({ title: "Own PR", checksPassed: 2 }),
+        [PR40]: listedStatus({ url: PR40, number: 40, title: "Stacked PR", canMerge: false }),
+      },
+    );
+    renderScreen(st);
+    await userEvent.click(rowOf("alpha-1"));
+    const details = screen.getByRole("complementary", { name: "Session details" });
+    expect(within(details).getByText("Own PR")).toBeInTheDocument();
+    expect(within(details).getByText("Stacked PR")).toBeInTheDocument();
+    expect(within(details).getAllByText("stacked")).toHaveLength(1);
+  });
+
+  it("lists the other sessions that own the PR under it, and links to them", async () => {
+    vi.mocked(api.pullRequests).mockResolvedValue([prStatus()]);
+    const st = hubState({
+      sessions: [
+        session({ id: "a", title: "alpha-1", role: "builder", pullRequests: [PR12] }),
+        session({ id: "v", title: "validator-3", role: "validator", status: "idle", pullRequests: [PR12] }),
+        session({ id: "r", title: "reviewer-2", role: "reviewer", status: "running", pullRequests: [PR12] }),
+        session({ id: "z", title: "zeta-9", pullRequests: [] }),
+      ],
+    });
+    renderScreen(st);
+    await userEvent.click(rowOf("alpha-1"));
+    const details = screen.getByRole("complementary", { name: "Session details" });
+    await within(details).findByRole("button", { name: "Open #12" });
+    expect(within(details).getByRole("button", { name: "Open validator-3" })).toHaveTextContent("validator-3 · idle");
+    expect(within(details).getByRole("button", { name: "Open reviewer-2" })).toHaveTextContent("reviewer-2 · running");
+    expect(within(details).queryByRole("button", { name: "Open zeta-9" })).not.toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Open alpha-1" })).not.toBeInTheDocument();
+  });
+
+  describe("30 s refresh", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    const pendingState = () => stateWith(
+      [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12] })],
+      { [PR12]: listedStatus({ checks: "pending", canMerge: false }) },
+    );
+
+    it("re-reads every 30 s while a PR has pending checks, and Merge appears once green", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      vi.mocked(api.pullRequests).mockReset();
+      vi.mocked(api.pullRequests)
+        .mockResolvedValueOnce([prStatus({ checks: "pending", canMerge: false })])
+        .mockResolvedValue([prStatus({ checks: "passing", canMerge: true })]);
+      renderScreen(pendingState());
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.click(rowOf("alpha-1"));
+      const details = screen.getByRole("complementary", { name: "Session details" });
+      await within(details).findByRole("button", { name: "Open #12" });
+      expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+      expect(api.pullRequests).toHaveBeenCalledTimes(1);
+
+      await act(async () => { vi.advanceTimersByTime(29_000); });
+      expect(api.pullRequests).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(1_000); });
+      expect(api.pullRequests).toHaveBeenCalledTimes(2);
+      expect(await within(details).findByRole("button", { name: "Merge #12" })).toBeInTheDocument();
+
+      // Green now: no further polling.
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+      expect(api.pullRequests).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not poll when no PR has pending checks", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      vi.mocked(api.pullRequests).mockReset();
+      vi.mocked(api.pullRequests).mockResolvedValue([prStatus({ checks: "passing" })]);
+      renderScreen(stateWith(
+        [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12] })],
+        { [PR12]: listedStatus({ checks: "passing" }) },
+      ));
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await user.click(rowOf("alpha-1"));
+      await screen.findByRole("button", { name: "Open #12" });
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+      expect(api.pullRequests).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

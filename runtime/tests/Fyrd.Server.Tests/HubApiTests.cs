@@ -505,6 +505,74 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task PrActions_AreAcceptedOnAStackedPr_ButNotOnAPrOutsideTheStack()
+    {
+        using var f = new FyrdFactory();
+        const string Stacked = "https://github.com/acme/widgets/pull/13";
+        f.Services.GetRequiredService<HubState>().Publish(
+            [View() with { PullRequests = [Pr, Stacked], StackedPullRequests = [Stacked] }], []);
+        f.GitHub.Statuses[Pr] = new PullRequestStatus(Pr, 12, "own", "open", false, "passing");
+        f.GitHub.Statuses[Stacked] = new PullRequestStatus(Stacked, 13, "stacked", "open", true, "passing");
+        f.GitHub.Statuses[OtherPr] = new PullRequestStatus(OtherPr, 99, "other", "open", false, "passing");
+
+        var ready = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/ready", new { url = Stacked });
+        Assert.Equal(HttpStatusCode.NoContent, ready.StatusCode);
+        var merge = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.NoContent, merge.StatusCode);
+        var outside = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = OtherPr });
+        Assert.Equal(HttpStatusCode.BadRequest, outside.StatusCode);
+        Assert.Equal([Stacked], f.GitHub.Readied);
+        Assert.Equal([Pr], f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task AnAction_InvalidatesTheRepoListing_AndRequestsAPoll()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false);
+        f.GitHub.Heads.Add(new PullRequestHead(Pr, "fyrd/a") { State = "open", Base = "main" });
+        var owned = f.Services.GetRequiredService<OwnedPullRequests>();
+        var state = f.Services.GetRequiredService<HubState>();
+        await owned.FindAsync("acme/widgets", ["fyrd/a"]);
+        await owned.FindAsync("acme/widgets", ["fyrd/a"]);
+        Assert.Equal(1, f.GitHub.Listings);
+        state.ResetPollRequest();
+        Assert.False(state.PollRequested.IsCompleted);
+
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+
+        Assert.True(state.PollRequested.IsCompleted);
+        await owned.FindAsync("acme/widgets", ["fyrd/a"]);
+        Assert.Equal(2, f.GitHub.Listings);
+    }
+
+    [Fact]
+    public async Task AFailedAction_DoesNotInvalidateOrPoll()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: false, mergeable: "conflicting");
+        var state = f.Services.GetRequiredService<HubState>();
+        state.ResetPollRequest();
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.False(state.PollRequested.IsCompleted);
+    }
+
+    [Fact]
+    public async Task State_CarriesThePullRequestStatusMap_AndStackedUrls()
+    {
+        using var f = new FyrdFactory();
+        var status = new PullRequestStatus(Pr, 12, "Fix it", "open", false, "pending") { Base = "main" };
+        f.Services.GetRequiredService<HubState>().Publish(
+            [View() with { PullRequests = [Pr], StackedPullRequests = [Pr] }], [], null, null,
+            new Dictionary<string, PullRequestStatus> { [Pr] = status });
+        var s = await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"));
+        Assert.Equal("pending", s.GetProperty("pullRequests").GetProperty(Pr).GetProperty("checks").GetString());
+        Assert.Equal(Pr, s.GetProperty("sessions")[0].GetProperty("stackedPullRequests")[0].GetString());
+    }
+
+    [Fact]
     public async Task PullRequests_NotHubSession_404()
     {
         using var f = new FyrdFactory();

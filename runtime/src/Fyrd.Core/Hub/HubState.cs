@@ -13,9 +13,14 @@ public sealed record HubSessionView(
     DateTimeOffset? CreatedAt, DateTimeOffset? LastActivity, IReadOnlyList<string> Tags,
     HubCostView? Cost = null)
 {
-    /// <summary>URLs of the pull requests the session owns (head is its branch). Only these accept PR actions.</summary>
+    /// <summary>
+    /// URLs of the pull requests the session owns: those whose head is one of its branches, and every open PR stacked with
+    /// them. Only these accept PR actions.
+    /// </summary>
     public IReadOnlyList<string> PullRequests { get; init; } = [];
 
+    /// <summary>The subset of <see cref="PullRequests"/> owned only through a stack.</summary>
+    public IReadOnlyList<string> StackedPullRequests { get; init; } = [];
     /// <summary>Tag a peasant puts on itself while a background worker runs (see the persona's Workers section).</summary>
     public const string WorkersRunningTag = "fyrd-workers-running";
 
@@ -56,6 +61,7 @@ public sealed class HubState(TimeProvider? time = null)
     private volatile IReadOnlyList<HubSessionView> _sessions = [];
     private volatile IReadOnlyList<HubQuestion> _questions = [];
     private volatile HubBudgetView? _budget;
+    private volatile IReadOnlyDictionary<string, PullRequestStatus> _pullRequests = new Dictionary<string, PullRequestStatus>();
     private volatile bool _signedOut;
     private volatile string? _lastError;
     private readonly object _gate = new();
@@ -84,6 +90,9 @@ public sealed class HubState(TimeProvider? time = null)
 
     public HubBudgetView? Budget => _budget;
 
+    /// <summary>Each owned PR's last listed status, held once however many sessions own it.</summary>
+    public IReadOnlyDictionary<string, PullRequestStatus> PullRequests => _pullRequests;
+
     public bool SignedOut { get => _signedOut; set => _signedOut = value; }
     public string? LastError { get => _lastError; set => _lastError = value; }
 
@@ -100,7 +109,7 @@ public sealed class HubState(TimeProvider? time = null)
     /// </summary>
     public void Publish(
         IReadOnlyList<HubSessionView> sessions, IReadOnlyList<HubQuestion> questions, IReadOnlySet<string>? failedSessions = null,
-        HubBudgetView? budget = null)
+        HubBudgetView? budget = null, IReadOnlyDictionary<string, PullRequestStatus>? pullRequests = null)
     {
         lock (_gate)
         {
@@ -114,6 +123,7 @@ public sealed class HubState(TimeProvider? time = null)
             foreach (var rid in _partial.Keys.Where(k => !seen.Contains(k)).ToList()) _partial.Remove(rid);
             _sessions = sessions.ToArray();
             _budget = budget;
+            _pullRequests = pullRequests ?? new Dictionary<string, PullRequestStatus>();
             _questions = questions.Where(q => !_claims.ContainsKey(q.RequestId)).ToArray();
         }
     }

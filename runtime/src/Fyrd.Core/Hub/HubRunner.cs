@@ -90,7 +90,7 @@ public sealed partial class HubRunner(
             try
             {
                 var w = await PollSessionAsync(s, ct);
-                var owned = ownedPrs is null ? [] : await ownedPrs.FindAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
+                var owned = ownedPrs is null ? OwnedSet.Empty : await ownedPrs.FindOwnedAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
                 views.Add(View(s, w.LastActivity, owned));
                 // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
                 // waiting on the owner has a live question.
@@ -124,7 +124,7 @@ public sealed partial class HubRunner(
             views = views.Select(v => v.Cost is null && previousViews.TryGetValue(v.Id, out var old) ? v with { Cost = old.Cost } : v).ToList();
         }
 
-        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, costPass?.Budget ?? state.Budget);
+        state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, costPass?.Budget ?? state.Budget, PullRequestStatuses(views));
 
         try
         {
@@ -274,15 +274,25 @@ public sealed partial class HubRunner(
     }
 
     /// <summary>A session's pull requests are the ones found on its repo and branches (the cloud API reports none itself).</summary>
-    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity, IReadOnlyList<string>? owned = null)
+    private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity, OwnedSet? owned = null)
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
-        var prs = (owned ?? []).Distinct(StringComparer.Ordinal).ToList();
-        return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
+                return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
             CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
         {
-            PullRequests = prs,
+            PullRequests = owned?.Urls ?? [],
+            StackedPullRequests = owned?.Stacked ?? [],
         };
+    }
+
+    /// <summary>The listed status of every PR any session owns, one entry per URL.</summary>
+    private IReadOnlyDictionary<string, PullRequestStatus> PullRequestStatuses(IEnumerable<HubSessionView> views)
+    {
+        var map = new Dictionary<string, PullRequestStatus>(StringComparer.Ordinal);
+        if (ownedPrs is null) return map;
+        foreach (var url in views.SelectMany(v => v.PullRequests).Distinct(StringComparer.Ordinal))
+            if (ownedPrs.Status(url) is { } status) map[url] = status;
+        return map;
     }
 
     private bool IsController(CloudSession s) => s.Id == _controllerId;
