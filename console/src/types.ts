@@ -84,6 +84,13 @@ export interface ControllerInfo {
   url: string;
 }
 
+/** Whether the server can talk to GitHub, and as whom. Never carries the token. */
+export interface GitHubStatus {
+  configured: boolean;
+  login: string | null;
+  error: string | null;
+}
+
 export interface HubState {
   sessions: HubSessionView[];
   questions: HubQuestion[];
@@ -92,6 +99,7 @@ export interface HubState {
   lastPollAt: string | null;
   controller: ControllerInfo | null;
   budget?: HubBudgetView | null;
+  gitHub?: GitHubStatus;
   /** Peasant shared-memory proposals waiting for the owner. */
   pendingMemory?: number;
   /** Each session's current live-only progress line, kept by the server (so sessions nobody has open still have one). */

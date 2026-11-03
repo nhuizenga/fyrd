@@ -77,3 +77,16 @@ export function needsConsoleBuild(repoRoot) {
   if (!fs.existsSync(src)) return false;
   return newestMtime(src) > fs.statSync(index).mtimeMs;
 }
+
+/** The one-line warning for `up` when no GitHub token is in the environment, else null. */
+export function tokenWarning(env = process.env) {
+  if (env.GH_TOKEN || env.GITHUB_TOKEN) return null;
+  return "GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.";
+}
+
+/** The `status` line for the `gitHub` part of /api/hub/state. */
+export function gitHubLine(gitHub) {
+  if (gitHub?.configured && gitHub.login) return `GitHub: signed in as ${gitHub.login}`;
+  if (gitHub?.configured && gitHub.error) return `GitHub: ${gitHub.error}`;
+  return "GitHub: not configured";
+}

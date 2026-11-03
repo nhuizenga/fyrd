@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine } from "./lib.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -70,4 +70,24 @@ test("needsConsoleBuild false when index newer than sources", () => {
   const past = new Date(Date.now() - 10000);
   fs.utimesSync(path.join(r, "console/src/a.tsx"), past, past);
   assert.equal(needsConsoleBuild(r), false);
+});
+
+test("tokenWarning says GH_TOKEN is not set when neither variable is", () => {
+  assert.equal(
+    tokenWarning({}),
+    "GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.",
+  );
+  assert.equal(tokenWarning({ GH_TOKEN: "" , GITHUB_TOKEN: "" }) !== null, true);
+});
+
+test("tokenWarning is silent with GH_TOKEN or GITHUB_TOKEN", () => {
+  assert.equal(tokenWarning({ GH_TOKEN: "x" }), null);
+  assert.equal(tokenWarning({ GITHUB_TOKEN: "x" }), null);
+});
+
+test("gitHubLine names the login, the error, or says not configured", () => {
+  assert.equal(gitHubLine({ configured: true, login: "octocat", error: null }), "GitHub: signed in as octocat");
+  assert.equal(gitHubLine({ configured: false, login: null, error: null }), "GitHub: not configured");
+  assert.equal(gitHubLine(undefined), "GitHub: not configured");
+  assert.match(gitHubLine({ configured: true, login: null, error: "bad or expired" }), /bad or expired/);
 });

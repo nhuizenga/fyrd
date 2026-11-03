@@ -423,6 +423,51 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task State_ReportsGitHubSignIn_WithoutAToken()
+    {
+        using var f = new FyrdFactory();
+        f.GitHub.Configured = false;
+        var gh = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("gitHub");
+        Assert.False(gh.GetProperty("configured").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, gh.GetProperty("login").ValueKind);
+        Assert.Equal(JsonValueKind.Null, gh.GetProperty("error").ValueKind);
+    }
+
+    [Fact]
+    public async Task State_ReportsTheLogin_AfterARefresh_AndAnError_WhenTheTokenIsBad()
+    {
+        using var f = new FyrdFactory();
+        var signIn = f.Services.GetRequiredService<GitHubSignIn>();
+        await signIn.RefreshAsync();
+        var gh = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("gitHub");
+        Assert.True(gh.GetProperty("configured").GetBoolean());
+        Assert.Equal("octo", gh.GetProperty("login").GetString());
+
+        f.GitHub.Fail = new GitHubException("GitHub rejected the token (bad or expired).");
+        await signIn.RefreshAsync();
+        gh = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("gitHub");
+        Assert.Equal(JsonValueKind.Null, gh.GetProperty("login").ValueKind);
+        Assert.Contains("bad or expired", gh.GetProperty("error").GetString());
+    }
+
+    [Theory]
+    [InlineData("GET", "pull-requests")]
+    [InlineData("POST", "pull-requests/ready")]
+    [InlineData("POST", "pull-requests/merge")]
+    public async Task PrEndpoints_WithoutAToken_503(string method, string path)
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+        f.GitHub.Configured = false;
+        var url = $"/api/hub/sessions/{SessionId}/{path}";
+        var r = method == "GET" ? await f.CreateClient().GetAsync(url) : await f.CreateClient().PostAsJsonAsync(url, new { url = Pr });
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
+        Assert.Contains("GitHub is not configured", await r.Content.ReadAsStringAsync());
+        Assert.Empty(f.GitHub.Readied);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
     public async Task PullRequests_NotHubSession_404()
     {
         using var f = new FyrdFactory();
