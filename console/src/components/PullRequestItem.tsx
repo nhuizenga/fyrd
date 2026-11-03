@@ -2,6 +2,9 @@ import { Alert, Button, Chip, Menu, Text } from "@servicetitan/anvil2";
 import MoreIcon from "@servicetitan/anvil2/assets/icons/material/round/more_vert.svg?react";
 import ReadyIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
 import MergeIcon from "@servicetitan/anvil2/assets/icons/material/round/call_merge.svg?react";
+import CheckIcon from "@servicetitan/anvil2/assets/icons/material/round/check_circle.svg?react";
+import CancelIcon from "@servicetitan/anvil2/assets/icons/material/round/cancel.svg?react";
+import PendingIcon from "@servicetitan/anvil2/assets/icons/material/round/pending.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import type { Nudge } from "../prNudges";
 import type { HubSessionView, PullRequestStatus } from "../types";
@@ -23,8 +26,6 @@ interface Props {
   error?: string | null;
   onReady: () => void;
   onMerge: () => void;
-  /** Owned through a stack rather than on one of this session's own branches. */
-  stacked?: boolean;
   /** The other hub sessions that own this PR, directly or through a stack. */
   alsoOn?: HubSessionView[];
   onOpenSession?: (id: string) => void;
@@ -33,7 +34,6 @@ interface Props {
   onNudge?: (nudge: Nudge) => void;
   /** "Sent to <session>" after a nudge went out. */
   notice?: string | null;
-  /** The open PR this one is stacked on, and the open PRs stacked on this one (all in the same list). */
   /** Offer "Merge stack" (the PR is in a linear chain of two or more open PRs and no job is running on it). */
   canMergeStack?: boolean;
   onMergeStack?: () => void;
@@ -41,15 +41,11 @@ interface Props {
   jobLine?: string | null;
   jobFailed?: boolean;
   onCancelJob?: () => void;
-  stackedOn?: PullRequestStatus;
-  stackedAbove?: PullRequestStatus[];
 }
 
 /** One pull request in the details pane: title line, status badges, actions and its own inline error. */
-const jumpTo = (number: number) =>
-  document.getElementById(`pr-item-${number}`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
 
-export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession, nudges = [], onNudge, notice, stackedOn, stackedAbove = [], canMergeStack, onMergeStack, jobLine, jobFailed, onCancelJob }: Props) {
+export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, alsoOn = [], onOpenSession, nudges = [], onNudge, notice, canMergeStack, onMergeStack, jobLine, jobFailed, onCancelJob }: Props) {
   const label = prLabel(url);
   const known = st && st.state !== "unknown";
   const title = known ? st.title : "";
@@ -58,7 +54,6 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
     <li className="pr-item" id={st?.number ? `pr-item-${st.number}` : undefined}>
       <div className="pr-line">
         <Chip label={label} size="small" title={title ? `${label} ${title}` : url} />
-        {stacked && <Chip label="stacked" size="small" title="Owned through a stack with this session's own PRs" />}
         {title && <span className="pr-title" title={title}>{title}</span>}
         <span className="pr-actions">
           <Button
@@ -99,15 +94,27 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
           {st.state !== "open" && <Chip label={st.state} size="small" />}
           {st.draft && <Chip label="Draft" size="small" />}
           {checksShown && (
-            <Chip
-              label={`✓ ${st.checksPassed}  ✗ ${st.checksFailed}  ◌ ${st.checksPending}`}
-              size="small"
-              color={st.checks === "failing" ? DANGER : st.checks === "pending" ? WARNING : undefined}
-              title={`Checks ${st.checks}${st.failingCheck ? `: ${st.failingCheck.name}` : ""}`}
-              {...(st.failingCheck?.url
-                ? { onClick: () => window.open(st.failingCheck!.url!, "_blank", "noopener,noreferrer") }
-                : {})}
-            />
+            <span className="pr-checks" role="group" aria-label={`Checks ${st.checks}`}>
+              {([
+                ["pass", st.checksPassed, CheckIcon, "passed"],
+                ["fail", st.checksFailed, CancelIcon, "failed"],
+                ["pending", st.checksPending, PendingIcon, "pending"],
+              ] as const).map(([kind, n, Icon, word]) => (
+                <Chip
+                  key={kind}
+                  icon={Icon}
+                  label={String(n)}
+                  size="small"
+                  className={`chip-check chip-check-${n > 0 ? kind : "none"}`}
+                  color={kind === "fail" && n > 0 ? DANGER : kind === "pending" && n > 0 ? WARNING : undefined}
+                  aria-label={`${n} ${word}`}
+                  title={`${n} check${n === 1 ? "" : "s"} ${word}${kind === "fail" && st.failingCheck ? `: ${st.failingCheck.name}` : ""}`}
+                  {...(kind === "fail" && st.failingCheck?.url
+                    ? { onClick: () => window.open(st.failingCheck!.url!, "_blank", "noopener,noreferrer") }
+                    : {})}
+                />
+              ))}
+            </span>
           )}
           {st.mergeable === "conflicting" && <Chip label="Conflicts" size="small" color={DANGER} />}
           {st.mergeState === "behind" && <Chip label="Behind base" size="small" color={WARNING} />}
@@ -116,20 +123,6 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
         </span>
       )}
       {st?.state === "unknown" && st.error && <Text size="small" subdued>{st.error}</Text>}
-      {(stackedOn || stackedAbove.length > 0) && (
-        <span className="pr-stack-links">
-          {stackedOn && (
-            <button type="button" className="pr-also-on-link" onClick={() => jumpTo(stackedOn.number)}>
-              Stacked on #{stackedOn.number}
-            </button>
-          )}
-          {stackedAbove.map((a) => (
-            <button key={a.url} type="button" className="pr-also-on-link" onClick={() => jumpTo(a.number)}>
-              #{a.number} stacked on this
-            </button>
-          ))}
-        </span>
-      )}
       {alsoOn.length > 0 && (
         <span className="pr-also-on">
           <Text size="small" subdued>Also on:</Text>

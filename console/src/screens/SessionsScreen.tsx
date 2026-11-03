@@ -4,6 +4,7 @@ import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_o
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import DownloadIcon from "@servicetitan/anvil2/assets/icons/material/round/download.svg?react";
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
+import RobotIcon from "@servicetitan/anvil2/assets/icons/material/round/smart_toy.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
 import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
@@ -11,9 +12,10 @@ import AddRepo from "../components/AddRepo";
 import ScrollIntoView from "../components/ScrollIntoView";
 import PullRequestItem, { prLabel } from "../components/PullRequestItem";
 import { confirmLine, jobFor, running, stepLine } from "../stackMerge";
-import { chainLine, chainOf, childrenOf, mergeOrderWarning, parentOf, type Chain } from "../stacks";
+import { chainLine, chainOf, mergeOrderWarning, type Chain } from "../stacks";
 import { nudgesFor, type Nudge } from "../prNudges";
-import { HEALTH_LABEL, anyPending, healthOf, stateColor, worstHealth } from "../prStatus";
+import { HEALTH_LABEL, anyPending, healthOf } from "../prStatus";
+import PrStatusIcon from "../components/PrStatusIcon";
 import Composer, { DRAFT_KEY, readStored, writeStored } from "../components/Composer";
 import Thread from "../components/Thread";
 import StatusIcon from "../components/StatusIcon";
@@ -40,17 +42,22 @@ const usd = (n: number) => `$${n.toFixed(2)}`;
 const pct = (ratio: number) => Math.round(ratio * 100);
 
 /** The session's spend today, a bar against its daily limit, and the +$ raises. */
-function CostBlock({ cost }: { cost: HubCostView | null | undefined }) {
-  if (!cost) return <Text>—</Text>;
+function CostBlock({ cost, raises }: { cost: HubCostView | null | undefined; raises?: ReactNode }) {
+  if (!cost) return <><Text>—</Text>{raises}</>;
   return (
     <>
       <Text>{usd(cost.costToday)}{cost.estimated ? " (estimated)" : ""}</Text>
-      <ProgressBar
-        aria-label={`${pct(cost.ratio)} percent of today's ${usd(cost.limitUsd)} limit used`}
-        value={Math.min(100, cost.ratio * 100)}
-        max={100}
-        error={cost.blocked !== null}
-      />
+      <div className="cost-meter">
+        <div className="cost-meter-bar">
+          <ProgressBar
+            aria-label={`${pct(cost.ratio)} percent of today's ${usd(cost.limitUsd)} limit used`}
+            value={Math.min(100, cost.ratio * 100)}
+            max={100}
+            error={cost.blocked !== null}
+          />
+        </div>
+        {raises}
+      </div>
       <Text size="small" subdued>
         {cost.exempt ? "Controller · limit not enforced" : `${pct(cost.ratio)}% of ${usd(cost.limitUsd)} limit today`}
       </Text>
@@ -451,62 +458,35 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
     return text || null;
   };
 
-  const healthDot = (health: ReturnType<typeof worstHealth>) =>
-    health === "none" ? null : (
-      <span className={`pr-dot pr-dot-${health}`} role="img" aria-label={HEALTH_LABEL[health]} title={HEALTH_LABEL[health]} />
-    );
-
-  // A small glyph when any of these PRs is part of a chain (a session in a stack owns the whole stack).
-  const stackGlyph = (statuses: (PullRequestStatus | undefined)[]) => {
+  // True when any of these PRs is part of a chain (a session in a stack owns the whole stack).
+  const anyStacked = (statuses: (PullRequestStatus | undefined)[]) => {
     const everything = Object.values(state?.pullRequests ?? {});
-    return statuses.some((st) => st && chainOf(st, everything))
-      ? <span className="pr-stack" role="img" aria-label="Stacked PR" title="Part of a stack">⇅</span>
-      : null;
+    return statuses.some((st) => st && chainOf(st, everything));
   };
 
-  // A spinner on the chips of a session whose PR is in a running stack merge.
-  const mergingGlyph = (urls: string[]) =>
-    urls.some((u) => (state?.stackMerges ?? []).some((j) => running(j) && j.prs.includes(u)))
-      ? <span className="pr-spinner" role="img" aria-label="Merging stack" title="A stack merge is running">⟳</span>
-      : null;
-
-  // One PR: its number, coloured by state, a checks dot and a conflict marker. Several: the count, with the worst status.
+  // One chip per session: {status icon} {stack icon} {number of PRs}. The status is the worst of the PRs.
   const prChip = (s: HubSessionView) => {
     if (s.pullRequests.length === 0) return null;
     const statuses = s.pullRequests.map(listed);
-    if (s.pullRequests.length === 1) {
-      const [url] = s.pullRequests;
-      const st = statuses[0];
-      const health = healthOf(st);
-      return (
-        <span className="pr-row-chip">
-          <Chip label={prLabel(url)} size="small" color={stateColor(st)} title={st?.title ? `${prLabel(url)} ${st.title} (${st.draft ? "draft" : st.state})` : url} />
-          {healthDot(health === "conflicts" ? "none" : health)}
-          {stackGlyph(statuses)}
-          {mergingGlyph(s.pullRequests)}
-          {st?.state === "open" && st.mergeable === "conflicting" && (
-            <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>
-          )}
-        </span>
-      );
-    }
-    const worst = worstHealth(statuses);
+    const merging = s.pullRequests.some((u) => (state?.stackMerges ?? []).some((j) => running(j) && j.prs.includes(u)));
+    const stacked = anyStacked(statuses);
     const tip = s.pullRequests.map((u, i) => {
       const st = statuses[i];
       if (!st) return prLabel(u);
       const health = healthOf(st);
-      return `${prLabel(u)} (${st.draft ? "draft" : st.state}${health !== "none" ? `, ${HEALTH_LABEL[health].toLowerCase()}` : ""})`;
+      return `${prLabel(u)} ${st.title ? `${st.title} ` : ""}(${st.draft ? "draft" : st.state}${health !== "none" ? `, ${HEALTH_LABEL[health].toLowerCase()}` : ""})`;
     }).join(", ");
     return (
-      <span className="pr-row-chip">
-        <Chip label={`${s.pullRequests.length} PRs`} size="small" title={tip} />
-        {healthDot(worst === "conflicts" ? "none" : worst)}
-        {stackGlyph(statuses)}
-        {mergingGlyph(s.pullRequests)}
-        {worst === "conflicts" && <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>}
+      <span className="pr-chip" title={tip} aria-label={`${s.pullRequests.length} pull request${s.pullRequests.length === 1 ? "" : "s"}`}>
+        <PrStatusIcon statuses={statuses} />
+        {stacked && <span className="pr-stack" role="img" aria-label="Stacked PR" title="Part of a stack">⇅</span>}
+        {merging && <span className="pr-spinner" role="img" aria-label="Merging stack" title="A stack merge is running">⟳</span>}
+        <span className="pr-chip-count">{s.pullRequests.length}</span>
       </span>
     );
   };
+
+  const workerCount = (s: HubSessionView) => Math.max(state?.progress?.[s.id]?.workers?.length ?? 0, s.workersRunning ? 1 : 0);
 
   const row = (s: HubSessionView, actions?: ReactNode) => (
     <li key={s.id} className="session-item">
@@ -515,11 +495,16 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <span className="session-row-text">
           <span className="session-row-title">{s.title}</span>
           {liveLine(s.id) && <span className="session-row-progress" title={liveLine(s.id) ?? undefined}>{liveLine(s.id)}</span>}
-          {(s.repo || s.branch || s.pullRequests.length > 0 || s.workersRunning) && (
+          {(s.repo || s.pullRequests.length > 0 || workerCount(s) > 0) && (
             <span className="session-row-chips">
-              {s.workersRunning && <Chip label="workers running" size="small" title="A background worker is running for this session" className="chip-workers" />}
+              {workerCount(s) > 0 && (
+                <Chip
+                  icon={RobotIcon} label={String(workerCount(s))} size="small" className="chip-workers"
+                  aria-label={`${workerCount(s)} worker${workerCount(s) === 1 ? "" : "s"} running`}
+                  title={`${workerCount(s)} background worker${workerCount(s) === 1 ? "" : "s"} running for this session`}
+                />
+              )}
               {s.repo && <Chip label={repoName(s.repo)} size="small" title={s.repo} />}
-              {s.branch && <Chip label={s.branch} size="small" title={`Branch ${s.branch}`} className="chip-branch" />}
               {prChip(s)}
             </span>
           )}
@@ -714,38 +699,40 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         </section>
         <ColumnDivider className="column-divider-attrs" label="Resize session details" width={attrsWidth} min={SIDE_MIN} max={SIDE_MAX} direction={-1} onChange={resizeAttrs} />
         <aside className="pane pane-attrs" aria-label="Session details">
-          {selected && (
+          {selected && (() => {
+            const repos = selected.repos?.length ? selected.repos : selected.repo ? [selected.repo] : [];
+            const branches = selected.branches?.length ? selected.branches : selected.branch ? [selected.branch] : [];
+            return (
             <>
+              <Text variant="headline" el="h4" size="small">Estimated cost</Text>
+              <CostBlock
+                cost={cost}
+                raises={(
+                  <div className="cost-raises" role="group" aria-label="Add budget">
+                    {([25, 100] as const).map((n) => (
+                      <Button
+                        key={n}
+                        appearance="secondary"
+                        size="small"
+                        aria-label={`+$${n} to today's limit`}
+                        disabled={!cost?.canExtend || blocked === "fyrd" || raising}
+                        onClick={() => addBudget(selected.id, cost!.limitUsd, n)}
+                      >
+                        +${n}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              />
               <Text variant="headline" el="h4" size="small">Details</Text>
               <dl className="details">
                 <dt>Role</dt><dd>{isController(selected) ? "Controller" : selected.role}</dd>
-                <dt>Repository</dt><dd>{selected.repo ?? "None attached"}</dd>
-                <dt>Branch</dt><dd>{selected.branch ?? "None"}</dd>
+                <dt>Repository</dt><dd>{repos.length === 0 ? "None attached" : <ul className="detail-list">{repos.map((r) => <li key={r}>{r}</li>)}</ul>}</dd>
+                <dt>Branch</dt><dd>{branches.length === 0 ? "None" : <ul className="detail-list">{branches.map((b) => <li key={b}>{b}</li>)}</ul>}</dd>
                 <dt>Started</dt><dd title={fullTime(selected.createdAt)}>{relativeTime(selected.createdAt)}</dd>
                 <dt>Last activity</dt><dd title={fullTime(selected.lastActivity)}>{relativeTime(selected.lastActivity)}</dd>
               </dl>
               <AddRepo key={selected.id} sessionId={selected.id} />
-              <Text variant="headline" el="h4" size="small">Estimated cost</Text>
-              <CostBlock cost={cost} />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} role="group" aria-label="Add budget">
-                {([25, 100] as const).map((n) => (
-                  <Button
-                    key={n}
-                    appearance="secondary"
-                    size="small"
-                    aria-label={`+$${n} to today's limit`}
-                    disabled={!cost?.canExtend || blocked === "fyrd" || raising}
-                    onClick={() => addBudget(selected.id, cost!.limitUsd, n)}
-                  >
-                    +${n}
-                  </Button>
-                ))}
-              </div>
-              {cost && !cost.exempt && !cost.canExtend && <Text size="small" subdued>Raises unlock at 90% of today's limit.</Text>}
-              <Text variant="headline" el="h4" size="small">Tags</Text>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {selected.tags.length === 0 ? <Text subdued size="small">None</Text> : selected.tags.map((t) => <Chip key={t} label={t} size="small" />)}
-              </div>
               <Text variant="headline" el="h4" size="small">Pull requests</Text>
               {gitHubNote && <Text size="small" subdued role="note">{gitHubNote}</Text>}
               {chains.map((c) => (
@@ -760,7 +747,6 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                       key={u}
                       url={u}
                       status={prStatuses.find((p) => p.url === u) ?? listed(u)}
-                      stacked={selected.stackedPullRequests?.includes(u) ?? false}
                       alsoOn={all.filter((o) => o.id !== selected.id && o.pullRequests.includes(u))}
                       onOpenSession={(id) => navigate("sessions", id)}
                       actionsHidden={gitHubNote !== null}
@@ -772,14 +758,16 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                       })()}
                       onNudge={(n) => pickNudge(u, n)}
                       {...stackProps(u)}
-                      stackedOn={(() => { const st = sessionPrs.find((p) => p.url === u); return st ? parentOf(st, sessionPrs) : undefined; })()}
-                      stackedAbove={(() => { const st = sessionPrs.find((p) => p.url === u); return st ? childrenOf(st, sessionPrs) : []; })()}
                       onReady={() => prAction(u, () => api.markPrReady(selected.id, u))}
                       onMerge={() => setConfirmMerge(prStatuses.find((p) => p.url === u) ?? listed(u) ?? null)}
                     />
                   ))}
                 </ul>
               )}
+              <Text variant="headline" el="h4" size="small">Tags</Text>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {selected.tags.length === 0 ? <Text subdued size="small">None</Text> : selected.tags.map((t) => <Chip key={t} label={t} size="small" />)}
+              </div>
               {confirmStack && (
                 <ScrollIntoView><Alert status="warning" title="Merge the whole stack?">
                   <Text>{confirmLine(confirmStack.top, confirmStack.rootBase)}</Text>
@@ -822,7 +810,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                 );
               })()}
             </>
-          )}
+            );
+          })()}
         </aside>
       </div>
     </div>
