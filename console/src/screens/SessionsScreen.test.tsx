@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, vi } from "vitest";
 import * as api from "../api";
@@ -10,6 +10,18 @@ import type { ScreenProps } from "./ScreenProps";
 import SessionsScreen from "./SessionsScreen";
 
 vi.mock("../api");
+
+// Counts Markdown renders: typing in the message box must not re-render transcript bubbles.
+const markdownRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../components/Markdown", async (importOriginal) => {
+  const { default: Real } = await importOriginal<typeof import("../components/Markdown")>();
+  return {
+    default: (props: { text: string }) => {
+      markdownRenders.count += 1;
+      return <Real {...props} />;
+    },
+  };
+});
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -815,6 +827,170 @@ it("an empty progress frame clears the bubble, and it stays cleared after switch
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ }));
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.queryByText("Using Read")).not.toBeInTheDocument();
+});
+
+describe("sending a message", () => {
+  const open = async () => {
+    renderScreen(two());
+    await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+    return screen.getByLabelText("Message this session");
+  };
+  const deferred = () => {
+    let resolve!: () => void;
+    let reject!: (e: Error) => void;
+    const promise = new Promise<undefined>((res, rej) => { resolve = () => res(undefined); reject = rej; });
+    return { promise, resolve, reject };
+  };
+
+  it("clears the box at once, shows the message optimistically and makes the box read-only while in flight", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    await userEvent.type(box, "hello there{Enter}");
+    expect(box).toHaveValue("");
+    expect(box).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByLabelText("Sending")).toHaveTextContent("hello there");
+    // Typing is ignored while the send is in flight.
+    await userEvent.type(box, "ignored");
+    expect(box).toHaveValue("");
+    d.resolve();
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    // The echoed user item replaces the optimistic one.
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "hello there", at: new Date().toISOString() }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("hello there")).toHaveLength(1);
+  });
+
+  it("on failure re-enables the box, keeps the text and shows the error", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    await userEvent.type(box, "keep me{Enter}");
+    expect(box).toHaveAttribute("readonly");
+    d.reject(new Error("upstream down"));
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    expect(box).toHaveValue("keep me");
+    expect(screen.getByRole("alert")).toHaveTextContent("upstream down");
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+  });
+
+  it("the echo replaces the optimistic message even when the thread is longer than the render window", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    for (let n = 0; n < 150; n++) FakeEventSource.latest().emit("item", item({ text: `filler ${n}` }));
+    await screen.findByText("Load earlier messages (50)");
+    await userEvent.type(box, "late echo{Enter}");
+    expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+    d.resolve();
+    // New items shift the window while the optimistic bubble is up; the echo still matches it by seq.
+    FakeEventSource.latest().emit("item", item({ text: "agent noise" }));
+    expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "late echo" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("late echo")).toHaveLength(1);
+  });
+
+  it("still matches the echo after load-more widened the window", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    for (let n = 0; n < 150; n++) FakeEventSource.latest().emit("item", item({ text: `filler ${n}` }));
+    await userEvent.type(box, "after more{Enter}");
+    await userEvent.click(await screen.findByRole("button", { name: /Load earlier messages/ }));
+    FakeEventSource.latest().emit("item", item({ role: "user", text: "after more" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    expect(screen.getAllByText("after more")).toHaveLength(1);
+    d.resolve();
+  });
+
+  it("matches the echo despite whitespace differences, from seq 0, one echo per message", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const box = await open();
+    await userEvent.type(box, "a  b{Enter}");
+    await userEvent.type(box, "a  b{Enter}");
+    expect(screen.getAllByLabelText("Sending")).toHaveLength(2);
+    FakeEventSource.latest().emit("item", item({ seq: 0, key: "e0", role: "user", text: "a b", at: new Date().toISOString() }));
+    expect(screen.getAllByLabelText("Sending")).toHaveLength(1);
+    FakeEventSource.latest().emit("item", item({ seq: 1, key: "e1", role: "user", text: "a b", at: new Date().toISOString() }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
+  it("an old identical message replayed after a cold-start send does not stand in for the echo", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const box = await open(); // the replay hasn't landed: nothing loaded at send time
+    await userEvent.type(box, "continue{Enter}");
+    FakeEventSource.latest().emit("item", item({ seq: 3, key: "old", role: "user", text: "continue", at: "2020-01-01T00:00:00Z" }));
+    expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+    FakeEventSource.latest().emit("item", item({ seq: 9, key: "new", role: "user", text: "continue", at: new Date().toISOString() }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
+  it("once the server accepted the message, the next user item replaces the bubble whatever its text", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const box = await open();
+    FakeEventSource.latest().emit("item", item({ seq: 1, text: "earlier" }));
+    await userEvent.type(box, "hello{Enter}");
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    FakeEventSource.latest().emit("item", item({ seq: 2, key: "wrapped", role: "user", text: "[from owner] hello" }));
+    expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+  });
+
+  it("drops the bubble 15 s after acceptance when no echo ever arrives", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+      const box = await open();
+      await userEvent.type(box, "ghost{Enter}");
+      expect(screen.getByLabelText("Sending")).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_100); });
+      expect(screen.queryByLabelText("Sending")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("restores the text on failure even when localStorage is unavailable", async () => {
+    vi.mocked(api.sendMessage).mockRejectedValue(new Error("nope"));
+    const box = await open();
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    try {
+      await userEvent.type(box, "precious{Enter}");
+      await vi.waitFor(() => expect(box).toHaveValue("precious"));
+      expect(box).not.toHaveAttribute("readonly");
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+
+  it("returns focus to the box when the lock lifts after sending with the button", async () => {
+    const d = deferred();
+    vi.mocked(api.sendMessage).mockReturnValue(d.promise);
+    const box = await open();
+    await userEvent.type(box, "via button");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    d.resolve();
+    await vi.waitFor(() => expect(box).not.toHaveAttribute("readonly"));
+    expect(box).toHaveFocus();
+  });
+
+  it("typing does not re-render the transcript", async () => {
+    const box = await open();
+    FakeEventSource.latest().emit("item", item({ text: "first" }));
+    FakeEventSource.latest().emit("item", item({ text: "second" }));
+    const bubble = screen.getByText("second");
+    await userEvent.type(box, "abcdef");
+    // The very same DOM node survives; and the render counter of the markdown component stays put.
+    expect(screen.getByText("second")).toBe(bubble);
+    const before = markdownRenders.count;
+    await userEvent.type(box, "ghijkl");
+    expect(markdownRenders.count).toBe(before);
+  });
 });
 
 it("shows the branch as a chip in the session list and in the details", async () => {
