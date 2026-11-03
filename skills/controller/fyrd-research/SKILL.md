@@ -15,7 +15,7 @@ Request: "Research {uri} and help me build an implementation plan". Start one Re
    - `title`: from step 1.
    - `tags`: `["fyrd-hub", "fyrd-role-researcher"]`.
    - `environment_id` from `<hub-settings>` (omit when empty), `permission_mode: "auto"`, `model` from `<peasant-persona id="researcher" …>`.
-   - `append_system_prompt`: the researcher persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="researcher">…</role-memory>`.
-   - `prompt`: `Research the input below and help the owner build an implementation plan. Investigate it and ask the owner with AskUserQuestion where a decision is needed. Then commit the plan as markdown to your branch and push it, publish it as a claude.ai artifact, then reply with the artifact link, branch, file path and a short summary.` followed by the uri verbatim on its own line.
+   - `append_system_prompt`: the researcher persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="researcher">…</role-memory>`, then a blank line and `<subagent-persona id="reviewer">…</subagent-persona>` (the reviewer persona text).
+   - `prompt`: `Research the input below and help the owner build an implementation plan. Investigate it in depth and ask the owner with AskUserQuestion whenever something is unclear or a decision is needed, until each work item is detailed enough for a Builder to build without guessing. Have a Reviewer subagent review the plan and make its suggested changes. Then commit the plan as markdown to your branch and push it, publish it as a claude.ai artifact, then reply with the artifact link, branch, file path and a short summary.` followed by the uri verbatim on its own line.
    - `source_url` from step 2 (omit only for `No repo`).
 6. Reply listing each Researcher's title and session id, and stop. The owner reads results in the Researchers' own sessions.

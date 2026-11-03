@@ -33,54 +33,38 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `environment_id`: from `<hub-settings>` (omit when empty).
    - `permission_mode`: `"auto"`.
    - `model`: the `model` attribute of that role's `<peasant-persona>`.
-   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`.
+   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`; then for a Builder a blank line, `<subagent-persona id="validator">…</subagent-persona>` and `<subagent-persona id="reviewer">…</subagent-persona>` with those personas' text, and for a Researcher only the reviewer one.
    - `prompt`: `Wait for your task.`
    - `source_url`: from step 4 (omit only for `No repo`).
 8. Reply with the title and session id, and stop.
 
 A later task for a running peasant goes in `mcp__claude-code-remote__send_message` (`session_id`, `message`). The first task always goes in `prompt`. A message that gives a Builder new work must include a `Base branch:` line (the branch the owner names, else `the repo's default branch`).
 
-## Validation request from a Builder
+## Owner asks for a validation or review
 
-A message starting `Validation request:` from a Builder names a draft PR, its base branch, the spec links and the Builder's title and session id. Start a Validator for it. A Builder sends it again after fixing findings; handle each one the same way.
+Builders validate and review their own pull requests, and Researchers review their own plans, with persona subagents. Never start a Validator or Reviewer because a peasant asked, and never relay findings between peasants. This section covers only the owner's own requests: "Validate PR <url>", `PR #{n} is ready` (or `PR #{n} is ready: <url>`), "Review PR <url>" and "Review this plan".
 
-The owner can send the same request from the console as `Validate PR <url>. Base branch: <base>. Builder: <title> (<id>).` Treat it the same way. Either form may lack the `Builder:` line or the `Spec:` links, and the PR is then all you have:
-- **No `Builder:` line.** Look the Builder up by branch: read the PR's head branch, then find the live session with role `builder` whose branch equals it (`list_sessions`, then `get_session`). If there is none, leave the `Builder:` line out of the prompt; the Validator then reports findings to you, and you forward them to whichever Builder you find or ask the owner.
+The console sends a validation as `Validate PR <url>. Base branch: <base>. Builder: <title> (<id>).` Any of those lines may be missing, and the PR is then all you have:
+- **No `Builder:` line.** Look the Builder up by branch: read the PR's head branch, then find the live session with role `builder` whose branch equals it (`list_sessions`, then `get_session`). If there is none, there is no Builder.
 - **No `Base branch:` line.** Use the PR's base branch.
-- **No `Spec:` links.** Send the prompt without a spec; the Validator checks the PR description and the tests.
+- **No `Spec:` links.** Go on without a spec; the check uses the PR description and the tests.
 
-1. **Title.** `validator-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
-2. **Repo.** It comes from the PR, so ask nothing.
+**A live Builder owns the PR.** Send it the request with `mcp__claude-code-remote__send_message`, and start nothing:
+- validation: `Validate <url> again with a Validator subagent and fix anything that fails, as in your PR flow. Base branch: <base>.`
+- review: `Review <url> with a Reviewer subagent, post the review and fix the findings, as in your PR flow. Base branch: <base>.`
+Reply with what you sent and to whom.
+
+**No live Builder owns it, or it is a plan.** Start a standalone session:
+
+1. **Title.** `reviewer-<suffix>` or `validator-<suffix>` (the owner's suffix, else the PR number or the plan's file name). Recycle a matching idle session or pick the next suffix, as in Start.
+2. **Repo.** It comes from the PR or the plan's URL, so ask nothing; otherwise apply the Repo rule.
 3. **Session cap.** If over, ask as in Start step 5.
 4. **Recycle.** As in Start step 6, and only if the session is actually being started.
-5. **Create.** `prompt`:
-   ```
-   Validate pull request <url> against the spec below.
-   Base branch: <base>
-   Builder: <builder title> (<builder session id>)   (leave this line out when there is no Builder)
-   Controller session: <your own session id>
-   If anything fails, send the findings to the Controller (Validation failed:). If everything passes, mark the PR ready for review, then ask the Controller for a reviewer (Review request:). Reply with your findings.
-   ```
-   followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
-6. Reply with the title and session id.
-
-## Validation failure from a Validator
-
-A message starting `Validation failed:` names a PR, its Builder (title and session id) and the findings.
-
-1. Forward it with `mcp__claude-code-remote__send_message` to the Builder's session: `Validator findings for <url>: <findings verbatim>. Fix them, push, then send a new Validation request:. Base branch: <base>.` Use the PR's base branch, keeping the Builder on its current branch.
-2. If the Builder isn't live, tell the owner and ask with `AskUserQuestion` (`Start a Builder to fix it`, `Leave it`).
-3. Reply with what you forwarded and to whom.
-
-## Review request from a Validator
-
-A message starting `Review request:` from a Validator names a PR it has marked ready, its base branch, the spec links and the Builder's title and session id. Start a Reviewer for it.
-
-1. **Title.** `reviewer-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
-2. **Repo.** It comes from the PR, so ask nothing.
-3. **Session cap.** If over, ask as in Start step 5.
-4. **Recycle.** As in Start step 6, and only if the session is actually being started.
-5. **Create.** `prompt`: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.` followed by the spec links. Other settings as in Start step 7, with `source_url` set to the PR's repo.
+5. **Create.** `prompt`, followed by any spec or input links the owner gave:
+   - Reviewer on a PR: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.`
+   - Reviewer on a plan: `Review the implementation plan <url> against the input below. Reply with your findings and any questions only the owner can answer.`
+   - Validator: `Validate pull request <url> against the spec below. Base branch: <base>. Reply with your findings.`
+   Other settings as in Start step 7, with `source_url` set to the repo.
 6. Reply with the title and session id.
 
 ## Tear down

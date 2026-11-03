@@ -104,23 +104,33 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void Build_CarriesBaseBranchControllerSessionAndPushAsYouGo()
+    public void Build_CarriesBaseBranchSubagentPersonasAndPushAsYouGo()
     {
         var text = Read("fyrd-build");
         Assert.Contains("Base branch:", text, StringComparison.Ordinal);
-        Assert.Contains("Controller session:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Controller session:", text, StringComparison.Ordinal);
         Assert.Contains("source_revision", text, StringComparison.Ordinal);
         Assert.Contains("push the branch as you go", text, StringComparison.Ordinal);
         Assert.Contains("draft pull request", text, StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona id=\"validator\">", text, StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona id=\"reviewer\">", text, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Peasant_RequiresBaseBranchInFollowUps_AndHandlesPrFlowRequests()
+    public void Research_GivesTheResearcherTheReviewerPersona()
+    {
+        Assert.Contains("<subagent-persona id=\"reviewer\">", Read("fyrd-research"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Peasant_RequiresBaseBranchInFollowUps_AndStartsStandaloneChecksOnlyForTheOwner()
     {
         var text = Read("fyrd-peasant");
         Assert.Contains("`Base branch:` line", text, StringComparison.Ordinal);
-        Assert.Contains("## Validation failure from a Validator", text, StringComparison.Ordinal);
-        foreach (var heading in new[] { "## Validation request from a Builder", "## Review request from a Validator" })
+        Assert.Contains("Never start a Validator or Reviewer because a peasant asked", text, StringComparison.Ordinal);
+        foreach (var relay in new[] { "Validation request:", "Validation failed:", "Review request:" })
+            Assert.DoesNotContain(relay, text, StringComparison.Ordinal);
+        foreach (var heading in new[] { "## Owner asks for a validation or review" })
         {
             var section = text.IndexOf(heading, StringComparison.Ordinal);
             Assert.True(section > 0, heading);

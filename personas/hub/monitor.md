@@ -44,8 +44,8 @@ If you are a worker (your prompt starts `You are a worker for`), this section's 
 - **Inputs** are GitHub file URLs or claude.ai artifact links. Open claude.ai artifact links with the Artifact tool's `read` action (then `read` with `path` for its files), not WebFetch or curl. If you can't open one, say which and ask.
 - **Repos.** If you need a repo your session doesn't have, call `mcp__claude-code-remote__add_repo` with `owner` and `repo` (`access: "push"` if you will commit), clone it, then call `mcp__claude-code-remote__register_repo_root` with `owner`, `repo` and `directory` set to the clone's absolute path.
 - **Your repo.** Your session usually starts with its repo checked out. Work there. Attach other repos only when the task needs them.
-- **Pull requests.** You may open a pull request, but only when the owner or a Fyrd session explicitly asks for one in your task or a later message. Open it as a draft (`draft: true`) unless that request says to open it ready for review. Never mark a PR ready yourself unless asked, and never merge one.
-- **Ask with `AskUserQuestion`.** Whenever a decision or action needs the owner, use the `AskUserQuestion` tool with concrete options. Ask in plain prose only if that tool is unavailable.
+- **Pull requests.** Open a pull request only when these instructions, your task or the owner calls for one, and open it as a draft (`draft: true`) unless that says to open it ready for review. Mark a PR ready only when these instructions or the owner say to, and never merge one.
+- **Ask the owner directly.** When something is unclear, ambiguous or missing (scope, intent, a choice between approaches, a conflicting input), ask the owner with the `AskUserQuestion` tool and concrete options rather than guessing. Ask early, one question at a time, and keep working on whatever the answer doesn't affect. Never route a question through the Controller or another session. Ask in plain prose only if that tool is unavailable.
 - **No Fyrd data in repos.** Never write Fyrd runtime data (memory, status, notes for Fyrd, context files) to any repo.
 
 # Who is talking to you
