@@ -120,4 +120,93 @@ public class PullRequestStacksTests
         Assert.Equal([Url(1), Url(2)], set.Urls);
         Assert.Empty(set.Stacked);
     }
+
+    private static PullRequestStatus St(int n, string head, string @base, string state = "open") =>
+        new(Url(n), n, $"PR {n}", state, false, "passing") { Head = head, Base = @base };
+
+    [Fact]
+    public void Warning_NamesTheChildAndTheTopDownOrder()
+    {
+        var prs = new[] { St(11, "a", "main"), St(12, "b", "a"), St(13, "c", "b") };
+        Assert.Equal(
+            "#12 is stacked on this PR. Merge from the top of the stack down: merge #13, then #12, then this. Merging this first leaves #12 targeting a merged branch.",
+            PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+    }
+
+    [Fact]
+    public void Warning_IsNullForThePrAtTheTop_AndForAPrWithNoStack()
+    {
+        var prs = new[] { St(11, "a", "main"), St(12, "b", "a"), St(20, "x", "main") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[1]));
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[2]));
+    }
+
+    [Fact]
+    public void Warning_IgnoresMergedClosedChildren()
+    {
+        var prs = new[] { St(11, "a", "main"), St(12, "b", "a", "merged"), St(13, "c", "a", "closed") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+    }
+
+    [Fact]
+    public void Above_ForkListsEveryChild_AndEveryDescendantTopDown()
+    {
+        var prs = new[] { St(1, "a", "main"), St(2, "b", "a"), St(3, "c", "a"), St(4, "d", "b") };
+        var (children, topDown) = PullRequestStacks.Above(prs, prs[0]);
+        Assert.Equal([2, 3], children.Select(c => c.Number));
+        Assert.Equal([4, 2, 3], topDown.Select(c => c.Number));
+        Assert.Equal("#2, #3 are stacked on this PR. Merge from the top of the stack down: merge #4, then #2, then #3, then this. Merging this first leaves #2, #3 targeting a merged branch.",
+            PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+    }
+
+    [Fact]
+    public void Above_NeverLoopsOnACycle()
+    {
+        var prs = new[] { St(1, "a", "b"), St(2, "b", "a") };
+        var (_, topDown) = PullRequestStacks.Above(prs, prs[0]);
+        Assert.Equal([2], topDown.Select(c => c.Number));
+    }
+
+    private static PullRequestStatus In(string repo, int n, string head, string @base, bool fork = false, string def = "main") =>
+        new($"https://github.com/{repo}/pull/{n}", n, $"PR {n}", "open", false, "passing")
+        { Head = head, Base = @base, CrossRepository = fork, DefaultBranch = def };
+
+    [Fact]
+    public void Links_OnlyWithinOneRepo()
+    {
+        var prs = new[] { In("acme/a", 1, "feat", "main"), In("acme/b", 2, "other", "feat") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+        Assert.Empty(PullRequestStacks.Above(prs, prs[0]).Children);
+        Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
+
+    [Fact]
+    public void Links_ThroughAnIdenticalRepoNameInDifferentCase()
+    {
+        var prs = new[] { In("Acme/Widgets", 1, "feat", "main"), In("acme/widgets", 2, "other", "feat") };
+        Assert.True(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
+
+    [Fact]
+    public void AForkPrWhoseHeadIsTheDefaultBranch_NeverMakesEverythingStacked()
+    {
+        // Fork PR "main → release" must not make every PR that targets main look stacked on it.
+        var prs = new[] { In("acme/a", 1, "main", "release", fork: true), In("acme/a", 2, "x", "main"), In("acme/a", 3, "y", "main") };
+        Assert.Null(PullRequestStacks.MergeOrderWarning(prs, prs[0]));
+        Assert.Empty(PullRequestStacks.Above(prs, prs[0]).Children);
+    }
+
+    [Fact]
+    public void ASameRepoPrWhoseHeadIsTheDefaultBranch_NeverLinks()
+    {
+        var prs = new[] { In("acme/a", 1, "main", "dev"), In("acme/a", 2, "x", "main") };
+        Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
+
+    [Fact]
+    public void ForkHeadsNeverLink_EvenWithMatchingBranchNames()
+    {
+        var prs = new[] { In("acme/a", 1, "feat", "main"), In("acme/a", 2, "other", "feat", fork: true) };
+        Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
+    }
 }

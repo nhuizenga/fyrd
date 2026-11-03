@@ -572,6 +572,60 @@ public class HubApiTests
         Assert.Equal(Pr, s.GetProperty("sessions")[0].GetProperty("stackedPullRequests")[0].GetString());
     }
 
+    private const string Child = "https://github.com/acme/widgets/pull/13";
+
+    private static void SeedStack(FyrdFactory f)
+    {
+        var parent = new PullRequestStatus(Pr, 12, "parent", "open", false, "passing") { Head = "fyrd/a", Base = "main", Mergeable = "mergeable" };
+        var child = new PullRequestStatus(Child, 13, "child", "open", false, "passing") { Head = "fyrd/b", Base = "fyrd/a", Mergeable = "mergeable" };
+        f.Services.GetRequiredService<HubState>().Publish([View() with { PullRequests = [Pr, Child], StackedPullRequests = [Child] }], [], null, null,
+            new Dictionary<string, PullRequestStatus> { [Pr] = parent, [Child] = child });
+        f.GitHub.Statuses[Pr] = parent;
+        f.GitHub.Statuses[Child] = child;
+    }
+
+    [Fact]
+    public async Task Merge_ThatLeavesAStackedPrBehind_409_WithTheOrder_NothingMerged()
+    {
+        using var f = new FyrdFactory();
+        SeedStack(f);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        var text = await r.Content.ReadAsStringAsync();
+        Assert.Contains("#13 is stacked on this PR. Merge from the top of the stack down: merge #13, then this.", text);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task Merge_WithForce_SkipsTheOrderGuard()
+    {
+        using var f = new FyrdFactory();
+        SeedStack(f);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr, force = true });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([Pr], f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task Merge_OfTheTopOfAStack_NeedsNoForce()
+    {
+        using var f = new FyrdFactory();
+        SeedStack(f);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Child });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([Child], f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task Merge_ForceDoesNotBypassOtherChecks()
+    {
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Pr, force = true });
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
     [Fact]
     public async Task PullRequests_NotHubSession_404()
     {

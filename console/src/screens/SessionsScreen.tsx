@@ -9,6 +9,7 @@ import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
 import PullRequestItem, { prLabel } from "../components/PullRequestItem";
+import { chainLine, chainOf, childrenOf, mergeOrderWarning, parentOf, type Chain } from "../stacks";
 import { nudgesFor, type Nudge } from "../prNudges";
 import { HEALTH_LABEL, anyPending, healthOf, stateColor, worstHealth } from "../prStatus";
 import Composer, { DRAFT_KEY, readStored, writeStored } from "../components/Composer";
@@ -159,6 +160,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
 
   // A PR's status as the last hub poll saw it; the details pane also re-reads live.
   const listed = (url: string) => state?.pullRequests?.[url];
+
+  const sessionPrs = (selected?.pullRequests ?? [])
+    .map((u) => prStatuses.find((p) => p.url === u) ?? listed(u))
+    .filter((p): p is PullRequestStatus => p !== undefined);
+  const chains = sessionPrs.reduce<Chain[]>((acc, p) => {
+    const c = chainOf(p, sessionPrs);
+    return c && !acc.some((x) => x.prs[0].url === c.prs[0].url) ? [...acc, c] : acc;
+  }, []);
 
   // While a selected session has a PR with running checks, re-read it every 30 s so Merge appears soon after CI goes green.
   const pendingNow = selected
@@ -409,6 +418,14 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       <span className={`pr-dot pr-dot-${health}`} role="img" aria-label={HEALTH_LABEL[health]} title={HEALTH_LABEL[health]} />
     );
 
+  // A small glyph when any of these PRs is part of a chain (a session in a stack owns the whole stack).
+  const stackGlyph = (statuses: (PullRequestStatus | undefined)[]) => {
+    const everything = Object.values(state?.pullRequests ?? {});
+    return statuses.some((st) => st && chainOf(st, everything))
+      ? <span className="pr-stack" role="img" aria-label="Stacked PR" title="Part of a stack">⇅</span>
+      : null;
+  };
+
   // One PR: its number, coloured by state, a checks dot and a conflict marker. Several: the count, with the worst status.
   const prChip = (s: HubSessionView) => {
     if (s.pullRequests.length === 0) return null;
@@ -421,6 +438,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         <span className="pr-row-chip">
           <Chip label={prLabel(url)} size="small" color={stateColor(st)} title={st?.title ? `${prLabel(url)} ${st.title} (${st.draft ? "draft" : st.state})` : url} />
           {healthDot(health === "conflicts" ? "none" : health)}
+          {stackGlyph(statuses)}
           {st?.state === "open" && st.mergeable === "conflicting" && (
             <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>
           )}
@@ -438,6 +456,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       <span className="pr-row-chip">
         <Chip label={`${s.pullRequests.length} PRs`} size="small" title={tip} />
         {healthDot(worst === "conflicts" ? "none" : worst)}
+        {stackGlyph(statuses)}
         {worst === "conflicts" && <span className="pr-conflict" role="img" aria-label="Merge conflicts" title="Merge conflicts">⚠</span>}
       </span>
     );
@@ -683,6 +702,11 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               </div>
               <Text variant="headline" el="h4" size="small">Pull requests</Text>
               {gitHubNote && <Text size="small" subdued role="note">{gitHubNote}</Text>}
+              {chains.map((c) => (
+                <Text key={c.prs[0].url} size="small" subdued className="pr-chain" title={c.fork ? "This stack forks: it can be merged one PR at a time" : undefined}>
+                  {chainLine(c)}{c.fork ? " · forked" : ""}
+                </Text>
+              ))}
               {selected.pullRequests.length === 0 ? (gitHubNote ? null : <Text subdued>—</Text>) : (
                 <ul className="pr-list">
                   {selected.pullRequests.map((u) => (
@@ -701,6 +725,8 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                         return st ? nudgesFor(st, all, controller) : [];
                       })()}
                       onNudge={(n) => pickNudge(u, n)}
+                      stackedOn={(() => { const st = sessionPrs.find((p) => p.url === u); return st ? parentOf(st, sessionPrs) : undefined; })()}
+                      stackedAbove={(() => { const st = sessionPrs.find((p) => p.url === u); return st ? childrenOf(st, sessionPrs) : []; })()}
                       onReady={() => prAction(u, () => api.markPrReady(selected.id, u))}
                       onMerge={() => setConfirmMerge(prStatuses.find((p) => p.url === u) ?? listed(u) ?? null)}
                     />
@@ -718,24 +744,27 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
                   </div>
                 </Alert>
               )}
-              {confirmMerge && (
-                <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
-                  <Text>This squash-merges {prLabel(confirmMerge.url)} into <code>{confirmMerge.base || "its base"}</code> on GitHub.</Text>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Button
-                      appearance="primary" size="small"
-                      onClick={() => {
-                        const pr = confirmMerge;
-                        setConfirmMerge(null);
-                        void prAction(pr.url, () => api.mergePr(selected.id, pr.url));
-                      }}
-                    >
-                      Merge pull request
-                    </Button>
-                    <Button appearance="ghost" size="small" onClick={() => setConfirmMerge(null)}>Cancel</Button>
-                  </div>
-                </Alert>
-              )}
+              {confirmMerge && (() => {
+                const warning = mergeOrderWarning(confirmMerge, sessionPrs);
+                const merge = (force: boolean) => {
+                  const pr = confirmMerge;
+                  setConfirmMerge(null);
+                  void prAction(pr.url, () => api.mergePr(selected.id, pr.url, force));
+                };
+                return (
+                  <Alert status="warning" title={`Merge ${prLabel(confirmMerge.url)} ${confirmMerge.title}?`}>
+                    {warning
+                      ? <Text role="alert">{warning}</Text>
+                      : <Text>This squash-merges {prLabel(confirmMerge.url)} into <code>{confirmMerge.base || "its base"}</code> on GitHub.</Text>}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Button appearance="primary" size="small" onClick={() => merge(warning !== null)}>
+                        {warning ? "Merge this only anyway" : "Merge pull request"}
+                      </Button>
+                      <Button appearance="ghost" size="small" onClick={() => setConfirmMerge(null)}>Cancel</Button>
+                    </div>
+                  </Alert>
+                );
+              })()}
             </>
           )}
         </aside>

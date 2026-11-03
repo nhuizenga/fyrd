@@ -29,6 +29,12 @@ public sealed record PullRequestStatus(string Url, int Number, string Title, str
     /// <summary><c>mergeable</c>, <c>conflicting</c> or <c>unknown</c>.</summary>
     public string Mergeable { get; init; } = "unknown";
 
+    /// <summary>The head is in a fork. Such a PR never links into a stack.</summary>
+    public bool CrossRepository { get; init; }
+
+    /// <summary>The repo's default branch (empty when unknown). A PR whose head is the default branch never links into a stack.</summary>
+    public string DefaultBranch { get; init; } = "";
+
     /// <summary>Lower-cased <c>mergeStateStatus</c>: clean, behind, blocked, dirty, unstable, draft, has_hooks or unknown.</summary>
     public string MergeState { get; init; } = "unknown";
 

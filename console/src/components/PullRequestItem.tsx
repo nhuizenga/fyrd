@@ -33,16 +33,22 @@ interface Props {
   onNudge?: (nudge: Nudge) => void;
   /** "Sent to <session>" after a nudge went out. */
   notice?: string | null;
+  /** The open PR this one is stacked on, and the open PRs stacked on this one (all in the same list). */
+  stackedOn?: PullRequestStatus;
+  stackedAbove?: PullRequestStatus[];
 }
 
 /** One pull request in the details pane: title line, status badges, actions and its own inline error. */
-export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession, nudges = [], onNudge, notice }: Props) {
+const jumpTo = (number: number) =>
+  document.getElementById(`pr-item-${number}`)?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+
+export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, stacked, alsoOn = [], onOpenSession, nudges = [], onNudge, notice, stackedOn, stackedAbove = [] }: Props) {
   const label = prLabel(url);
   const known = st && st.state !== "unknown";
   const title = known ? st.title : "";
   const checksShown = known && st.checks !== "none";
   return (
-    <li className="pr-item">
+    <li className="pr-item" id={st?.number ? `pr-item-${st.number}` : undefined}>
       <div className="pr-line">
         <Chip label={label} size="small" title={title ? `${label} ${title}` : url} />
         {stacked && <Chip label="stacked" size="small" title="Owned through a stack with this session's own PRs" />}
@@ -102,6 +108,20 @@ export default function PullRequestItem({ url, status: st, actionsHidden, error,
         </span>
       )}
       {st?.state === "unknown" && st.error && <Text size="small" subdued>{st.error}</Text>}
+      {(stackedOn || stackedAbove.length > 0) && (
+        <span className="pr-stack-links">
+          {stackedOn && (
+            <button type="button" className="pr-also-on-link" onClick={() => jumpTo(stackedOn.number)}>
+              Stacked on #{stackedOn.number}
+            </button>
+          )}
+          {stackedAbove.map((a) => (
+            <button key={a.url} type="button" className="pr-also-on-link" onClick={() => jumpTo(a.number)}>
+              #{a.number} stacked on this
+            </button>
+          ))}
+        </span>
+      )}
       {alsoOn.length > 0 && (
         <span className="pr-also-on">
           <Text size="small" subdued>Also on:</Text>

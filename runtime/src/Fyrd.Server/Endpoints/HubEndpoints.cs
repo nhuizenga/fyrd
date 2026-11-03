@@ -27,7 +27,7 @@ internal static partial class HubEndpoints
     private sealed record AdoptBody(string? SessionId);
     private sealed record BudgetBody(JsonElement? AmountUsd);
     private sealed record RenameBody(string? Title);
-    private sealed record PrBody(string? Url);
+    private sealed record PrBody(string? Url, bool? Force = null);
     private sealed record AnswerBody(string? Choice, string? Text);
 
     public static IEndpointRouteBuilder MapHub(this IEndpointRouteBuilder app)
@@ -195,6 +195,10 @@ internal static partial class HubEndpoints
             {
                 // Re-checked here, not trusted from the console: the PR may have changed since it was listed.
                 if (!current.CanMerge) return Results.Problem("That pull request is not ready to merge (draft, checks not passing, merge conflicts, or not open).", statusCode: StatusCodes.Status409Conflict);
+                // Merge from the top of a stack down. Only "merge this only anyway" (force) may skip the order.
+                if (body?.Force != true
+                    && PullRequestStacks.MergeOrderWarning(StackedStatuses(state, id, current), current) is { } warning)
+                    return Results.Problem(warning, statusCode: StatusCodes.Status409Conflict);
                 await github.MergeAsync(url, ct);
                 return Results.NoContent();
             }));
@@ -578,6 +582,12 @@ internal static partial class HubEndpoints
                 return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         });
+
+    /// <summary>The session's PRs as the last poll listed them, with the freshly read one in place of its listed copy.</summary>
+    private static IEnumerable<PullRequestStatus> StackedStatuses(HubState state, string id, PullRequestStatus current) =>
+        state.Sessions.First(s => s.Id == id).PullRequests
+            .Select(u => u == current.Url ? current : state.PullRequests.GetValueOrDefault(u))
+            .OfType<PullRequestStatus>();
 
     private static IResult NotConfigured() =>
         Results.Problem("GitHub is not configured. Set GH_TOKEN before /fyrd:up.", statusCode: StatusCodes.Status503ServiceUnavailable);
