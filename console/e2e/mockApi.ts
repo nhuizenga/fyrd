@@ -85,6 +85,8 @@ export interface MockOptions {
   stackMerges?: StackMergeView[];
   /** Pull requests of `session_b1` (the session lists their URLs and the API serves these statuses). */
   prs?: PullRequestStatus[];
+  /** Hold `POST …/message` this long (and optionally fail it) to stand in for a slow upstream. */
+  message?: { delayMs: number; status?: number };
   /** Peasant shared-memory proposals waiting for approval. */
   pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
   /** Session rows to serve instead of the defaults. */
@@ -131,6 +133,12 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     }
     if (/^\/api\/hub\/sessions\/session_stack\/pull-requests$/.test(path)) return route.fulfill({ json: STACK_PRS });
     if (opts.prs && path === "/api/hub/sessions/session_b1/pull-requests") return route.fulfill({ json: opts.prs });
+    if (opts.message && req.method() === "POST" && /\/message$/.test(path)) {
+      await new Promise((r) => setTimeout(r, opts.message!.delayMs));
+      return route.fulfill(opts.message.status && opts.message.status >= 400
+        ? { status: opts.message.status, json: { detail: "Upstream down" } }
+        : { status: 204 });
+    }
     if (path === "/api/hub/state") return route.fulfill({ json: state });
     if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
