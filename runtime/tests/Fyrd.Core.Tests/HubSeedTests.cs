@@ -128,6 +128,8 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("subagent_type: \"general-purpose\"", d, StringComparison.Ordinal);
         Assert.Contains("markPullRequestReadyForReview", d, StringComparison.Ordinal);
         Assert.Contains("event: COMMENT", d, StringComparison.Ordinal);
+        Assert.Contains("return your findings only", d, StringComparison.Ordinal);
+        Assert.Contains("authored by you: it is not new work", d, StringComparison.Ordinal);
         foreach (var relay in new[] { "Controller session:", "Validation request:", "Validation failed:", "Review request:" })
             Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
     }
@@ -141,6 +143,7 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("POST /repos/{owner}/{repo}/merges", d, StringComparison.Ordinal);
         Assert.Contains("X-GitHub-Api-Version: 2026-03-10", d, StringComparison.Ordinal);
         Assert.Contains("Never force-push, never push", d, StringComparison.Ordinal);
+        Assert.Contains("any non-2xx response", d, StringComparison.Ordinal);
     }
 
     [Fact]

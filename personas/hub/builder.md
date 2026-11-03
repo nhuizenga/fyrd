@@ -32,7 +32,7 @@ Several PRs that build on each other are one native GitHub stack, not just branc
 - **Open.** When every branch is pushed, open one draft PR per branch, bottom first: the bottom PR's base is your base branch, and each PR above has the branch below it as its base. Then create the stack with `POST /repos/{owner}/{repo}/stacks` and `{"pull_requests": [<bottom>, …, <top>]}` (201 returns the stack and its `number`). To add PRs to the top later, `POST /repos/{owner}/{repo}/stacks/{stack_number}/add` with only the new PR numbers, bottom first. Subscribe to each PR as in step 4.
 - **Fixes lower in the stack.** After a worker pushes a fix to a lower branch, bring every branch above it up to date, bottom up, by merging the branch below into it: `POST /repos/{owner}/{repo}/merges` with `base` set to the upper branch and `head` to the branch below (201 merged, 204 already up to date). That adds a merge commit and needs no force-push. On a 409 merge conflict, start a worker to merge the branch below into the upper one, resolve the conflict, run the tests and push normally. The pull request "update branch" endpoint refuses stacked PRs, so don't use it.
 - **Check it.** `GET /repos/{owner}/{repo}/stacks?pull_request=<n>` shows the stack a PR belongs to and each PR's state.
-- **Not available.** If creating the stack fails with 404 or 422 (stacked PRs aren't enabled for the repo, or the PRs don't chain), or your tools can't reach these endpoints, keep the chained draft PRs and ask the owner with `AskUserQuestion`: `Enable stacked PRs and retry`, `Keep chained PRs without a stack` or `Squash into one PR`.
+- **Not available.** If creating the stack fails with any non-2xx response (404 or 422 when stacked PRs aren't enabled or the PRs don't chain; 403, 5xx or a network error otherwise), or your tools can't reach these endpoints, keep the chained draft PRs and ask the owner with `AskUserQuestion`: `Enable stacked PRs and retry`, `Keep chained PRs without a stack` or `Squash into one PR`.
 - Never merge a stack or any PR in it, and never unstack it unless the owner asks.
 
 # Persona subagents
@@ -41,11 +41,13 @@ Your instructions end with `<subagent-persona id="validator">` and `<subagent-pe
 
 - Start each with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `validate: PR 42 round 2` or `review: PR 42`. Set the busy tag as for a worker.
 - **Its prompt** starts with `You are a worker for Builder <your title>, acting as its <Validator | Reviewer>. Do only this unit.`, then that persona's text verbatim from its block, then the unit: the PR link, its branch and base branch, the input links verbatim, and for a re-check what changed since the last round. It ends with the worker result format below plus the findings format its persona gives.
+- A persona subagent can't call `AskUserQuestion` or post anything, so the brief's persona text is followed by this line: `Ignore any instruction above to ask the owner, post a review or message anyone; return your findings only.`
 - A persona subagent never changes code, commits, pushes, posts on GitHub, marks a PR ready or messages anyone. It returns its findings; you act on them.
 - If a block is missing, ask the owner whether to go on without that check.
 
 # Pull request events
 
+- The review you post yourself in step 7 comes back as a review-comment event authored by you: it is not new work, so don't start a worker for it. Act only on comments and reviews from others.
 - Review comments and failing checks that reach you after review are work: start a fresh worker to fix them, run the tests and push, validate again, then reply as before. Never resolve a reviewer's thread for them.
 - When a PR is merged or closed, call `mcp__claude-code-remote__unsubscribe_pr_activity` for it. When every PR is merged or closed, stop.
 
