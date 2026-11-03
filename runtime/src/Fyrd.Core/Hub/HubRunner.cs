@@ -13,7 +13,7 @@ namespace Fyrd.Core.Hub;
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
     HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard, PendingMemory pending,
-    OwnedPullRequests? ownedPrs = null)
+    IOwnerMessages owner, OwnedPullRequests? ownedPrs = null)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -126,15 +126,16 @@ public sealed partial class HubRunner(
 
         state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, costPass?.Budget ?? state.Budget, PullRequestStatuses(views));
 
-        try
+        // Separate tries: a failed or slow instructions refresh must not skip the memory update for the pass.
+        var liveIds = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var post in new Func<Task>[] { () => PostInstructionsRefreshAsync(sessions, ct), () => PostMemoryUpdateAsync(liveIds, ct) })
         {
-            await PostInstructionsRefreshAsync(sessions, ct);
-            await PostMemoryUpdateAsync(sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal), ct);
-        }
-        catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
-                                  && (e is not OperationCanceledException || !ct.IsCancellationRequested))
-        {
-            lastError ??= $"controller update: {e.Message}";
+            try { await post(); }
+            catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
+                                      && (e is not OperationCanceledException || !ct.IsCancellationRequested))
+            {
+                lastError ??= $"controller update: {e.Message}";
+            }
         }
 
         if (costPass is not null)
@@ -249,7 +250,8 @@ public sealed partial class HubRunner(
         var (prompt, instructionsHash, memoryHash) = controller.BuildPrompt();
         // An adoption during this pass replaced the Controller: post nothing to the old one.
         if (controller.CurrentId != controllerId || instructionsHash == controller.PostedInstructionsHash) return;
-        await cloud.SendMessageAsync(controllerId, prompt, ct);
+        // Sent as the owner's own turn: a running session rejects a peer-wrapped message for this.
+        await owner.SendAsync(controllerId, prompt, ct);
         controller.MarkPosted(instructionsHash, memoryHash);
     }
 
@@ -262,7 +264,8 @@ public sealed partial class HubRunner(
         var hash = ControllerManager.Hash(text);
         // An adoption during this pass replaced the Controller (and set its own hash): post nothing to the old one.
         if (controller.CurrentId != controllerId || hash == controller.PostedMemoryHash) return;
-        await cloud.SendMessageAsync(controllerId, text, ct);
+        // Same path as a typed message: a running session rejects a peer-wrapped memory update.
+        await owner.SendAsync(controllerId, text, ct);
         controller.PostedMemoryHash = hash;
     }
 
@@ -280,6 +283,8 @@ public sealed partial class HubRunner(
                 return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
             CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
         {
+            Repos = Repos(s.Raw),
+            Branches = Branches(s.Raw),
             PullRequests = owned?.Urls ?? [],
             StackedPullRequests = owned?.Stacked ?? [],
         };
@@ -309,16 +314,31 @@ public sealed partial class HubRunner(
     private static DateTimeOffset? CreatedAt(JsonElement raw) =>
         Str(raw, "created_at") is { } v && DateTimeOffset.TryParse(v, out var at) ? at : null;
 
+    private static string RepoName(string url)
+    {
+        const string gh = "https://github.com/";
+        var repo = url.StartsWith(gh, StringComparison.OrdinalIgnoreCase) ? url[gh.Length..].TrimEnd('/') : url;
+        return repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? repo[..^4] : repo;
+    }
+
+    /// <summary>Every attached repo, in source order, without duplicates.</summary>
+    private static IReadOnlyList<string> Repos(JsonElement raw)
+    {
+        var list = new List<string>();
+        if (raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var ctx)
+            && ctx.ValueKind == JsonValueKind.Object && ctx.TryGetProperty("sources", out var sources)
+            && sources.ValueKind == JsonValueKind.Array)
+            foreach (var src in sources.EnumerateArray())
+                if (Str(src, "url") is { Length: > 0 } url) list.Add(RepoName(url));
+        return list.Distinct(StringComparer.Ordinal).ToList();
+    }
+
     private static (string? Repo, string? Branch) RepoAndBranch(JsonElement raw)
     {
         var ctx = raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var c) ? c : default;
         string? repo = null;
         if (First(ctx, "sources") is { } src && Str(src, "url") is { Length: > 0 } url)
-        {
-            const string gh = "https://github.com/";
-            repo = url.StartsWith(gh, StringComparison.OrdinalIgnoreCase) ? url[gh.Length..].TrimEnd('/') : url;
-            if (repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) repo = repo[..^4];
-        }
+            repo = RepoName(url);
         // The live branch comes first: builders' outcomes are empty, so it is usually the only source.
         var branch = LiveBranch(raw);
         if (branch is null && First(ctx, "outcomes") is { } outcome

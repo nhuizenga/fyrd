@@ -24,6 +24,9 @@ export interface HubSessionView {
   status: string;
   repo: string | null;
   branch: string | null;
+  /** Every repository attached to the session, and every branch it is on (older servers send only `repo` and `branch`). */
+  repos?: string[];
+  branches?: string[];
   createdAt: string | null;
   lastActivity: string | null;
   tags: string[];

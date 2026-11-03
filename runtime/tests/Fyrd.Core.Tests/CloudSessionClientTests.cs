@@ -129,22 +129,6 @@ public sealed class CloudSessionClientTests : IDisposable
         Assert.Equal("u3", page.LastId);
     }
 
-    [Fact]
-    public async Task SendMessage_PostsUnwrappedUserEvent()
-    {
-        var h = new FakeHandler();
-        await Client(h).SendMessageAsync("session_01abc", "go on");
-
-        var r = h.Requests[0];
-        Assert.Equal(HttpMethod.Post, r.Request.Method);
-        Assert.EndsWith("/v1/sessions/session_01abc/events", r.Request.RequestUri!.AbsolutePath);
-        var ev = JsonDocument.Parse(r.Body!).RootElement.GetProperty("events")[0];
-        Assert.Equal("user", ev.GetProperty("type").GetString());
-        Assert.Equal("go on", ev.GetProperty("message").GetProperty("content").GetString());
-        // An empty session_id appears to read as a peer message to the worker; the UI sends the target's id.
-        Assert.Equal("session_01abc", ev.GetProperty("session_id").GetString());
-    }
-
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.Forbidden)]

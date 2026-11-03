@@ -61,7 +61,7 @@ public sealed partial class CloudSessionClient : ICloudSessions
                     ["request"] = new JsonObject { ["subtype"] = "set_permission_mode", ["mode"] = mode },
                 },
             });
-        events.Add(new JsonObject { ["type"] = "event", ["data"] = UserEvent(request.FirstMessage, "") });
+        events.Add(new JsonObject { ["type"] = "event", ["data"] = UserEvent(request.FirstMessage) });
 
         var body = new JsonObject
         {
@@ -102,13 +102,6 @@ public sealed partial class CloudSessionClient : ICloudSessions
             root.TryGetProperty("has_more", out var hm) && hm.ValueKind == JsonValueKind.True,
             Str(root, "first_id"),
             Str(root, "last_id"));
-    }
-
-    public async Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default)
-    {
-        ValidateSessionId(sessionId);
-        var body = new JsonObject { ["events"] = new JsonArray(UserEvent(text, sessionId)) };
-        using var _ = await SendAsync(HttpMethod.Post, $"/v1/sessions/{sessionId}/events", body, ct);
     }
 
     public async Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default)
@@ -318,14 +311,12 @@ public sealed partial class CloudSessionClient : ICloudSessions
             throw new ArgumentException("Session id must match ^session_[A-Za-z0-9]+$.", nameof(sessionId));
     }
 
-    /// <summary>A user turn. The web UI stamps the target session's id on it; an empty id appears to make the worker treat
-    /// the text as coming from another session (a peer message) instead of the owner (inferred, not yet confirmed against a
-    /// live session, nor which id form the UI sends). Required, so every call site chooses: a new session has no id yet,
-    /// so create passes "".</summary>
-    private static JsonObject UserEvent(string text, string sessionId) => new()
+    /// <summary>The first user turn of a new session, which has no id yet (so the session id is empty). Later messages
+    /// never use this: they go through <see cref="IOwnerMessages"/>.</summary>
+    private static JsonObject UserEvent(string text) => new()
     {
         ["uuid"] = Guid.NewGuid().ToString(),
-        ["session_id"] = sessionId,
+        ["session_id"] = "",
         ["type"] = "user",
         ["parent_tool_use_id"] = null,
         ["message"] = new JsonObject { ["role"] = "user", ["content"] = text },

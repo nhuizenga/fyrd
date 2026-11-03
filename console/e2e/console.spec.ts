@@ -92,6 +92,7 @@ test.describe("Sessions", () => {
     await page.goto("/#/sessions");
     const list = page.getByRole("complementary", { name: "Session list" });
     const download = page.waitForEvent("download");
+    await list.getByRole("listitem").filter({ hasText: "builder-docs" }).hover();
     await list.getByRole("button", { name: "Export builder-docs" }).click();
     expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
   });
@@ -104,7 +105,10 @@ test.describe("Sessions", () => {
     const open = list.getByRole("button", { name: "Open Controller" });
     const search = list.getByLabel("Search sessions");
     const first = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-prime-sieve/ });
-    // Open/Replace are icons on the Controller's row, to the right of its name.
+    // Open/Replace are icons on the Controller's row, to the right of its name; they appear after a short hover.
+    await expect(open).toBeHidden();
+    await ctl.hover();
+    await expect(open).toBeVisible();
     const replace = list.getByRole("button", { name: "Replace Controller" });
     for (const b of [open, replace]) {
       expect(Math.abs((await y(b)) + (await box(b)).height / 2 - ((await y(ctl)) + (await box(ctl)).height / 2))).toBeLessThan(6);
@@ -135,7 +139,7 @@ test.describe("Sessions", () => {
   test("details pane order and relative times", async ({ page }) => {
     await page.goto("/#/sessions/session_b1");
     const pane = page.getByRole("complementary", { name: "Session details" });
-    await expect(pane.locator("h4")).toHaveText(["Details", "Estimated cost", "Tags", "Pull requests"]);
+    await expect(pane.locator("h4")).toHaveText(["Estimated cost", "Details", "Pull requests", "Tags"]);
     await expect(pane.locator("dt")).toHaveText(["Role", "Repository", "Branch", "Started", "Last activity"]);
     await expect(pane.locator("dd").nth(3)).toHaveText("1 day ago");
     await expect(pane.locator("dd").nth(4)).toHaveText("5 minutes ago");
@@ -197,10 +201,10 @@ test.describe("Workers", () => {
     });
   });
 
-  test("the list shows a workers-running chip and the header says Working (background)", async ({ page }) => {
+  test("the list shows a workers chip with a count and the header says Working (background)", async ({ page }) => {
     await page.goto(`/#/sessions/${WORKING}`);
     const list = page.getByRole("complementary", { name: "Session list" });
-    await expect(list.getByText("workers running")).toBeVisible();
+    await expect(list.getByLabel(/^\d+ workers? running$/)).toBeVisible();
     await expect(page.getByText("Working (background)")).toBeVisible();
   });
 
@@ -386,7 +390,13 @@ test.describe("Pull request details", () => {
     await mockApi(page, { prs });
     await page.goto("/#/sessions/session_b1");
     const details = page.getByRole("complementary", { name: "Session details" });
-    await expect(details.getByText("✓ 8 ✗ 1 ◌ 2")).toBeVisible();
+    await expect(details.getByTitle("8 checks passed")).toBeVisible();
+    await expect(details.getByTitle(/^1 check failed/)).toBeVisible();
+    await expect(details.getByTitle("2 checks pending")).toBeVisible();
+    const fill = (title: string | RegExp) => details.getByTitle(title).locator("svg").first().evaluate((el) => getComputedStyle(el).fill);
+    expect(await fill("8 checks passed")).toBe("rgb(46, 158, 79)");
+    expect(await fill(/^1 check failed/)).toBe("rgb(211, 47, 47)");
+    expect(await fill("2 checks pending")).toBe("rgb(138, 143, 152)");
     for (const t of ["Draft", "Conflicts", "Behind base", "Reviewed", "→ fyrd/github-api"]) await expect(details.getByText(t, { exact: true })).toBeVisible();
     await expect(details.getByRole("button", { name: "Merge #20" })).toHaveCount(0);
     await expect(details.getByRole("button", { name: "Merge #21" })).toBeVisible();

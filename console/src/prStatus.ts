@@ -21,13 +21,6 @@ export const HEALTH_LABEL: Record<PrHealth, string> = {
   failing: "Checks failing", conflicts: "Merge conflicts", pending: "Checks running", passing: "Checks passing", none: "",
 };
 
-/** A chip surface colour for the PR's state (draft grey, open blue, merged purple, closed muted). */
-export const stateColor = (st: PullRequestStatus | undefined): string | undefined =>
-  !st || st.state === "unknown" ? undefined
-  : st.state === "merged" ? "#ede9fe"
-  : st.state === "closed" ? "#f3f4f6"
-  : st.draft ? "#e5e7eb" : "#dbeafe";
-
 /** Does any of these PRs have checks still running, so its status is worth re-reading soon? */
 export const anyPending = (statuses: (PullRequestStatus | undefined)[]): boolean =>
   statuses.some((s) => s?.state === "open" && s.checks === "pending");

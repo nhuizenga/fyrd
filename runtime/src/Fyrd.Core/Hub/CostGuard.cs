@@ -12,7 +12,7 @@ public sealed record CostPass(IReadOnlyDictionary<string, HubCostView> Views, Hu
 /// Controller is told once; the fyrd at its limit blocks every session but the Controller (no interrupts) and the
 /// Controller is told once. The Controller itself is never blocked or interrupted.
 /// </summary>
-public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessions cloud, ControllerManager controller)
+public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessions cloud, IOwnerMessages owner, ControllerManager controller)
 {
     public const decimal ExtendThreshold = 0.9m;
     public static readonly IReadOnlyList<decimal> ExtendAmounts = [25m, 100m];
@@ -99,7 +99,7 @@ public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessi
                 if (ledger.NotifiedAtLimit(id) == v.LimitUsd) continue;
                 if (controllerId is null) { ledger.SetNotified(id, v.LimitUsd); continue; } // nobody to tell
                 if (!controllerLive) continue; // a Controller exists but could not be read: tell it next pass
-                await cloud.SendMessageAsync(controllerId,
+                await owner.SendAsync(controllerId,
                     $"Fyrd budget: session {title} ({id}) reached its {Usd(v.LimitUsd)} USD daily limit ({Usd(v.CostToday)} USD spent) " +
                     "and was interrupted. Don't send it work today unless the owner raises its limit.", ct);
                 ledger.SetNotified(id, v.LimitUsd);
@@ -114,7 +114,7 @@ public sealed class CostGuard(CostLedger ledger, ConfigStore config, ICloudSessi
         {
             try
             {
-                await cloud.SendMessageAsync(controllerId,
+                await owner.SendAsync(controllerId,
                     $"Fyrd budget: the fyrd reached its {Usd(cfg.FyrdDailyLimitUsd)} USD daily limit ({Usd(budget.FyrdCostToday)} USD spent). " +
                     "Console sending is paused for every session except you until midnight. Running work was not interrupted. " +
                     "Don't start new peer work today unless the owner raises the limit.", ct);

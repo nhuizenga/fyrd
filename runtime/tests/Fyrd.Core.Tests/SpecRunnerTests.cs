@@ -28,7 +28,7 @@ public class SpecRunnerTests
         }
 
         public SpecRunner NewRunner() => new(Specs, Inbox, Cloud, State, Time, Relay);
-        public LeadRelay Relay => new(Specs, Cloud, Owner, State, Inbox);
+        public LeadRelay Relay => new(Specs, Owner, State, Inbox);
 
         public string NewSpec(string title = "Add export button", string lead = "lead1")
         {
@@ -697,7 +697,6 @@ public class SpecRunnerTests
             onListEvents();
             return inner.ListEventsAsync(id, limit, after, before, ct);
         }
-        public Task SendMessageAsync(string id, string text, CancellationToken ct = default) => inner.SendMessageAsync(id, text, ct);
         public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => inner.ListByTagAsync(tag, ct);
         public Task InterruptAsync(string id, CancellationToken ct = default) => inner.InterruptAsync(id, ct);
         public Task ArchiveAsync(string id, CancellationToken ct = default) => inner.ArchiveAsync(id, ct);

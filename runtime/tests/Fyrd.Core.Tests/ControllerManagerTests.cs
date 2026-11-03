@@ -14,6 +14,7 @@ public sealed class ControllerManagerTests : IDisposable
     private readonly TempHome _home = new();
     private readonly string _seeds = Path.Combine(Path.GetTempPath(), "fyrd-seeds-" + Guid.NewGuid());
     private readonly FakeCloudSessions _cloud = new();
+    private readonly FakeOwnerMessages _owner = new();
 
     public ControllerManagerTests()
     {
@@ -31,7 +32,7 @@ public sealed class ControllerManagerTests : IDisposable
     {
         var config = new ConfigStore(_home.Paths);
         if (withEnv) config.Save(new FyrdConfig(EnvironmentId: "env_abc123"));
-        return new ControllerManager(_cloud, new HubPersonas(_home.Paths, _seeds), memory ?? new HubMemory(_home.Paths), config, _home.Paths);
+        return new ControllerManager(_cloud, _owner, new HubPersonas(_home.Paths, _seeds), memory ?? new HubMemory(_home.Paths), config, _home.Paths);
     }
 
     private async Task Adopted(string id = Ctl)
@@ -53,7 +54,7 @@ public sealed class ControllerManagerTests : IDisposable
         Assert.Equal(Ctl, info.SessionId);
         Assert.Equal("https://claude.ai/code/" + Ctl, info.Url);
         Assert.Equal(Ctl, Make().CurrentId);
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.Equal(Ctl, sent.SessionId);
         Assert.StartsWith(FirstLine + "\n\nControl things.", sent.Text);
         Assert.Contains("<hub-settings>", sent.Text);
@@ -63,6 +64,17 @@ public sealed class ControllerManagerTests : IDisposable
         var expected = ControllerManager.MemoryHash(mem, new HubPersonas(_home.Paths, _seeds).List());
         Assert.Equal(expected, m.PostedMemoryHash);
         Assert.Equal(expected, Make().PostedMemoryHash);
+    }
+
+    [Fact]
+    public async Task Adopt_SendFails_PropagatesAndStoresNothing()
+    {
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        _owner.Fail = new OwnerMessageException("claude is not on PATH");
+
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().AdoptAsync(Ctl, default));
+
+        Assert.Null(Make().CurrentId);
     }
 
     [Fact]
@@ -83,7 +95,7 @@ public sealed class ControllerManagerTests : IDisposable
     {
         var ex = await Assert.ThrowsAsync<HubConfigException>(() => Make().AdoptAsync(id, default));
         Assert.Contains("session_", ex.Message);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
         Assert.Null(Make().CurrentId);
     }
 
@@ -99,7 +111,7 @@ public sealed class ControllerManagerTests : IDisposable
 
         Assert.Equal("That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.", ex.Message);
         Assert.Empty(_cloud.Archived);
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
         Assert.Equal("session_old", Make().CurrentId);
     }
 
@@ -116,7 +128,7 @@ public sealed class ControllerManagerTests : IDisposable
     {
         var at = DateTimeOffset.Parse("2026-10-31T12:00:00Z");
         var config = new ConfigStore(_home.Paths);
-        var m = new ControllerManager(_cloud, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), config, _home.Paths, new FixedTime(at));
+        var m = new ControllerManager(_cloud, _owner, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), config, _home.Paths, new FixedTime(at));
         Assert.Null(m.AdoptedAt);
         _cloud.SetSession(FakeCloudSessions.Session(Ctl));
         await m.AdoptAsync(Ctl, default);
@@ -139,7 +151,7 @@ public sealed class ControllerManagerTests : IDisposable
         if (archived) _cloud.SetSession(FakeCloudSessions.Session(Ctl, "archived"));
         var ex = await Assert.ThrowsAsync<HubConfigException>(() => Make().AdoptAsync(Ctl, default));
         Assert.Equal(Unavailable, ex.Message);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
         Assert.Null(Make().CurrentId);
     }
 
@@ -153,7 +165,7 @@ public sealed class ControllerManagerTests : IDisposable
 
         Assert.Equal(["session_old"], _cloud.Archived);
         Assert.Equal(Ctl, Make().CurrentId);
-        Assert.Equal(Ctl, _cloud.Sent[^1].SessionId);
+        Assert.Equal(Ctl, _owner.Sent[^1].SessionId);
     }
 
     [Fact]
@@ -175,7 +187,7 @@ public sealed class ControllerManagerTests : IDisposable
         await Adopted();
         await Make().AdoptAsync(Ctl, default);
         Assert.Empty(_cloud.Archived);
-        Assert.Equal(2, _cloud.Sent.Count);
+        Assert.Equal(2, _owner.Sent.Count);
     }
 
     [Fact]
@@ -189,7 +201,7 @@ public sealed class ControllerManagerTests : IDisposable
 
         Assert.Equal("The Controller persona is missing.", ex.Message);
         Assert.Empty(_cloud.Archived);
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
         Assert.Equal("session_old", Make().CurrentId);
     }
 

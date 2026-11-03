@@ -121,7 +121,7 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Equal("That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.",
             (await ReadJson(r)).GetProperty("detail").GetString());
-        Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public class HubApiTests
         var body = await ReadJson(r);
         Assert.Equal("session_ctl1", body.GetProperty("sessionId").GetString());
         Assert.Equal("https://claude.ai/code/session_ctl1", body.GetProperty("url").GetString());
-        var sent = Assert.Single(f.Cloud.Sent);
+        var sent = Assert.Single(f.Owner.Sent);
         Assert.Equal("session_ctl1", sent.SessionId);
         Assert.StartsWith("You are the Fyrd Controller.", sent.Text);
         Assert.Contains("environment_id: env_test1", sent.Text);
@@ -151,7 +151,7 @@ public class HubApiTests
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = id });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("session_", (await ReadJson(r)).GetProperty("detail").GetString());
-        Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -249,7 +249,6 @@ public class HubApiTests
         using var f = new FyrdFactory();
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_other/message", new { text = "hi" });
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
-        Assert.Empty(f.Cloud.Sent);
         Assert.Empty(f.Owner.Sent);
     }
 
@@ -262,7 +261,6 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
         // The owner's own CLI sends composer turns, so the session reads them as the owner's, not a peer's.
         Assert.Equal((SessionId, "hello"), Assert.Single(f.Owner.Sent));
-        Assert.Empty(f.Cloud.Sent);
     }
 
     [Fact]
@@ -287,8 +285,17 @@ public class HubApiTests
             (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest,
             (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = new string('x', 20_001) })).StatusCode);
-        Assert.Empty(f.Cloud.Sent);
         Assert.Empty(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Resume_OwnerSendFails_Is502()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        f.Owner.Fail = new OwnerMessageException("claude is not on PATH");
+        var r = await f.CreateClient().PostAsync($"/api/hub/sessions/{SessionId}/resume", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
     }
 
     [Fact]
@@ -300,7 +307,7 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/pause", null)).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/resume", null)).StatusCode);
         Assert.Equal([SessionId], f.Cloud.Interrupted);
-        Assert.Equal((SessionId, "Continue where you left off."), Assert.Single(f.Cloud.Sent));
+        Assert.Equal((SessionId, "Continue where you left off."), Assert.Single(f.Owner.Sent));
     }
 
     [Fact]
@@ -1144,7 +1151,6 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.Conflict, m.StatusCode);
         Assert.Equal(detail, (await ReadJson(m)).GetProperty("detail").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/hub/sessions/{SessionId}/resume", null)).StatusCode);
-        Assert.Empty(f.Cloud.Sent);
         Assert.Empty(f.Owner.Sent);
         // Pause stays available so the owner can still stop a running session.
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/pause", null)).StatusCode);

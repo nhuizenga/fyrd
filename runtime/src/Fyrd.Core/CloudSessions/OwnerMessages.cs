@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -6,8 +7,9 @@ using System.Text.RegularExpressions;
 namespace Fyrd.Core.CloudSessions;
 
 /// <summary>
-/// Sends a turn the owner typed (the console composer) to a cloud session. Only for text the owner wrote: Fyrd's own
-/// prompts and relayed text go through <see cref="ICloudSessions.SendMessageAsync"/>, which the session reads as a peer's.
+/// Sends a message to a cloud session as the owner's turn. Every message Fyrd sends directly to a session goes through
+/// here (typed turns, prompts, notices, relayed answers): the cloud HTTP API's message post is read as a peer's and
+/// running sessions reject it, so <see cref="ICloudSessions"/> has no send method.
 /// </summary>
 public interface IOwnerMessages
 {
@@ -24,6 +26,9 @@ public sealed class OwnerMessageException(string message) : Exception(message);
 /// </summary>
 public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
 {
+    // Delivery is at-least-once: on a timeout the CLI may already have queued the turn, yet callers (HubRunner hashes,
+    // CostGuard notice markers, LeadRelay failed cards) only record success after SendAsync returns, so they retry and can
+    // post the same message twice. Accepted: a duplicate prompt or notice is harmless next to a lost one.
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
     [GeneratedRegex("^session_[A-Za-z0-9]+$")]
@@ -84,13 +89,23 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
             var stderr = p.StandardError.ReadToEndAsync(cts.Token);
             try
             {
-                await p.StandardInput.WriteAsync(text.AsMemory(), cts.Token);
-                p.StandardInput.Close();
+                try
+                {
+                    await p.StandardInput.WriteAsync(text.AsMemory(), cts.Token);
+                    p.StandardInput.Close();
+                }
+                catch (IOException)
+                {
+                    // The CLI exited before reading stdin (signed out, bad session): fall through so its real error surfaces.
+                }
                 await p.WaitForExitAsync(cts.Token);
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
                 try { p.Kill(true); } catch (InvalidOperationException) { }
+                // Observe the read tasks so they cannot fault unobserved after the kill.
+                try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
+                if (ct.IsCancellationRequested) throw;
                 throw new OwnerMessageException("claude timed out; the message may still have been delivered.");
             }
             CheckResult(p.ExitCode, await stdout, await stderr);

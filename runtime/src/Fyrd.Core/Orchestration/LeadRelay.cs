@@ -4,10 +4,10 @@ using Fyrd.Core.Specs;
 namespace Fyrd.Core.Orchestration;
 
 /// <summary>
-/// Relays the owner's inbox answers (through the owner's CLI, so the lead reads them as the owner's) and squad-cap
-/// changes (through the API) to the lead session.
+/// Relays the owner's inbox answers and squad-cap changes to the lead session, through the owner's CLI so the lead
+/// reads them as the owner's.
 /// </summary>
-public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, IOwnerMessages owner, RunnerState state, InboxStore inbox)
+public sealed class LeadRelay(SpecStore specs, IOwnerMessages owner, RunnerState state, InboxStore inbox)
 {
     private readonly HashSet<string> _inFlight = [];
 
@@ -63,8 +63,14 @@ public sealed class LeadRelay(SpecStore specs, ICloudSessions cloud, IOwnerMessa
     public async Task RelayConfigAsync(int squadCap, CancellationToken ct)
     {
         var message = Protocol.FormatConfig(squadCap);
+        // One failing lead must not keep the rest from learning the new cap: send to all, then report every failure.
+        var failures = new List<string>();
         foreach (var run in specs.ListActive())
             if (run.Status != SpecStatus.Researching && !string.IsNullOrEmpty(run.SessionId))
-                await cloud.SendMessageAsync(run.SessionId, message, ct);
+            {
+                try { await owner.SendAsync(run.SessionId, message, ct); }
+                catch (OwnerMessageException e) { failures.Add($"{run.SessionId}: {e.Message}"); }
+            }
+        if (failures.Count > 0) throw new OwnerMessageException(string.Join("; ", failures));
     }
 }

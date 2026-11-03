@@ -19,7 +19,6 @@ public sealed class FakeCloudSessions : ICloudSessions
     /// <summary>Events returned per call; a smaller value forces multi-page listing.</summary>
     public int PageSize { get; set; } = 100;
 
-    public List<(string SessionId, string Text)> Sent { get; } = [];
     public List<CreateSessionRequest> Created { get; } = [];
     public List<string?> EventAfterIds { get; } = [];
     public List<string> Interrupted { get; } = [];
@@ -114,13 +113,6 @@ public sealed class FakeCloudSessions : ICloudSessions
         var page = all.Skip(start).Take(size).ToList();
         var hasMore = start + page.Count < all.Count;
         return new EventPage(page, hasMore, page.FirstOrDefault()?.Uuid, page.LastOrDefault()?.Uuid);
-    }
-
-    public Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default)
-    {
-        MaybeThrow();
-        Sent.Add((sessionId, text));
-        return Task.CompletedTask;
     }
 
     public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default)

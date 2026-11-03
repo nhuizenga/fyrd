@@ -9,7 +9,6 @@ public interface ICloudSessions
     Task<EventPage> ListEventsAsync(
         string sessionId, int limit = 100, string? afterId = null, string? beforeId = null, CancellationToken ct = default);
 
-    Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default);
     Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default);
     Task InterruptAsync(string sessionId, CancellationToken ct = default);
     Task ArchiveAsync(string sessionId, CancellationToken ct = default);

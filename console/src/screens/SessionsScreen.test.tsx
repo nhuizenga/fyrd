@@ -321,7 +321,7 @@ it("only +$25 and +$100 render, enabled when canExtend, and post the amount", as
   const { rerender } = render(<Routed state={withCost({ ratio: 0.89 })} onChanged={vi.fn()} />);
   await open(/alpha-1/);
   expect(screen.getByRole("button", { name: "+$25 to today's limit" })).toBeDisabled();
-  expect(screen.getByText("Raises unlock at 90% of today's limit.")).toBeInTheDocument();
+  expect(screen.queryByText(/Raises unlock/)).not.toBeInTheDocument();
   const onChanged = vi.fn();
   rerender(<Routed state={withCost({ ratio: 0.9, canExtend: true })} onChanged={onChanged} />);
   expect(screen.queryByText(/Raises unlock/)).not.toBeInTheDocument();
@@ -472,7 +472,7 @@ it("details come first, in order, with relative times", async () => {
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   const pane = screen.getByRole("complementary", { name: "Session details" });
   const headings = [...pane.querySelectorAll("h4")].map((h) => h.textContent);
-  expect(headings).toEqual(["Details", "Estimated cost", "Tags", "Pull requests"]);
+  expect(headings).toEqual(["Estimated cost", "Details", "Pull requests", "Tags"]);
   expect([...pane.querySelectorAll("dt")].map((d) => d.textContent)).toEqual(["Role", "Repository", "Branch", "Started", "Last activity"]);
   expect(pane).toHaveTextContent("Started1 day ago");
   expect(pane).toHaveTextContent("Last activity5 minutes ago");
@@ -531,11 +531,13 @@ const PR40 = "https://github.com/acme/widgets/pull/40";
 const withTwoPrs = () =>
   hubState({ sessions: [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12, PR40] })] });
 
-it("a session row with several PRs shows one 'n PRs' chip instead of each number", () => {
+it("a session row with several PRs shows one chip with the count and no 'PRs' text", () => {
   renderScreen(withTwoPrs());
   const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
-  expect(within(row).getByText("2 PRs")).toBeInTheDocument();
-  expect(within(row).getByTitle("#12, #40")).toBeInTheDocument();
+  const chip = within(row).getByLabelText("2 pull requests");
+  expect(chip).toHaveTextContent("2");
+  expect(within(row).queryByText(/PRs/)).not.toBeInTheDocument();
+  expect(chip).toHaveAttribute("title", expect.stringContaining("#12"));
   expect(within(row).queryByText("#12")).not.toBeInTheDocument();
 });
 
@@ -550,7 +552,7 @@ it("session rows show a repo chip and PR chips", () => {
   renderScreen(withRepo());
   const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
   expect(within(row).getByText("widgets")).toBeInTheDocument();
-  expect(within(row).getByText("#12")).toBeInTheDocument();
+  expect(within(row).getByLabelText("1 pull request")).toHaveTextContent("1");
   const bare = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*beta-2/ });
   expect(within(bare).queryByText("widgets")).not.toBeInTheDocument();
 });
@@ -993,19 +995,31 @@ describe("sending a message", () => {
   });
 });
 
-it("shows the branch as a chip in the session list and in the details", async () => {
+it("shows no branch chip in the session list, but the branch in the details", async () => {
   renderScreen(withRepo());
   const row = screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
-  expect(within(row).getByText("fyrd/alpha")).toBeInTheDocument();
+  expect(within(row).queryByText("fyrd/alpha")).not.toBeInTheDocument();
   await userEvent.click(row);
   const details = screen.getByRole("complementary", { name: "Session details" });
   expect(within(details).getByText("Branch")).toBeInTheDocument();
   expect(within(details).getByText("fyrd/alpha")).toBeInTheDocument();
 });
 
-it("shows a workers-running chip and a collapsed worker result card", async () => {
-  renderScreen(hubState({ sessions: [session({ id: "a", title: "alpha-1", status: "idle", tags: ["fyrd-hub", "fyrd-workers-running"], workersRunning: true })] }));
-  expect(screen.getByText("workers running")).toBeInTheDocument();
+it("lists every attached repo and branch in the details", async () => {
+  const st = hubState({ sessions: [session({ id: "a", title: "alpha-1", repo: "acme/web", branch: "b1", repos: ["acme/web", "acme/api"], branches: ["b1", "b2"] })] });
+  renderScreen(st);
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+  const details = screen.getByRole("complementary", { name: "Session details" });
+  for (const t of ["acme/web", "acme/api", "b1", "b2"]) expect(within(details).getByText(t)).toBeInTheDocument();
+});
+
+it("shows a workers chip with the number of workers and a collapsed worker result card", async () => {
+  renderScreen(hubState({
+    sessions: [session({ id: "a", title: "alpha-1", status: "idle", tags: ["fyrd-hub", "fyrd-workers-running"], workersRunning: true })],
+    progress: { a: item({ kind: "progress", status: "Waiting for workers", workers: [{ id: "w1", description: "x", line: null }, { id: "w2", description: "y", line: null }] }) },
+  }));
+  expect(screen.queryByText("workers running")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("2 workers running")).toHaveTextContent("2");
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
   expect(screen.getByText("Working (background)")).toBeInTheDocument();
   FakeEventSource.latest().emit("item", item({ kind: "worker", text: "build: initial task", detail: "fork", toolUseId: "tw1" }));
@@ -1100,8 +1114,13 @@ describe("pull request details", () => {
       failingCheck: { name: "lint", url: "https://ci.example/lint" },
     }));
     expect(within(details).getByText("Draft")).toBeInTheDocument();
-    const checks = within(details).getByTitle("Checks failing: lint");
-    expect(checks).toHaveTextContent("✓ 8 ✗ 1 ◌ 2");
+    expect(within(details).getByTitle("8 checks passed")).toHaveTextContent("8");
+    expect(within(details).getByTitle("2 checks pending")).toHaveTextContent("2");
+    expect(within(details).getByTitle("8 checks passed")).toHaveClass("chip-check-pass");
+    expect(within(details).getByTitle("2 checks pending")).toHaveClass("chip-check-pending");
+    const checks = within(details).getByTitle("1 check failed: lint");
+    expect(checks).toHaveTextContent("1");
+    expect(checks).toHaveClass("chip-check-fail");
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     await userEvent.click(checks);
     expect(open).toHaveBeenCalledWith("https://ci.example/lint", "_blank", "noopener,noreferrer");
@@ -1161,9 +1180,17 @@ describe("live PR statuses", () => {
       { [PR12]: listedStatus({ checks: "failing", mergeable: "conflicting", canMerge: false }) },
     ));
     const row = rowOf("alpha-1");
-    expect(within(row).getByText("#12")).toBeInTheDocument();
-    expect(within(row).getByRole("img", { name: "Checks failing" })).toHaveClass("pr-dot-failing");
-    expect(within(row).getByRole("img", { name: "Merge conflicts" })).toBeInTheDocument();
+    expect(within(row).getByLabelText("1 pull request")).toHaveTextContent("1");
+    expect(within(row).getByRole("img", { name: "Checks failing" })).toHaveClass("pr-status-fail");
+  });
+
+  it("the row status icon is green passing, grey pending or not run", () => {
+    renderScreen(stateWith(
+      [session({ id: "a", title: "alpha-1", pullRequests: [PR12] }), session({ id: "b", title: "beta-2", pullRequests: [PR40] })],
+      { [PR12]: listedStatus({ checks: "passing" }), [PR40]: listedStatus({ url: PR40, number: 40, checks: "pending", canMerge: false }) },
+    ));
+    expect(within(rowOf("alpha-1")).getByRole("img", { name: "Checks passing" })).toHaveClass("pr-status-pass");
+    expect(within(rowOf("beta-2")).getByRole("img", { name: "Checks running" })).toHaveClass("pr-status-pending");
   });
 
   it("a merged PR shows no checks dot; a draft shows neither dot nor marker unless open with checks", () => {
@@ -1171,7 +1198,7 @@ describe("live PR statuses", () => {
       [session({ id: "a", title: "alpha-1", pullRequests: [PR12] })],
       { [PR12]: listedStatus({ state: "merged", checks: "passing", canMerge: false }) },
     ));
-    expect(rowOf("alpha-1").querySelector(".pr-dot, .pr-conflict")).toBeNull();
+    expect(within(rowOf("alpha-1")).getByRole("img", { name: "Merged" })).toHaveClass("pr-status-merged");
   });
 
   it("several PRs show the count with the worst status: failing > conflicts > pending > passing", () => {
@@ -1185,13 +1212,13 @@ describe("live PR statuses", () => {
       },
     ));
     const row = rowOf("alpha-1");
-    expect(within(row).getByText("3 PRs")).toBeInTheDocument();
-    expect(within(row).getByTitle(/#40 \(open, checks running\)/)).toBeInTheDocument();
-    expect(within(row).getByRole("img", { name: "Merge conflicts" })).toBeInTheDocument();
+    expect(within(row).getByLabelText("3 pull requests")).toHaveTextContent("3");
+    expect(within(row).getByLabelText("3 pull requests")).toHaveAttribute("title", expect.stringMatching(/#40 .*\(open, checks running\)/));
+    expect(within(row).getByRole("img", { name: "Merge conflicts" })).toHaveClass("pr-status-fail");
     expect(within(row).queryByRole("img", { name: "Checks failing" })).not.toBeInTheDocument();
   });
 
-  it("the details pane shows hub-state statuses at once, with a stacked tag", async () => {
+  it("the details pane shows hub-state statuses at once, with no stacked chip", async () => {
     vi.mocked(api.pullRequests).mockImplementation(() => new Promise(() => {})); // the live read has not answered yet
     const st = stateWith(
       [session({ id: "a", title: "alpha-1", repo: "acme/widgets", pullRequests: [PR12, PR40], stackedPullRequests: [PR40] })],
@@ -1205,7 +1232,7 @@ describe("live PR statuses", () => {
     const details = screen.getByRole("complementary", { name: "Session details" });
     expect(within(details).getByText("Own PR")).toBeInTheDocument();
     expect(within(details).getByText("Stacked PR")).toBeInTheDocument();
-    expect(within(details).getAllByText("stacked")).toHaveLength(1);
+    expect(within(details).queryByText("stacked")).not.toBeInTheDocument();
   });
 
   it("lists the other sessions that own the PR under it, and links to them", async () => {
@@ -1385,12 +1412,11 @@ describe("stacked PRs", () => {
     return details;
   };
 
-  it("shows the chain line and the stacked-on links", async () => {
+  it("shows the chain line and no per-PR stacked-on links", async () => {
     const details = await openStack();
     expect(within(details).getByText("main ← #11 ← #12 ← #13 (top)")).toBeInTheDocument();
-    expect(within(details).getByRole("button", { name: "Stacked on #11" })).toBeInTheDocument();
-    expect(within(details).getByRole("button", { name: "#13 stacked on this" })).toBeInTheDocument();
-    expect(within(details).getByRole("button", { name: "#12 stacked on this" })).toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Stacked on #11" })).not.toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: /stacked on this/ })).not.toBeInTheDocument();
   });
 
   it("a row in a stack gets the stack glyph; an unstacked PR does not", () => {
