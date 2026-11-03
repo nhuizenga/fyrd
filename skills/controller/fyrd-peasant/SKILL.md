@@ -44,6 +44,11 @@ A later task for a running peasant goes in `mcp__claude-code-remote__send_messag
 
 A message starting `Validation request:` from a Builder names a draft PR, its base branch, the spec links and the Builder's title and session id. Start a Validator for it. A Builder sends it again after fixing findings; handle each one the same way.
 
+The owner can send the same request from the console as `Validate PR <url>. Base branch: <base>. Builder: <title> (<id>).` Treat it the same way. Either form may lack the `Builder:` line or the `Spec:` links, and the PR is then all you have:
+- **No `Builder:` line.** Look the Builder up by branch: read the PR's head branch, then find the live session with role `builder` whose branch equals it (`list_sessions`, then `get_session`). If there is none, leave the `Builder:` line out of the prompt; the Validator then reports findings to you, and you forward them to whichever Builder you find or ask the owner.
+- **No `Base branch:` line.** Use the PR's base branch.
+- **No `Spec:` links.** Send the prompt without a spec; the Validator checks the PR description and the tests.
+
 1. **Title.** `validator-<builder suffix>`. Recycle a matching idle session or pick the next suffix, as in Start.
 2. **Repo.** It comes from the PR, so ask nothing.
 3. **Session cap.** If over, ask as in Start step 5.
@@ -52,7 +57,7 @@ A message starting `Validation request:` from a Builder names a draft PR, its ba
    ```
    Validate pull request <url> against the spec below.
    Base branch: <base>
-   Builder: <builder title> (<builder session id>)
+   Builder: <builder title> (<builder session id>)   (leave this line out when there is no Builder)
    Controller session: <your own session id>
    If anything fails, send the findings to the Controller (Validation failed:). If everything passes, mark the PR ready for review, then ask the Controller for a reviewer (Review request:). Reply with your findings.
    ```

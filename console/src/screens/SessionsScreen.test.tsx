@@ -1278,6 +1278,92 @@ describe("live PR statuses", () => {
   });
 });
 
+describe("PR nudges", () => {
+  const stateFor = (o: { controller?: boolean } = {}) => hubState({
+    sessions: [
+      session({ id: "a", title: "alpha-1", role: "builder", repo: "acme/widgets", branch: "fyrd/alpha", pullRequests: [PR12] }),
+      session({ id: "c", title: "controller", role: "controller", tags: [] }),
+    ],
+    controller: o.controller === false ? null : { sessionId: "c", url: "https://claude.ai/code/c" },
+  });
+  const openMenu = async (pr: PullRequestStatus, st = stateFor()) => {
+    vi.mocked(api.pullRequests).mockResolvedValue([pr]);
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    renderScreen(st);
+    await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+    const details = screen.getByRole("complementary", { name: "Session details" });
+    await userEvent.click(await within(details).findByRole("button", { name: "Ask for help with #12" }));
+    return details;
+  };
+
+  it("Request validation sends the exact text to the Controller and says so", async () => {
+    const details = await openMenu(prStatus());
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Request validation" }));
+    expect(api.sendMessage).toHaveBeenCalledWith("c", `Validate PR ${PR12}. Base branch: main. Builder: alpha-1 (a).`);
+    expect(await within(details).findByText("Sent to controller")).toBeInTheDocument();
+  });
+
+  it("a rapid double send of one nudge messages the session once", async () => {
+    let release: () => void = () => {};
+    const details = await openMenu(prStatus());
+    vi.mocked(api.sendMessage).mockImplementation(() => new Promise<undefined>((r) => { release = () => r(undefined); }));
+    const trigger = within(details).getByRole("button", { name: "Ask for help with #12" });
+    const menuId = trigger.getAttribute("aria-controls")!;
+    const item = () => within(document.getElementById(menuId)!).getByRole("menuitem", { name: "Request validation" });
+    await userEvent.click(item());
+    await userEvent.click(trigger);
+    await userEvent.click(item());
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    release();
+    await within(details).findByText("Sent to controller");
+  });
+
+  it("Request review is not offered on a draft", async () => {
+    await openMenu(prStatus({ draft: true, canMerge: false }));
+    expect(await screen.findByRole("menuitem", { name: "Request validation" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Request review" })).not.toBeInTheDocument();
+  });
+
+  it("Fix failing checks goes to the owning Builder, not the Controller", async () => {
+    await openMenu(prStatus({ checks: "failing", canMerge: false, failingCheck: { name: "lint", url: null } }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Fix failing checks" }));
+    expect(api.sendMessage).toHaveBeenCalledWith("a", `Checks are failing on ${PR12}: lint. Fix them, run the tests, push, and reply as before.`);
+  });
+
+  it("the Controller items are disabled without a Controller", async () => {
+    await openMenu(prStatus(), stateFor({ controller: false }));
+    const item = await screen.findByRole("menuitem", { name: "Request review" });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAttribute("title", "No Controller");
+    await userEvent.click(item);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("Watch PR asks first, and sends only after the confirm", async () => {
+    const details = await openMenu(prStatus());
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Watch PR" }));
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(within(details).getByText("Start a PR Monitor for #12?")).toBeInTheDocument();
+    await userEvent.click(within(details).getByRole("button", { name: "Start PR Monitor" }));
+    expect(api.sendMessage).toHaveBeenCalledWith("c", `Watch ${PR12} and fix anything that comes up`);
+  });
+
+  it("Watch PR can be cancelled", async () => {
+    const details = await openMenu(prStatus());
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Watch PR" }));
+    await userEvent.click(within(details).getByRole("button", { name: "Cancel" }));
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(within(details).queryByText("Start a PR Monitor for #12?")).not.toBeInTheDocument();
+  });
+
+  it("a failed send shows its error under the PR", async () => {
+    const details = await openMenu(prStatus());
+    vi.mocked(api.sendMessage).mockRejectedValue(new Error("Controller is busy"));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Request validation" }));
+    expect(await within(details).findByText("Controller is busy")).toBeInTheDocument();
+  });
+});
+
 it("the in-progress bubble lists running workers with their latest tool", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));

@@ -51,9 +51,10 @@ A message that starts with `Fyrd budget:` comes from Fyrd, not the owner. It nam
 | Validation request from a Builder (a message starting `Validation request:`) | Start a Validator for the PR (`fyrd-peasant`, Validation request from a Builder). |
 | Validation failure from a Validator (a message starting `Validation failed:`) | Forward the findings to the Builder it names (`fyrd-peasant`, Validation failure from a Validator). |
 | Review request from a Validator (a message starting `Review request:`) | Start a Reviewer for the PR (`fyrd-peasant`, Review request from a Validator). |
-| A message `PR #{n} is ready` (from the owner) | Start a Reviewer for that PR as for a review request. |
+| A message "Validate PR <url>" (from the owner) | Start a Validator for that PR as for a validation request. |
+| A message `PR #{n} is ready` or `PR #{n} is ready: <url>` (from the owner) | Start a Reviewer for that PR as for a review request. |
 | "Tear down {name}" | Archive it (see Teardown). |
-| "Watch #{pr} and fix anything that comes up" | Start a PR Monitor (`fyrd-watch`). |
+| "Watch #{pr} and fix anything that comes up", or "Watch <url> and fix anything that comes up" | Start a PR Monitor (`fyrd-watch`). |
 | "Start a new watcher on {slack channel}…" | Start a Slack Monitor (`fyrd-watch`). |
 | "Start a new lead…" | Reply "The Lead role isn't defined yet" and offer a Builder instead with `AskUserQuestion` (options `Start a Builder`, `Cancel`). |
 

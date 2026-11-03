@@ -177,4 +177,14 @@ public sealed class HubSkillsTests
         foreach (var n in Names)
             Assert.DoesNotMatch(@"slack_(send|schedule)|send_message_draft|mcp__claude_ai_Slack", Read(n));
     }
+
+    [Fact]
+    public void ValidationRequest_WorksWithoutABuilderOrSpecLine_ByLookingTheBuilderUpByBranch()
+    {
+        var peasant = Read("fyrd-peasant");
+        Assert.Contains("`Validate PR <url>. Base branch: <base>. Builder: <title> (<id>).`", peasant, StringComparison.Ordinal);
+        Assert.Contains("No `Builder:` line", peasant, StringComparison.Ordinal);
+        Assert.Contains("whose branch equals it", peasant, StringComparison.Ordinal);
+        Assert.Contains("No `Spec:` links", peasant, StringComparison.Ordinal);
+    }
 }
