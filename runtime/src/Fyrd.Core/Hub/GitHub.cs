@@ -9,9 +9,35 @@ namespace Fyrd.Core.Hub;
 /// </summary>
 public sealed record PullRequestStatus(string Url, int Number, string Title, string State, bool Draft, string Checks, string? Error = null)
 {
-    /// <summary>Open, out of draft, and no check failing or still running.</summary>
-    public bool CanMerge => State == "open" && !Draft && Checks is "passing" or "none";
+    /// <summary>The branch the PR merges into, and the one it merges from.</summary>
+    public string Base { get; init; } = "";
+    public string Head { get; init; } = "";
+
+    public int ChecksPassed { get; init; }
+    public int ChecksFailed { get; init; }
+    public int ChecksPending { get; init; }
+
+    /// <summary>The first failing check, or null.</summary>
+    public FailingCheck? FailingCheck { get; init; }
+
+    /// <summary><c>none</c>, <c>commented</c>, <c>approved</c> or <c>changes_requested</c>.</summary>
+    public string Review { get; init; } = "none";
+
+    /// <summary><c>mergeable</c>, <c>conflicting</c> or <c>unknown</c>.</summary>
+    public string Mergeable { get; init; } = "unknown";
+
+    /// <summary>Lower-cased <c>mergeStateStatus</c>: clean, behind, blocked, dirty, unstable, draft, has_hooks or unknown.</summary>
+    public string MergeState { get; init; } = "unknown";
+
+    /// <summary>
+    /// Open, out of draft, no check failing or still running, and no conflicts. Not gated on <c>blocked</c>: GitHub's own
+    /// branch rules answer that, and the merge error is shown.
+    /// </summary>
+    public bool CanMerge => State == "open" && !Draft && Checks is "passing" or "none" && Mergeable != "conflicting";
 }
+
+/// <summary>A failing check's name and where to read why (null when GitHub gave no link).</summary>
+public sealed record FailingCheck(string Name, string? Url);
 
 public class GitHubException(string message) : Exception(message);
 

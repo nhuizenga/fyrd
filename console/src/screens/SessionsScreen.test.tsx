@@ -731,7 +731,9 @@ it("session rows no longer show a role line", () => {
 });
 
 const prStatus = (o: Partial<PullRequestStatus> = {}): PullRequestStatus => ({
-  url: PR12, number: 12, title: "Fix it", state: "open", draft: false, checks: "passing", canMerge: true, ...o,
+  url: PR12, number: 12, title: "Fix it", state: "open", draft: false, checks: "passing", canMerge: true,
+  base: "main", head: "fyrd/alpha", checksPassed: 0, checksFailed: 0, checksPending: 0, failingCheck: null,
+  review: "none", mergeable: "mergeable", mergeState: "clean", ...o,
 });
 const openAlphaWith = async (pr: PullRequestStatus) => {
   vi.mocked(api.pullRequests).mockResolvedValue([pr]);
@@ -1088,6 +1090,61 @@ describe("without GitHub access", () => {
   it("shows no note when signed in", async () => {
     const details = await openAlpha({ configured: true, login: "octocat", error: null });
     expect(within(details).queryByRole("note")).not.toBeInTheDocument();
+  });
+});
+
+describe("pull request details", () => {
+  it("shows checks with counts on a draft, and a link to the failing check", async () => {
+    const { details } = await openAlphaWith(prStatus({
+      draft: true, checks: "failing", canMerge: false, checksPassed: 8, checksFailed: 1, checksPending: 2,
+      failingCheck: { name: "lint", url: "https://ci.example/lint" },
+    }));
+    expect(within(details).getByText("Draft")).toBeInTheDocument();
+    const checks = within(details).getByTitle("Checks failing: lint");
+    expect(checks).toHaveTextContent("✓ 8 ✗ 1 ◌ 2");
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    await userEvent.click(checks);
+    expect(open).toHaveBeenCalledWith("https://ci.example/lint", "_blank", "noopener,noreferrer");
+    open.mockRestore();
+  });
+
+  it("shows the title and the base branch, with the full title as a tooltip", async () => {
+    const { details } = await openAlphaWith(prStatus({ title: "A rather long pull request title", base: "release" }));
+    expect(within(details).getByText("A rather long pull request title")).toHaveAttribute("title", "A rather long pull request title");
+    expect(within(details).getByText("→ release")).toBeInTheDocument();
+  });
+
+  it("flags conflicts and hides Merge", async () => {
+    const { details } = await openAlphaWith(prStatus({ mergeable: "conflicting", canMerge: false }));
+    expect(within(details).getByText("Conflicts")).toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Merge #12" })).not.toBeInTheDocument();
+  });
+
+  it("flags a PR that is behind its base", async () => {
+    const { details } = await openAlphaWith(prStatus({ mergeState: "behind" }));
+    expect(within(details).getByText("Behind base")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["commented", "Reviewed"],
+    ["approved", "Approved"],
+    ["changes_requested", "Changes requested"],
+  ] as const)("shows a %s review as %s", async (review, text) => {
+    const { details } = await openAlphaWith(prStatus({ review }));
+    expect(within(details).getByText(text)).toBeInTheDocument();
+  });
+
+  it("the merge confirm says squash and names the base", async () => {
+    const { details } = await openAlphaWith(prStatus({ base: "main" }));
+    await userEvent.click(within(details).getByRole("button", { name: "Merge #12" }));
+    expect(within(details).getByText(/squash-merges #12 into/)).toHaveTextContent("squash-merges #12 into main on GitHub.");
+  });
+
+  it("a failed action shows its error under the PR", async () => {
+    vi.mocked(api.markPrReady).mockRejectedValue(new Error("GitHub refused"));
+    const { details } = await openAlphaWith(prStatus({ draft: true, canMerge: false }));
+    await userEvent.click(within(details).getByRole("button", { name: "Mark #12 ready for review" }));
+    expect(await within(details).findByText("GitHub refused")).toBeInTheDocument();
   });
 });
 

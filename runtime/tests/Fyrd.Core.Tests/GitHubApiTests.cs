@@ -85,7 +85,8 @@ public class GitHubApiTests
 
         var s = await api.GetAsync(Url);
 
-        Assert.Equal(new PullRequestStatus(Url, 12, "Fix it", "open", true, "passing"), s);
+        Assert.Equal(new PullRequestStatus(Url, 12, "Fix it", "open", true, "passing")
+            { Base = "main", Head = "fyrd/a", ChecksPassed = 3, Mergeable = "mergeable" }, s);
         Assert.False(s.CanMerge);
         var req = Assert.Single(graph.Requests);
         Assert.Equal("https://api.github.com/graphql", req.Request.RequestUri!.ToString());
@@ -326,5 +327,80 @@ public class GitHubApiTests
             Environment.SetEnvironmentVariable("GH_TOKEN", gh);
             Environment.SetEnvironmentVariable("GITHUB_TOKEN", github);
         }
+    }
+
+    private static PullRequestStatus Parse(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return GitHubApi.ParseStatus(Url, doc.RootElement);
+    }
+
+    private const string MixedRollup = """
+        [{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://ci/build"},
+         {"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://ci/lint"},
+         {"__typename":"StatusContext","context":"deploy","state":"FAILURE","targetUrl":"https://ci/deploy"},
+         {"__typename":"CheckRun","name":"e2e","status":"IN_PROGRESS","conclusion":null,"detailsUrl":"https://ci/e2e"},
+         {"__typename":"StatusContext","context":"cov","state":"PENDING","targetUrl":null},
+         {"__typename":"CheckRun","name":"docs","status":"COMPLETED","conclusion":"SKIPPED","detailsUrl":"https://ci/docs"},
+         {"__typename":"StatusContext","context":"ok","state":"SUCCESS","targetUrl":null}]
+        """;
+
+    [Fact]
+    public void ParseStatus_CountsChecks_AndKeepsTheFirstFailingOne()
+    {
+        var s = Parse(Pr(rollup: MixedRollup));
+
+        Assert.Equal("failing", s.Checks);
+        Assert.Equal((3, 2, 2), (s.ChecksPassed, s.ChecksFailed, s.ChecksPending));
+        Assert.Equal(new FailingCheck("lint", "https://ci/lint"), s.FailingCheck);
+    }
+
+    [Fact]
+    public void ParseStatus_AFailingStatusContext_NamesItByContextAndTargetUrl()
+    {
+        var s = Parse(Pr(rollup: """[{"__typename":"StatusContext","context":"deploy","state":"ERROR","targetUrl":"https://ci/deploy"}]"""));
+        Assert.Equal(new FailingCheck("deploy", "https://ci/deploy"), s.FailingCheck);
+    }
+
+    [Fact]
+    public void ParseStatus_NoFailure_NoFailingCheck() =>
+        Assert.Null(Parse(Pr(rollup: """[{"__typename":"CheckRun","name":"b","status":"COMPLETED","conclusion":"SUCCESS"}]""")).FailingCheck);
+
+    private static string WithReview(string reviewDecision, string latest) =>
+        Pr().Replace("\"mergeable\"", $"\"reviewDecision\":{reviewDecision},\"latestReviews\":{{\"nodes\":{latest}}},\"mergeable\"");
+
+    [Theory]
+    [InlineData("\"APPROVED\"", """[{"state":"APPROVED"}]""", "approved")]
+    [InlineData("\"CHANGES_REQUESTED\"", """[{"state":"CHANGES_REQUESTED"}]""", "changes_requested")]
+    [InlineData("null", """[{"state":"COMMENTED"}]""", "commented")]
+    [InlineData("\"REVIEW_REQUIRED\"", """[{"state":"COMMENTED"}]""", "commented")]
+    [InlineData("\"REVIEW_REQUIRED\"", "[]", "none")]
+    [InlineData("null", "[]", "none")]
+    public void ParseStatus_Review_UsesTheDecisionWhenSet_ElseTheLatestReviews(string decision, string latest, string expected) =>
+        Assert.Equal(expected, Parse(WithReview(decision, latest)).Review);
+
+    [Theory]
+    [InlineData("MERGEABLE", "mergeable")]
+    [InlineData("CONFLICTING", "conflicting")]
+    [InlineData("UNKNOWN", "unknown")]
+    public void ParseStatus_Mergeable(string value, string expected) =>
+        Assert.Equal(expected, Parse(Pr(mergeable: value)).Mergeable);
+
+    [Fact]
+    public void ParseStatus_MergeStateIsLowerCased_AndBaseAndHeadAreRead()
+    {
+        var s = Parse(Pr().Replace("\"mergeable\"", "\"mergeStateStatus\":\"HAS_HOOKS\",\"mergeable\""));
+        Assert.Equal("has_hooks", s.MergeState);
+        Assert.Equal(("main", "fyrd/a"), (s.Base, s.Head));
+        Assert.Equal("unknown", Parse(Pr()).MergeState);
+    }
+
+    [Fact]
+    public void CanMerge_IsFalseWhenConflicting_ButNotGatedOnBlocked()
+    {
+        Assert.False(Parse(Pr(mergeable: "CONFLICTING")).CanMerge);
+        var blocked = Parse(Pr().Replace("\"mergeable\"", "\"mergeStateStatus\":\"BLOCKED\",\"mergeable\""));
+        Assert.Equal("blocked", blocked.MergeState);
+        Assert.True(blocked.CanMerge);
     }
 }

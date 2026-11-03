@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { QUESTION, SESSIONS, docsTranscript, item, longTranscript, mockApi, session } from "./mockApi";
+import { LONG_TITLE, QUESTION, SESSIONS, docsTranscript, item, longTranscript, mockApi, prStatus, session } from "./mockApi";
 
 const fontOf = (l: Locator) => l.evaluate((el) => getComputedStyle(el).fontFamily);
 const box = async (l: Locator) => (await l.boundingBox())!;
@@ -318,5 +318,39 @@ test.describe("Settings and shell", () => {
     const logo = page.locator(".brand img");
     await expect(logo).toBeVisible();
     expect(await logo.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  });
+});
+
+test.describe("Pull request details", () => {
+  const prs = [
+    prStatus({ number: 20, title: LONG_TITLE, draft: true, canMerge: false, base: "fyrd/github-api", checks: "failing", checksPassed: 8, checksFailed: 1, checksPending: 2,
+      failingCheck: { name: "lint", url: "https://ci.example/lint" }, review: "commented", mergeable: "conflicting", mergeState: "behind" }),
+    prStatus({ number: 21, title: "Short title" }),
+  ];
+
+  test("a long title truncates inside the pane and the action buttons stay visible", async ({ page }) => {
+    await mockApi(page, { prs });
+    await page.goto("/#/sessions/session_b1");
+    const details = page.getByRole("complementary", { name: "Session details" });
+    const title = details.getByText(LONG_TITLE);
+    await expect(title).toBeVisible();
+    await expect(title).toHaveAttribute("title", LONG_TITLE);
+    const pane = await box(details);
+    const open = await box(details.getByRole("button", { name: "Open #20" }));
+    expect(open.x + open.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
+    expect(await details.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const t = await box(title);
+    expect(t.x + t.width).toBeLessThanOrEqual(pane.x + pane.width + 1);
+    await expect(details.getByRole("button", { name: "Open #21" })).toBeVisible();
+  });
+
+  test("shows counts on a draft, the base, review, conflicts and behind badges, and no Merge on a conflict", async ({ page }) => {
+    await mockApi(page, { prs });
+    await page.goto("/#/sessions/session_b1");
+    const details = page.getByRole("complementary", { name: "Session details" });
+    await expect(details.getByText("✓ 8 ✗ 1 ◌ 2")).toBeVisible();
+    for (const t of ["Draft", "Conflicts", "Behind base", "Reviewed", "→ fyrd/github-api"]) await expect(details.getByText(t, { exact: true })).toBeVisible();
+    await expect(details.getByRole("button", { name: "Merge #20" })).toHaveCount(0);
+    await expect(details.getByRole("button", { name: "Merge #21" })).toBeVisible();
   });
 });

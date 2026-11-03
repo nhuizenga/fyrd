@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, TranscriptItem } from "../src/types";
+import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, PullRequestStatus, TranscriptItem } from "../src/types";
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
@@ -18,6 +18,14 @@ export const SESSIONS: HubSessionView[] = [
   session({ id: "session_b3", title: "reviewer-api", role: "reviewer" }),
   session({ id: "session_b4", title: "validator-web", role: "validator", status: "archived" }),
 ];
+
+export const prStatus = (o: Partial<PullRequestStatus> & { number: number }): PullRequestStatus => ({
+  url: `https://github.com/acme/sieve/pull/${o.number}`, title: `PR ${o.number}`, state: "open", draft: false, checks: "passing",
+  canMerge: true, base: "main", head: `fyrd/pr-${o.number}`, checksPassed: 3, checksFailed: 0, checksPending: 0, failingCheck: null,
+  review: "none", mergeable: "mergeable", mergeState: "clean", ...o,
+});
+
+export const LONG_TITLE = "Draft with mixed checks and a very long title that must truncate nicely in the details pane column width";
 
 export const QUESTION: HubQuestion = {
   id: "session_b2:req1:0", sessionId: "session_b2", sessionTitle: "builder-docs", question: "Which docs format?",
@@ -60,6 +68,8 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Pull requests of `session_b1` (the session lists their URLs and the API serves these statuses). */
+  prs?: PullRequestStatus[];
   /** Hold `POST …/message` this long (and optionally fail it) to stand in for a slow upstream. */
   message?: { delayMs: number; status?: number };
   /** Peasant shared-memory proposals waiting for approval. */
@@ -74,7 +84,7 @@ export interface MockOptions {
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
   const state: HubState = {
-    sessions: opts.sessions ?? SESSIONS, questions: opts.questions ?? [], signedOut: false, lastError: null,
+    sessions: (opts.sessions ?? SESSIONS).map((x) => (opts.prs && x.id === "session_b1" ? { ...x, pullRequests: opts.prs.map((p) => p.url) } : x)), questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
     gitHub: { configured: true, login: "octocat", error: null },
@@ -104,6 +114,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
       });
     }
+    if (opts.prs && path === "/api/hub/sessions/session_b1/pull-requests") return route.fulfill({ json: opts.prs });
     if (opts.message && req.method() === "POST" && /\/message$/.test(path)) {
       await new Promise((r) => setTimeout(r, opts.message!.delayMs));
       return route.fulfill(opts.message.status && opts.message.status >= 400

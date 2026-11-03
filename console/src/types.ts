@@ -45,6 +45,18 @@ export interface PullRequestStatus {
   /** Why GitHub could not be read, when `state` is `unknown`. */
   error?: string | null;
   canMerge: boolean;
+  /** The branch the PR merges into, and the one it merges from. */
+  base?: string;
+  head?: string;
+  checksPassed: number;
+  checksFailed: number;
+  checksPending: number;
+  /** The first failing check, with where to read why. */
+  failingCheck: { name: string; url: string | null } | null;
+  review: "none" | "commented" | "approved" | "changes_requested";
+  mergeable: "mergeable" | "conflicting" | "unknown";
+  /** GitHub's `mergeStateStatus`, lower-cased. */
+  mergeState: "clean" | "behind" | "blocked" | "dirty" | "unstable" | "draft" | "has_hooks" | "unknown";
 }
 
 /** A session's estimated (list-price) spend for today against its daily limit. */

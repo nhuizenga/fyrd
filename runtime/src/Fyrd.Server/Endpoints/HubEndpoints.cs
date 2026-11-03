@@ -176,6 +176,8 @@ internal static partial class HubEndpoints
                 return Results.Ok(all.Select(p => new
                 {
                     p.Url, p.Number, p.Title, p.State, p.Draft, p.Checks, p.Error, canMerge = p.CanMerge,
+                    p.Base, p.Head, p.ChecksPassed, p.ChecksFailed, p.ChecksPending, p.FailingCheck,
+                    p.Review, p.Mergeable, p.MergeState,
                 }));
             }));
 
@@ -191,7 +193,7 @@ internal static partial class HubEndpoints
             PrAction(id, body, state, github, ct, async (url, current) =>
             {
                 // Re-checked here, not trusted from the console: the PR may have changed since it was listed.
-                if (!current.CanMerge) return Results.Problem("That pull request is not ready to merge (draft, checks not passing, or not open).", statusCode: StatusCodes.Status409Conflict);
+                if (!current.CanMerge) return Results.Problem("That pull request is not ready to merge (draft, checks not passing, merge conflicts, or not open).", statusCode: StatusCodes.Status409Conflict);
                 await github.MergeAsync(url, ct);
                 return Results.NoContent();
             }));
