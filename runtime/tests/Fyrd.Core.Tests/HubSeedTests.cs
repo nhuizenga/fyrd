@@ -97,9 +97,16 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("Never edit, commit or push from your clones", d, StringComparison.Ordinal);
         Assert.Contains("No repo", d, StringComparison.Ordinal);
         Assert.Contains("Base branch:", d, StringComparison.Ordinal);
-        Assert.Contains("Review request", d, StringComparison.Ordinal);
-        Assert.Contains("Validation request:", d, StringComparison.Ordinal);
-        Assert.Contains("Validation failed:", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Controller_DispatchesButNeverRelaysBetweenPeasants()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("You dispatch; you don't coordinate.", d, StringComparison.Ordinal);
+        Assert.Contains("`subagent-persona` element with `id=\"validator\"`", d, StringComparison.Ordinal);
+        foreach (var relay in new[] { "Controller session:", "Validation request:", "Validation failed:", "Review request:" })
+            Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -110,18 +117,66 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("after every commit", d, StringComparison.Ordinal);
         Assert.Contains("origin/HEAD", d, StringComparison.Ordinal);
         Assert.Contains("subscribe_pr_activity", d, StringComparison.Ordinal);
-        Assert.Contains("Validation request:", d, StringComparison.Ordinal);
-        Assert.DoesNotContain("Review request:", d, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Validator_ReportsToController_AndMarksReadyOnPass()
+    public void Builder_ValidatesAndReviewsItsOwnPrsWithSubagents()
+    {
+        var d = Get("builder").Definition;
+        Assert.Contains("<subagent-persona id=\"validator\">", d, StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona id=\"reviewer\">", d, StringComparison.Ordinal);
+        Assert.Contains("subagent_type: \"general-purpose\"", d, StringComparison.Ordinal);
+        Assert.Contains("`draft: false`", d, StringComparison.Ordinal);
+        Assert.Contains("event: COMMENT", d, StringComparison.Ordinal);
+        foreach (var relay in new[] { "Controller session:", "Validation request:", "Validation failed:", "Review request:" })
+            Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Builder_StacksMultiPrWorkNatively()
+    {
+        var d = Get("builder").Definition;
+        Assert.Contains("gh extension install github/gh-stack", d, StringComparison.Ordinal);
+        Assert.Contains("gh stack init --base", d, StringComparison.Ordinal);
+        Assert.Contains("gh stack submit --auto", d, StringComparison.Ordinal);
+        Assert.Contains("gh stack sync", d, StringComparison.Ordinal);
+        Assert.Contains("Never run `gh stack merge`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Validator_ReportsInItsReply_NotToTheController()
     {
         var d = Get("validator").Definition;
-        Assert.Contains("Controller session:", d, StringComparison.Ordinal);
-        Assert.Contains("Validation failed:", d, StringComparison.Ordinal);
-        Assert.Contains("Review request:", d, StringComparison.Ordinal);
-        Assert.Contains("`draft: false`", d, StringComparison.Ordinal);
+        Assert.Contains("# The check", d, StringComparison.Ordinal);
+        Assert.Contains("You are a worker for Builder", d, StringComparison.Ordinal);
+        foreach (var relay in new[] { "Controller session:", "Validation failed:", "Review request:" })
+            Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Reviewer_ReviewsCodeAndPlans()
+    {
+        var d = Get("reviewer").Definition;
+        Assert.Contains("# Reviewing code", d, StringComparison.Ordinal);
+        Assert.Contains("# Reviewing a plan", d, StringComparison.Ordinal);
+        Assert.Contains("ready to build", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Researcher_AsksDeeply_AndReviewsThePlanBeforePublishing()
+    {
+        var d = Get("researcher").Definition;
+        Assert.Contains("<subagent-persona id=\"reviewer\">", d, StringComparison.Ordinal);
+        Assert.Contains("Go deep on each work item", d, StringComparison.Ordinal);
+        Assert.True(d.IndexOf("**Review the plan.**", StringComparison.Ordinal) < d.IndexOf("**Publish.**", StringComparison.Ordinal),
+            "the plan must be reviewed before it is published");
+    }
+
+    [Fact]
+    public void Peasants_AskTheOwnerDirectly()
+    {
+        foreach (var p in Load().Where(p => p.Id != "controller"))
+            Assert.True(p.Definition.Contains("Never route a question through the Controller", StringComparison.Ordinal), $"{p.Id} may route questions");
     }
 
     [Fact]

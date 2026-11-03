@@ -14,15 +14,14 @@ Request: "Build the following: {uri list}". Start one Builder per uri, all at on
 5. **Create.** Call `mcp__claude-code-remote__create_session` once per uri, in parallel, with:
    - `title` from step 1; `tags: ["fyrd-hub", "fyrd-role-builder"]`.
    - `environment_id` from `<hub-settings>` (omit when empty), `permission_mode: "auto"`, `model` from `<peasant-persona id="builder" …>`.
-   - `append_system_prompt`: the builder persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="builder">…</role-memory>`.
+   - `append_system_prompt`: the builder persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="builder">…</role-memory>`, then a blank line, `<subagent-persona id="validator">…</subagent-persona>` (the validator persona text), a blank line and `<subagent-persona id="reviewer">…</subagent-persona>` (the reviewer persona text).
    - `prompt`, followed by the uri verbatim on its own line:
      ```
      Build what the input below describes.
      Repo: <owner>/<repo>
      Base branch: <branch, or "the repo's default branch">
-     Controller session: <your own session id>
-     Output: create your branch from the base branch, commit your work and push the branch as you go, then reply with the branch name and a summary. Do not open a pull request.
+     Output: create your branch from the base branch, commit your work and push the branch as you go. Then open a draft pull request against the base branch (a native stack of draft PRs if the work spans several), validate it with Validator subagents and fix what fails, mark it ready, review it with a Reviewer subagent and fix the findings, and reply with the PR links and a summary.
      ```
-     If the owner asked for PRs, replace the last sentence with `Then open a draft pull request against the base branch, subscribe to its activity, ask the Controller for a validator, and reply with its link.`
+     If the owner asked for no PR, replace the output line with `Output: create your branch from the base branch, commit your work and push the branch as you go, then reply with the branch name and a summary. Do not open a pull request.`
    - `source_url` from step 2 (`https://github.com/<owner>/<repo>`; omit only for `No repo`). When the base is a named branch, also pass `source_revision: "<branch>"`. The Builder attaches any other repo it lacks itself (`add_repo` with `access: "push"`, clone, then `register_repo_root`).
 6. Reply listing each Builder's title and session id, and stop. The owner reads results in the Builders' own sessions.
