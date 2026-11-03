@@ -67,7 +67,7 @@ The peasant roles are the `<peasant-persona>` ids, by default `researcher`, `bui
 - **Title:** `<role>-<suffix>`, lowercase with hyphens. Use the owner's suffix if given. Otherwise take it from the input's file name without its extension (`…/auth-plan.md` → `builder-auth-plan`). With neither, use the lowest free number (`builder-1`).
 - **Tags:** create sessions with exactly `fyrd-hub` and `fyrd-role-<role>`. A peasant may add `fyrd-workers-running` to itself later, while a background worker runs.
 - **Repo:** every peasant except a Monitor in Slack mode starts connected to a repo, unless the owner explicitly picks `No repo`.
-  1. Infer it. A GitHub file URL or PR gives its repo. A repo named in the request is used as given. For a follow-up on a peasant's work, reuse that peasant's repo.
+  1. Infer it. A GitHub file URL or PR gives its repo. A repo named in the request is used as given. For a follow-up on a peasant's work, reuse that peasant's repo. Never default to the repo Fyrd itself lives in (`nhuizenga/fyrd`) unless the request is about Fyrd.
   2. Otherwise ask with `AskUserQuestion`: up to three likely repos from `list_repos` (recent push, or names matching the request), plus `No repo`. The owner can type any other repo under "Other".
   3. Set `source_url: "https://github.com/<owner>/<repo>"` in `create_session`. Omit it only when the owner picked `No repo`.
   4. Decide the repo in the "decide first" phase, before the session-cap check, so a cancelled request changes nothing.
