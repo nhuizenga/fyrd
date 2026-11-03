@@ -60,6 +60,8 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Hold `POST …/message` this long (and optionally fail it) to stand in for a slow upstream. */
+  message?: { delayMs: number; status?: number };
   /** Peasant shared-memory proposals waiting for approval. */
   pending?: { id: string; text: string; source: string; sessionId: string; at: string }[];
   /** Session rows to serve instead of the defaults. */
@@ -101,6 +103,12 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         },
         body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
       });
+    }
+    if (opts.message && req.method() === "POST" && /\/message$/.test(path)) {
+      await new Promise((r) => setTimeout(r, opts.message!.delayMs));
+      return route.fulfill(opts.message.status && opts.message.status >= 400
+        ? { status: opts.message.status, json: { detail: "Upstream down" } }
+        : { status: 204 });
     }
     if (path === "/api/hub/state") return route.fulfill({ json: state });
     if (/^\/api\/hub\/sessions\/[^/]+\/budget$/.test(path)) {
