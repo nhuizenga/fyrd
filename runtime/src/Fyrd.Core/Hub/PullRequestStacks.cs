@@ -102,4 +102,37 @@ public static class PullRequestStacks
         return $"{kids} stacked on this PR. Merge from the top of the stack down: merge {order}. " +
                $"Merging this first leaves {string.Join(", ", children.Select(N))} targeting a merged branch.";
     }
+
+    /// <summary>
+    /// The chain of open PRs the PR at <paramref name="url"/> belongs to, root first, or null when it is not stacked with
+    /// another. Walks up to the root, then down through the children; where a PR has several open children the chain follows
+    /// the lowest number and <c>Fork</c> is set (a fork anywhere in the chain counts).
+    /// </summary>
+    public static (IReadOnlyList<PullRequestStatus> RootToTop, bool Fork)? Chain(IEnumerable<PullRequestStatus> statuses, string url)
+    {
+        var open = statuses.Where(p => p.State == "open").ToList();
+        var start = open.FirstOrDefault(p => p.Url == url);
+        if (start is null) return null;
+        PullRequestStatus? Parent(PullRequestStatus p) => open.FirstOrDefault(o => Stacked(o, p));
+        List<PullRequestStatus> Kids(PullRequestStatus p) => open.Where(o => Stacked(p, o)).OrderBy(o => o.Number).ToList();
+
+        var root = start;
+        var seen = new HashSet<string>(StringComparer.Ordinal) { start.Url };
+        for (var p = Parent(root); p is not null && !seen.Contains(p.Url); p = Parent(root)) { seen.Add(p.Url); root = p; }
+
+        var chain = new List<PullRequestStatus> { root };
+        var visited = new HashSet<string>(StringComparer.Ordinal) { root.Url };
+        var fork = false;
+        for (var cur = root; ;)
+        {
+            var kids = Kids(cur).Where(k => !visited.Contains(k.Url)).ToList();
+            if (kids.Count == 0) break;
+            if (kids.Count > 1) fork = true;
+            cur = kids[0];
+            visited.Add(cur.Url);
+            chain.Add(cur);
+        }
+        if (!fork) fork = chain.Any(c => Kids(c).Count > 1);
+        return chain.Count < 2 ? null : (chain, fork);
+    }
 }

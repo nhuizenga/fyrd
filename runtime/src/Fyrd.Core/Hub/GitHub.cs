@@ -29,6 +29,9 @@ public sealed record PullRequestStatus(string Url, int Number, string Title, str
     /// <summary><c>mergeable</c>, <c>conflicting</c> or <c>unknown</c>.</summary>
     public string Mergeable { get; init; } = "unknown";
 
+    /// <summary>The commit the PR head points at (empty when unknown).</summary>
+    public string HeadSha { get; init; } = "";
+
     /// <summary>The head is in a fork. Such a PR never links into a stack.</summary>
     public bool CrossRepository { get; init; }
 
@@ -88,6 +91,9 @@ public sealed record PullRequestHead(string Url, string Branch)
     public string State { get; init; } = "unknown";
     public bool CrossRepository { get; init; }
     public PullRequestStatus? Status { get; init; }
+
+    /// <summary>An open PR the listing did not read in full (no checks, review or mergeability): read it on its own when needed.</summary>
+    public bool Partial { get; init; }
 }
 
 /// <summary>A repo's recent pull requests (any state) and its default branch, which stacks never link through.</summary>
@@ -106,7 +112,11 @@ public interface IGitHub
     Task<PullRequestListing> ListAsync(string repo, CancellationToken ct = default);
     Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default);
     Task MarkReadyAsync(string url, CancellationToken ct = default);
-    Task MergeAsync(string url, CancellationToken ct = default);
+    /// <summary>
+    /// Squash-merges the PR. With <paramref name="headSha"/> GitHub merges only if the head is still that commit, so a push
+    /// after the status was read is never squashed unchecked (the merge then fails with a message saying the PR changed).
+    /// </summary>
+    Task MergeAsync(string url, string? headSha = null, CancellationToken ct = default);
 }
 
 public static partial class PullRequestUrl

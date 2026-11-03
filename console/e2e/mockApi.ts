@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, PullRequestStatus, TranscriptItem } from "../src/types";
+import type { HubPersona, HubQuestion, MemoryEntry, HubSessionView, HubState, PullRequestStatus, StackMergeView, TranscriptItem } from "../src/types";
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
@@ -19,6 +19,18 @@ export const SESSIONS: HubSessionView[] = [
   session({ id: "session_b4", title: "validator-web", role: "validator", status: "archived" }),
 ];
 
+const PR = (n: number) => `https://github.com/acme/stack/pull/${n}`;
+const stackPr = (n: number, head: string, base: string): PullRequestStatus => ({
+  url: PR(n), number: n, title: `Stacked change ${n}`, state: "open", draft: false, checks: "passing", canMerge: true, head, base,
+  checksPassed: 3, checksFailed: 0, checksPending: 0, failingCheck: null, review: "none", mergeable: "mergeable", mergeState: "clean",
+});
+
+/** A builder whose three open PRs are stacked: main ← #11 ← #12 ← #13 (top). */
+export const STACK_SESSION = session({
+  id: "session_stack", title: "builder-stack", repo: "acme/stack", branch: "fyrd/b",
+  pullRequests: [PR(11), PR(12), PR(13)], stackedPullRequests: [PR(11), PR(13)],
+});
+export const STACK_PRS: PullRequestStatus[] = [stackPr(11, "fyrd/a", "main"), stackPr(12, "fyrd/b", "fyrd/a"), stackPr(13, "fyrd/c", "fyrd/b")];
 export const prStatus = (o: Partial<PullRequestStatus> & { number: number }): PullRequestStatus => ({
   url: `https://github.com/acme/sieve/pull/${o.number}`, title: `PR ${o.number}`, state: "open", draft: false, checks: "passing",
   canMerge: true, base: "main", head: `fyrd/pr-${o.number}`, checksPassed: 3, checksFailed: 0, checksPending: 0, failingCheck: null,
@@ -68,6 +80,9 @@ export interface MockOptions {
   transcripts?: Record<string, TranscriptItem[]>;
   questions?: HubQuestion[];
   memory?: MemoryEntry[];
+  /** Adds a builder with a three-PR stack, and serves its PR statuses. */
+  stack?: boolean;
+  stackMerges?: StackMergeView[];
   /** Pull requests of `session_b1` (the session lists their URLs and the API serves these statuses). */
   prs?: PullRequestStatus[];
   /** Hold `POST …/message` this long (and optionally fail it) to stand in for a slow upstream. */
@@ -84,12 +99,14 @@ export interface MockOptions {
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
   const state: HubState = {
-    sessions: (opts.sessions ?? SESSIONS).map((x) => (opts.prs && x.id === "session_b1" ? { ...x, pullRequests: opts.prs.map((p) => p.url) } : x)), questions: opts.questions ?? [], signedOut: false, lastError: null,
+    sessions: [...(opts.sessions ?? SESSIONS), ...(opts.stack ? [STACK_SESSION] : [])].map((x) => (opts.prs && x.id === "session_b1" ? { ...x, pullRequests: opts.prs.map((p) => p.url) } : x)), questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
     budget: { date: "2026-11-01", timeZone: "UTC", fyrdCostToday: 120, fyrdLimitUsd: 500, fyrdBlocked: false },
-    gitHub: { configured: true, login: "octocat", error: null },
     controller: { sessionId: "session_ctl", url: "https://claude.ai/code/session_ctl" },
     pendingMemory: opts.pending?.length ?? 0,
+    gitHub: { configured: true, login: "octocat", error: null },
+    pullRequests: opts.stack ? Object.fromEntries(STACK_PRS.map((p) => [p.url, p])) : {},
+    stackMerges: opts.stackMerges ?? [],
   };
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -114,6 +131,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         body: `{"type":"fyrd_export","sessionId":"${exp[1]}"}\n{"type":"fyrd_export_end","eventCount":0}\n`,
       });
     }
+    if (/^\/api\/hub\/sessions\/session_stack\/pull-requests$/.test(path)) return route.fulfill({ json: STACK_PRS });
     if (opts.prs && path === "/api/hub/sessions/session_b1/pull-requests") return route.fulfill({ json: opts.prs });
     if (opts.message && req.method() === "POST" && /\/message$/.test(path)) {
       await new Promise((r) => setTimeout(r, opts.message!.delayMs));

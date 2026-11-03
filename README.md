@@ -11,6 +11,8 @@ Requires Node, the .NET 10 SDK, and npm.
 - `/fyrd:down` stops the server.
 - In the console's Sessions list, the download icon on a session's row exports all of its saved events as raw JSONL (a header line, one event per line, an `fyrd_export_end` trailer; a file without the trailer is incomplete). The same file is at `GET /api/hub/sessions/{id}/export`. The export holds everything the session saw, including tool output and any secrets it printed, and Fyrd does no redaction.
 
+- In the console's session details, a pull request that is part of a stack (an open PR whose base is another open PR's head) shows the chain, and its menu offers **Merge stack**. That squash-merges the whole chain top down to the root, waiting for each PR's checks before merging it (polling every 20 s, at most 30 minutes per PR; after a merge the next PR must show its new head commit, and "no checks yet" counts as not yet for 2 minutes; each merge is pinned to the head commit that was checked, so a push in between makes GitHub refuse it; a GitHub rate limit is waited out), and stops with the reason on a failure, a conflict, a PR closed or merged by someone else, an unexpected base change or a timeout. Cancel stops before the next merge and never undoes merges already done. Stack-merge jobs live in the server's memory only: a restart drops a running job, leaving some PRs merged and the rest open. Click Merge stack again and the chain is recomputed from what is still open, so it resumes safely.
+
 Runtime state (PID/port, log) lives in `~/.fyrd/run/`; data lives in `~/.fyrd/data/`.
 
 Environment variables:

@@ -34,7 +34,7 @@ internal static partial class HubEndpoints
     {
         var group = app.MapGroup("/api/hub");
 
-        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress, GitHubSignIn gitHub) => ApiErrors.Run(() =>
+        group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress, GitHubSignIn gitHub, StackMergeJobs stackMerges) => ApiErrors.Run(() =>
         {
             // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
             // after the last poll, which no poll has had the chance to list yet.
@@ -52,6 +52,10 @@ internal static partial class HubEndpoints
                 lastPollAt = state.LastPollAt,
                 budget = state.Budget,
                 pullRequests = state.PullRequests,
+                stackMerges = stackMerges.Snapshot().Select(j => new
+                {
+                    j.Id, j.Repo, j.Prs, j.Index, status = j.Status.ToString().ToLowerInvariant(), j.Message, j.StartedAt, j.UpdatedAt,
+                }),
                 gitHub = new { configured = gitHub.Configured, login = gitHub.Login, error = gitHub.Error },
                 pendingMemory = pending.Count,
                 // Each session's current live-only progress line (a tool in use, the reply so far), for sessions nobody has open.
@@ -190,6 +194,39 @@ internal static partial class HubEndpoints
                 return Results.NoContent();
             }));
 
+        // Merges a whole chain of stacked PRs, top down, waiting for checks between steps (a background job).
+        group.MapPost("/sessions/{id}/pull-requests/merge-stack", (string id, PrBody? body, HubState state, IGitHub github, StackMergeJobs jobs, CancellationToken ct) =>
+            InHub(id, state, async () =>
+            {
+                if (!github.Configured) return NotConfigured();
+                var url = body?.Url;
+                var own = state.Sessions.First(s => s.Id == id).PullRequests;
+                if (!PullRequestUrl.IsValid(url) || !own.Contains(url!))
+                    return Bad("That is not one of this session's pull requests.");
+                try
+                {
+                    // Live status for every PR of the session, so a stale console view cannot start a bad merge.
+                    var live = await Task.WhenAll(own.Select(u => github.GetAsync(u, ct)));
+                    if (PullRequestStacks.Chain(live, url!) is not { } chain)
+                        return Results.Problem("That pull request is not stacked with another one.", statusCode: StatusCodes.Status409Conflict);
+                    if (StackMergeJobs.Preconditions(chain.RootToTop, chain.Fork, own) is { } why)
+                        return Results.Problem(why, statusCode: StatusCodes.Status409Conflict);
+                    var (owner, repo, _) = PullRequestUrl.Parse(url!);
+                    return jobs.Start($"{owner}/{repo}", chain.RootToTop, out var conflict) is { } job
+                        ? Results.Accepted(value: new { jobId = job.Id })
+                        : Results.Problem(conflict, statusCode: StatusCodes.Status409Conflict);
+                }
+                catch (GitHubException e)
+                {
+                    return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
+                }
+            }));
+
+        group.MapPost("/stack-merges/{jobId}/cancel", (string jobId, StackMergeJobs jobs) =>
+            jobs.Cancel(jobId)
+                ? Results.NoContent()
+                : Results.Problem("No such stack merge.", statusCode: StatusCodes.Status404NotFound));
+
         group.MapPost("/sessions/{id}/pull-requests/merge", (string id, PrBody? body, HubState state, IGitHub github, OwnedPullRequests owned, CancellationToken ct) =>
             PrAction(id, body, state, github, owned, ct, async (url, current) =>
             {
@@ -199,7 +236,7 @@ internal static partial class HubEndpoints
                 if (body?.Force != true
                     && PullRequestStacks.MergeOrderWarning(StackedStatuses(state, id, current), current) is { } warning)
                     return Results.Problem(warning, statusCode: StatusCodes.Status409Conflict);
-                await github.MergeAsync(url, ct);
+                await github.MergeAsync(url, current.HeadSha, ct);
                 return Results.NoContent();
             }));
 

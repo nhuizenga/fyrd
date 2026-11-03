@@ -16,7 +16,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
 
     /// <summary>The fields one pull request is read with (the node's <c>id</c> is what mark-ready needs).</summary>
     internal const string PrFields = """
-        id url number title state isDraft headRefName baseRefName isCrossRepository baseRepository{defaultBranchRef{name}} reviewDecision mergeable mergeStateStatus
+        id url number title state isDraft headRefName headRefOid baseRefName isCrossRepository baseRepository{defaultBranchRef{name}} reviewDecision mergeable mergeStateStatus
         latestReviews(first:10){nodes{state}}
         commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename
           ... on CheckRun{name status conclusion detailsUrl}
@@ -29,7 +29,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
           repository(owner:$owner,name:$name){
             defaultBranchRef{name}
             all:pullRequests(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{url number title state isDraft headRefName baseRefName isCrossRepository}}
-            open:pullRequests(first:50,states:OPEN){nodes{
+            open:pullRequests(first:5,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{
         """ + PrFields + """
         }}}}
         """;
@@ -63,7 +63,10 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
 
     /// <summary>
     /// Maps the listing: the light <c>all</c> alias joined with the heavy <c>open</c> alias by URL. Entries without a plain PR
-    /// URL or a head branch are skipped. Only open PRs carry the check rollup, which keeps the query's point cost down.
+    /// URL or a head branch are skipped. Only the 5 most recently updated open PRs carry the check rollup; the rest are
+    /// marked <see cref="PullRequestHead.Partial"/> and an owned one is read on its own (see <see cref="OwnedPullRequests"/>).
+    /// Measured on dotnet/runtime against GitHub's ~10s limit: 50 open always 502s, 20 runs 7-9s and sometimes 504s, 10 runs
+    /// 4-8s, 5 runs 2-3s. Resolving rollups and mergeability is what is slow; the point cost stays at 1-2.
     /// </summary>
     public static PullRequestListing ParseList(JsonElement data)
     {
@@ -85,6 +88,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                     State = light.State,
                     CrossRepository = e.TryGetProperty("isCrossRepository", out var x) && x.ValueKind == JsonValueKind.True,
                     Status = open.TryGetValue(url!, out var rich) ? rich : light,
+                    Partial = rich is null && light.State == "open",
                 });
             }
         var def = Path(data, "repository", "defaultBranchRef", "name", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
@@ -94,7 +98,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
     public async Task<PullRequestStatus> GetAsync(string url, CancellationToken ct = default)
     {
         var (owner, repo, number) = PullRequestUrl.Parse(url);
-        using var data = await QueryAsync(GetQuery, new { owner, name = repo, number }, $"{owner}/{repo}", ct);
+        using var data = await QueryAsync(GetQuery, new { owner, name = repo, number }, $"{owner}/{repo}", ct, url);
         return ParseStatus(url, NodeOf(Data(data), url));
     }
 
@@ -102,21 +106,22 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
     {
         var (owner, repo, number) = PullRequestUrl.Parse(url);
         // The id comes from a fresh read, never from a cache.
-        using var data = await QueryAsync(GetQuery, new { owner, name = repo, number }, $"{owner}/{repo}", ct);
+        using var data = await QueryAsync(GetQuery, new { owner, name = repo, number }, $"{owner}/{repo}", ct, url);
         var id = Str(NodeOf(Data(data), url), "id") ?? throw new GitHubException("GitHub did not return that pull request's id.");
         using var _ = await QueryAsync(ReadyMutation, new { id }, $"{owner}/{repo}", ct);
     }
 
     // Always squash: the owner's history is squashed, and no merge-method menu.
-    public async Task MergeAsync(string url, CancellationToken ct = default)
+    public async Task MergeAsync(string url, string? headSha = null, CancellationToken ct = default)
     {
         var (owner, repo, number) = PullRequestUrl.Parse(url);
         if (!token.Present) throw new GitHubNotConfiguredException();
         try
         {
-            var result = await octokit.PullRequest.Merge(owner, repo, number, new MergePullRequest { MergeMethod = PullRequestMergeMethod.Squash });
+            var result = await octokit.PullRequest.Merge(owner, repo, number, new MergePullRequest { MergeMethod = PullRequestMergeMethod.Squash, Sha = string.IsNullOrEmpty(headSha) ? null : headSha });
             if (!result.Merged) throw new GitHubException($"GitHub refused the merge: {result.Message}");
         }
+        catch (PullRequestMismatchException) { throw new GitHubException("GitHub refused the merge: the pull request changed after it was checked (its head moved). Check it again."); }
         catch (Exception e) when (e is ApiException or HttpRequestException) { throw Map(e, $"{owner}/{repo}", "GitHub refused the merge: "); }
     }
 
@@ -181,12 +186,14 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
             Review = review,
             Mergeable = mergeable,
             MergeState = Str(r, "mergeStateStatus")?.ToLowerInvariant() ?? "unknown",
+            HeadSha = Str(r, "headRefOid") ?? "",
             CrossRepository = r.TryGetProperty("isCrossRepository", out var xr) && xr.ValueKind == JsonValueKind.True,
             DefaultBranch = Path(r, "baseRepository", "defaultBranchRef", "name", out var db) && db.ValueKind == JsonValueKind.String ? db.GetString()! : "",
         };
     }
 
-    private async Task<JsonDocument> QueryAsync(string query, object variables, string subject, CancellationToken ct)
+    /// <param name="prUrl">The pull request asked for, so a NOT_FOUND on it (not on the repo) says the PR does not exist.</param>
+    private async Task<JsonDocument> QueryAsync(string query, object variables, string subject, CancellationToken ct, string? prUrl = null)
     {
         if (!token.Present) throw new GitHubNotConfiguredException();
         using var req = new HttpRequestMessage(HttpMethod.Post, "graphql")
@@ -212,8 +219,13 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                 var first = errors[0];
                 var message = Str(first, "message") ?? "unknown error";
                 var type = Str(first, "type");
+                // GitHub reports a missing PR in a readable repo at path [repository, pullRequest]; a missing or hidden repo at [repository].
+                var missingPr = first.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.Array && path.GetArrayLength() == 2
+                    && path[1].ValueKind == JsonValueKind.String && path[1].GetString() == "pullRequest";
                 doc.Dispose();
                 if (type == "RATE_LIMITED") throw new GitHubRateLimitException(_time.GetUtcNow().AddMinutes(1));
+                if (type == "NOT_FOUND" && prUrl is not null && missingPr)
+                    throw new GitHubException($"GitHub has no pull request at {prUrl}.");
                 if (type == "NOT_FOUND" || type == "FORBIDDEN") throw new GitHubException($"GitHub token lacks access to {subject}.");
                 throw new GitHubException($"GitHub refused the request: {message}");
             }

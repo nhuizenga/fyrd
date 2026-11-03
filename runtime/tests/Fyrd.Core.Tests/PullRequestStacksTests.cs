@@ -209,4 +209,15 @@ public class PullRequestStacksTests
         var prs = new[] { In("acme/a", 1, "feat", "main"), In("acme/a", 2, "other", "feat", fork: true) };
         Assert.False(PullRequestStacks.Stacked(prs[0], prs[1]));
     }
+
+    [Fact]
+    public void Chain_DoesNotLinkAcrossReposOrThroughForks()
+    {
+        var other = new[] { In("acme/a", 1, "feat", "main"), In("acme/b", 2, "other", "feat") };
+        Assert.Null(PullRequestStacks.Chain(other, other[0].Url));
+        var fork = new[] { In("acme/a", 1, "feat", "main"), In("acme/a", 2, "other", "feat", fork: true) };
+        Assert.Null(PullRequestStacks.Chain(fork, fork[0].Url));
+        var healthy = new[] { In("acme/a", 1, "feat", "main"), In("acme/a", 2, "other", "feat") };
+        Assert.Equal([1, 2], PullRequestStacks.Chain(healthy, healthy[0].Url)!.Value.RootToTop.Select(p => p.Number));
+    }
 }

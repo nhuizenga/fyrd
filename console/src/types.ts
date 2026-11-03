@@ -111,6 +111,19 @@ export interface GitHubStatus {
   error: string | null;
 }
 
+/** A running or just-finished stack merge (`stackMerges` in hub state). `prs` merge in the order listed: top of the chain first. */
+export interface StackMergeView {
+  id: string;
+  repo: string;
+  prs: string[];
+  /** The PR being waited on or merged; every PR before it is merged. */
+  index: number;
+  status: "waiting" | "merging" | "done" | "failed" | "cancelled";
+  message: string | null;
+  startedAt: string;
+  updatedAt: string;
+}
+
 export interface HubState {
   sessions: HubSessionView[];
   questions: HubQuestion[];
@@ -120,6 +133,7 @@ export interface HubState {
   controller: ControllerInfo | null;
   budget?: HubBudgetView | null;
   gitHub?: GitHubStatus;
+  stackMerges?: StackMergeView[];
   /** Each owned PR's last listed status, by URL (held once however many sessions own it). */
   pullRequests?: Record<string, PullRequestStatus>;
   /** Peasant shared-memory proposals waiting for the owner. */

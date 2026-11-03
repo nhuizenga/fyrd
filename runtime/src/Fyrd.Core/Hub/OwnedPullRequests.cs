@@ -5,12 +5,16 @@ namespace Fyrd.Core.Hub;
 /// open PR stacked with them. Not 1:1: every session on a PR's branch gets it. The cloud sessions API carries no PR links, so
 /// each repo's recent PRs are listed from GitHub (one GraphQL request, with statuses), at most once per <see cref="Ttl"/>. A
 /// failed listing keeps the last good one and is not retried until the TTL passes; a rate-limited one is not retried before
-/// GitHub's reset time. With no GitHub token there is no listing, so no session owns any PR.
+/// GitHub's reset time. With no GitHub token there is no listing, so no session owns any PR. An owned open PR the listing
+/// read only partially (it is not among the most recently updated) is then read on its own, once per listing.
 /// Not thread safe: used by the sequential hub poll.
 /// </summary>
 public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
 {
     public static readonly TimeSpan Ttl = TimeSpan.FromSeconds(60);
+
+    /// <summary>At most this many owned PRs the listing left partial are read one by one per call; the rest wait a poll.</summary>
+    public const int MaxDetailReads = 10;
 
     private sealed record Listing(DateTimeOffset At, PullRequestListing Value);
 
@@ -49,7 +53,39 @@ public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
             }
             lock (_gate) _byRepo[repo!] = listing;
         }
-        return listing is null ? OwnedSet.Empty : PullRequestStacks.Owned(listing.Value, wanted);
+        if (listing is null) return OwnedSet.Empty;
+        var set = PullRequestStacks.Owned(listing.Value, wanted);
+        await DetailAsync(repo!, set.Urls, ct);
+        return set;
+    }
+
+    /// <summary>
+    /// Reads each owned PR the listing left partial on its own and stores the full status in the listing, so each is read at
+    /// most once per listing (a failed read keeps the partial status until then). A rate limit stops the reads and the listing.
+    /// </summary>
+    private async Task DetailAsync(string repo, IReadOnlyList<string> urls, CancellationToken ct)
+    {
+        List<string> partial;
+        lock (_gate)
+        {
+            if (!_byRepo.TryGetValue(repo, out var l)) return;
+            var owned = new HashSet<string>(urls, StringComparer.Ordinal);
+            partial = l.Value.Prs.Where(p => p.Partial && owned.Contains(p.Url)).Select(p => p.Url).Take(MaxDetailReads).ToList();
+        }
+        foreach (var url in partial)
+        {
+            PullRequestStatus? status;
+            try { status = await github.GetAsync(url, ct); }
+            catch (GitHubRateLimitException e) { lock (_gate) _notBefore[repo] = e.ResetAt; return; }
+            // A failed read keeps the partial status until the next listing, so a broken PR is not re-read every poll.
+            catch (GitHubException) { status = null; }
+            lock (_gate)
+            {
+                if (!_byRepo.TryGetValue(repo, out var l)) return;
+                var prs = l.Value.Prs.Select(p => p.Url == url && p.Partial ? p with { Status = status ?? p.Status, Partial = false } : p).ToList();
+                _byRepo[repo] = l with { Value = l.Value with { Prs = prs } };
+            }
+        }
     }
 
     /// <summary>The last listed status of a PR, or null when no listing has it.</summary>

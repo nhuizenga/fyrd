@@ -1429,6 +1429,107 @@ describe("stacked PRs", () => {
   });
 });
 
+describe("Merge stack", () => {
+  const U = (n: number) => `https://github.com/acme/widgets/pull/${n}`;
+  const chain = [
+    prStatus({ url: U(11), number: 11, head: "a", base: "main" }),
+    prStatus({ url: U(12), number: 12, head: "b", base: "a" }),
+    prStatus({ url: U(13), number: 13, head: "c", base: "b" }),
+  ];
+  const job = (o: Partial<import("../types").StackMergeView> = {}): import("../types").StackMergeView => ({
+    id: "j1", repo: "acme/widgets", prs: [U(13), U(12), U(11)], index: 1, status: "waiting", message: null,
+    startedAt: "2026-11-02T12:00:00Z", updatedAt: "2026-11-02T12:00:00Z", ...o,
+  });
+  const open = async (statuses = chain, extra: Partial<HubState> = {}) => {
+    vi.mocked(api.pullRequests).mockResolvedValue(statuses);
+    const st = hubState({
+      sessions: [session({ id: "a", title: "alpha-1", repo: "acme/widgets", role: "builder", pullRequests: statuses.map((p) => p.url) })],
+      pullRequests: Object.fromEntries(statuses.map((p) => [p.url, p])), ...extra,
+    });
+    const onChanged = renderScreen(st);
+    await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+    const details = screen.getByRole("complementary", { name: "Session details" });
+    await within(details).findByRole("button", { name: `Open #${statuses[0].number}` });
+    return { details, onChanged };
+  };
+  // Opens one PR's menu and returns queries scoped to it (every PR item has its own menu).
+  const menuOf = async (details: HTMLElement, n: number) => {
+    const trigger = within(details).getByRole("button", { name: `Ask for help with #${n}` });
+    await userEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "") ?? document.body;
+    return within(menu);
+  };
+
+  it("the menu offers Merge stack, and the confirm lists the order", async () => {
+    vi.mocked(api.mergeStack).mockResolvedValue({ jobId: "j1" });
+    const { details } = await open();
+    const menu = await menuOf(details, 12);
+    await userEvent.click(await menu.findByRole("menuitem", { name: "Merge stack" }));
+    expect(within(details).getByText("#13 → #12 → #11 into main, squash, waiting for checks between steps")).toBeInTheDocument();
+    expect(api.mergeStack).not.toHaveBeenCalled();
+    await userEvent.click(within(details).getByRole("button", { name: "Merge stack" }));
+    expect(api.mergeStack).toHaveBeenCalledWith("a", U(12));
+  });
+
+  it("is not offered on a PR that is not in a chain, nor on a fork", async () => {
+    const { details } = await open([prStatus({ head: "z", base: "main" })]);
+    const menu = await menuOf(details, 12);
+    expect(await menu.findByRole("menuitem", { name: "Request validation" })).toBeInTheDocument();
+    expect(menu.queryByRole("menuitem", { name: "Merge stack" })).not.toBeInTheDocument();
+  });
+
+  it("is not offered on a forked stack", async () => {
+    const fork = [...chain, prStatus({ url: U(14), number: 14, head: "d", base: "a" })];
+    const { details } = await open(fork);
+    const menu = await menuOf(details, 12);
+    expect(await menu.findByRole("menuitem", { name: "Request validation" })).toBeInTheDocument();
+    expect(menu.queryByRole("menuitem", { name: "Merge stack" })).not.toBeInTheDocument();
+  });
+
+  it("a start error shows under the PR", async () => {
+    vi.mocked(api.mergeStack).mockRejectedValue(new Error("A stack merge is already running for these pull requests"));
+    const { details } = await open();
+    const menu = await menuOf(details, 13);
+    await userEvent.click(await menu.findByRole("menuitem", { name: "Merge stack" }));
+    await userEvent.click(within(details).getByRole("button", { name: "Merge stack" }));
+    expect(await within(details).findByText(/already running/)).toBeInTheDocument();
+  });
+
+  it("while a job runs each PR shows its step, Cancel sits on the current step, and Merge stack is hidden", async () => {
+    vi.mocked(api.cancelStackMerge).mockResolvedValue(undefined);
+    const { details } = await open(chain, { stackMerges: [job()] });
+    expect(within(details).getByText("Merged")).toBeInTheDocument();
+    expect(within(details).getByText("Waiting for checks on #12 (step 2 of 3)")).toBeInTheDocument();
+    expect(within(details).getByText("Queued (step 3 of 3)")).toBeInTheDocument();
+    const cancels = within(details).getAllByRole("button", { name: "Cancel stack merge" });
+    expect(cancels).toHaveLength(1);
+    const menu = await menuOf(details, 12);
+    expect(menu.queryByRole("menuitem", { name: "Merge stack" })).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(cancels[0]);
+    expect(api.cancelStackMerge).toHaveBeenCalledWith("j1");
+  });
+
+  it("a failed job names the reason on its PR, with no Cancel", async () => {
+    const { details } = await open(chain, { stackMerges: [job({ status: "failed", message: "Checks are failing on #12." })] });
+    expect(within(details).getByText("Failed: Checks are failing on #12.")).toBeInTheDocument();
+    expect(within(details).queryByRole("button", { name: "Cancel stack merge" })).not.toBeInTheDocument();
+  });
+
+  it("the session row shows a spinner while its PRs are in a running job, and not afterwards", () => {
+    const st = (jobs: import("../types").StackMergeView[]) => hubState({
+      sessions: [session({ id: "a", title: "alpha-1", pullRequests: chain.map((p) => p.url) })],
+      pullRequests: Object.fromEntries(chain.map((p) => [p.url, p])), stackMerges: jobs,
+    });
+    renderScreen(st([job()]));
+    const row = () => screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ });
+    expect(within(row()).getByRole("img", { name: "Merging stack" })).toBeInTheDocument();
+    cleanup();
+    renderScreen(st([job({ status: "done", index: 3 })]));
+    expect(within(row()).queryByRole("img", { name: "Merging stack" })).not.toBeInTheDocument();
+  });
+});
+
 it("the in-progress bubble lists running workers with their latest tool", async () => {
   renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
