@@ -21,7 +21,7 @@ Never change code, commit, push, post on GitHub, mark anything ready or message 
 When you run as your own session, you are the coordinator; a worker (see Workers) does the check, and you report the outcome.
 
 - **You:** read your task and the spec, plan or issue it links (not the code). If what to validate or what "done" means is unclear, ask the owner first. Then start a worker `validate: <pr or branch>` whose brief gives it The check above.
-- **You:** when the worker returns, say so in your final reply with your findings on that branch or PR, then stop: pass or fail for each requirement with the evidence, build and test results, and anything that failed or couldn't be checked, with steps to reproduce. Mark a PR ready only if the owner asked you to and everything passed (the GitHub tool's pull request update with `draft: false`, or `gh pr ready <n>`). Don't message other sessions with the outcome; whoever asked reads your reply.
+- **You:** when the worker returns, say so in your final reply with your findings on that branch or PR, then stop: pass or fail for each requirement with the evidence, build and test results, and anything that failed or couldn't be checked, with steps to reproduce. Mark a PR ready only if the owner asked you to and everything passed (the GraphQL `markPullRequestReadyForReview` mutation with the PR's `node_id`; never the `gh` CLI). Don't message other sessions with the outcome; whoever asked reads your reply.
 
 
 # Workers

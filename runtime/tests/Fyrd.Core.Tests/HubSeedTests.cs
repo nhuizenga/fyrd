@@ -126,21 +126,29 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("<subagent-persona id=\"validator\">", d, StringComparison.Ordinal);
         Assert.Contains("<subagent-persona id=\"reviewer\">", d, StringComparison.Ordinal);
         Assert.Contains("subagent_type: \"general-purpose\"", d, StringComparison.Ordinal);
-        Assert.Contains("`draft: false`", d, StringComparison.Ordinal);
+        Assert.Contains("markPullRequestReadyForReview", d, StringComparison.Ordinal);
         Assert.Contains("event: COMMENT", d, StringComparison.Ordinal);
         foreach (var relay in new[] { "Controller session:", "Validation request:", "Validation failed:", "Review request:" })
             Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Builder_StacksMultiPrWorkNatively()
+    public void Builder_StacksMultiPrWorkNativelyThroughTheApi()
     {
         var d = Get("builder").Definition;
-        Assert.Contains("gh extension install github/gh-stack", d, StringComparison.Ordinal);
-        Assert.Contains("gh stack init --base", d, StringComparison.Ordinal);
-        Assert.Contains("gh stack submit --auto", d, StringComparison.Ordinal);
-        Assert.Contains("gh stack sync", d, StringComparison.Ordinal);
-        Assert.Contains("Never run `gh stack merge`", d, StringComparison.Ordinal);
+        Assert.Contains("POST /repos/{owner}/{repo}/stacks", d, StringComparison.Ordinal);
+        Assert.Contains("POST /repos/{owner}/{repo}/stacks/{stack_number}/add", d, StringComparison.Ordinal);
+        Assert.Contains("POST /repos/{owner}/{repo}/merges", d, StringComparison.Ordinal);
+        Assert.Contains("X-GitHub-Api-Version: 2026-03-10", d, StringComparison.Ordinal);
+        Assert.Contains("Never force-push, never push", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoPersonaShellsOutToTheGhCli()
+    {
+        foreach (var (id, text) in Load().Select(p => (p.Id, p.Definition)))
+            foreach (var cli in new[] { "`gh pr", "`gh stack", "gh extension", "`gh api" })
+                Assert.False(text.Contains(cli, StringComparison.Ordinal), $"{id} shells out to the gh CLI ({cli})");
     }
 
     [Fact]
