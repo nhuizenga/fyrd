@@ -120,6 +120,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .md table { border-collapse: collapse; }
 .md th, .md td { border: 1px solid var(--a2-border-color-default); padding: 4px 8px; }
 .md blockquote { padding-left: 12px; border-left: 3px solid var(--a2-border-color-default); }
+.msg-sending { opacity: 0.6; white-space: pre-wrap; }
 .rename-form { display: flex; flex-direction: column; gap: 6px; }
 .msg-progress-detail { margin: 0; padding: 6px 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--a2-font-family-mono, monospace); font-size: 0.85em; background: var(--a2-background-color-primary-subdued); border-radius: 4px; }
 .session-row-chips .chip-branch { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -144,3 +145,4 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .pr-list, .pr-item, .pr-line, .pr-badges { min-width: 0; max-width: 100%; }
 .pr-title { flex: 1 1 0; }
 .pr-line > .pr-actions, .pr-line > :first-child { flex: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
