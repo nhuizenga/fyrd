@@ -6,8 +6,9 @@ using System.Text.RegularExpressions;
 namespace Fyrd.Core.CloudSessions;
 
 /// <summary>
-/// Sends a turn the owner typed (the console composer) to a cloud session. Only for text the owner wrote: Fyrd's own
-/// prompts and relayed text go through <see cref="ICloudSessions.SendMessageAsync"/>, which the session reads as a peer's.
+/// Sends a message to a cloud session as the owner's turn. Every message Fyrd sends directly to a session goes through
+/// here (typed turns, prompts, notices, relayed answers): the cloud HTTP API's message post is read as a peer's and
+/// running sessions reject it, so <see cref="ICloudSessions"/> has no send method.
 /// </summary>
 public interface IOwnerMessages
 {

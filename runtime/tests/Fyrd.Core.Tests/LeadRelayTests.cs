@@ -14,7 +14,7 @@ public class LeadRelayTests
         if (lead) { specs.SetLead(run.Id, "sess-" + run.Id); specs.UpdateStatus(run.Id, SpecStatus.Building); }
         var cloud = new FakeCloudSessions();
         var owner = new FakeOwnerMessages();
-        return (specs, cloud, owner, new LeadRelay(specs, cloud, owner, new RunnerState(), new InboxStore(h.Paths, specs, new DecisionMemory(h.Paths), new FixedTime(DateTimeOffset.Parse("2026-10-29T12:00:00Z")))), run);
+        return (specs, cloud, owner, new LeadRelay(specs, owner, new RunnerState(), new InboxStore(h.Paths, specs, new DecisionMemory(h.Paths), new FixedTime(DateTimeOffset.Parse("2026-10-29T12:00:00Z")))), run);
     }
 
     private static InboxCard Card(string specId, string? key) =>
@@ -31,7 +31,6 @@ public class LeadRelayTests
         Assert.Contains("```fyrd-answer", sent.Text);
         Assert.Contains("\"id\":\"q-color\"", sent.Text);
         Assert.Contains("\"answer\":\"blue\"", sent.Text);
-        Assert.Empty(cloud.Sent);
     }
 
     [Fact]
@@ -70,21 +69,21 @@ public class LeadRelayTests
     [Fact]
     public async Task RelayConfig_SkipsResearchLeads()
     {
-        using var h = new TempHome(); var (specs, cloud, _, relay, run) = Setup(h);
+        using var h = new TempHome(); var (specs, _, owner, relay, run) = Setup(h);
         var research = specs.Create("Research it", Repo, "x");
         specs.SetResearchLead(research.Id, "sess-research");
         await relay.RelayConfigAsync(6, default);
-        Assert.Equal("sess-" + run.Id, Assert.Single(cloud.Sent).SessionId);
+        Assert.Equal("sess-" + run.Id, Assert.Single(owner.Sent).SessionId);
     }
 
     [Fact]
     public async Task RelayConfig_OnlyActiveLeads()
     {
-        using var h = new TempHome(); var (specs, cloud, _, relay, run) = Setup(h);
+        using var h = new TempHome(); var (specs, _, owner, relay, run) = Setup(h);
         var done = specs.Create("Other thing", Repo, "x");
         specs.SetLead(done.Id, "sess-done"); specs.UpdateStatus(done.Id, SpecStatus.ReadyForHandoff);
         await relay.RelayConfigAsync(6, default);
-        var sent = Assert.Single(cloud.Sent);
+        var sent = Assert.Single(owner.Sent);
         Assert.Equal("sess-" + run.Id, sent.SessionId);
         Assert.Contains("```fyrd-config", sent.Text);
         Assert.Contains("\"squadCap\":6", sent.Text);

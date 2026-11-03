@@ -26,6 +26,7 @@ public sealed partial class ControllerManager
     private sealed record State(string? SessionId, string? PostedMemoryHash, string? PostedInstructionsHash = null);
 
     private readonly ICloudSessions _cloud;
+    private readonly IOwnerMessages _owner;
     private readonly HubPersonas _personas;
     private readonly HubMemory _memory;
     private readonly ConfigStore _config;
@@ -38,11 +39,12 @@ public sealed partial class ControllerManager
     private DateTimeOffset? _adoptedAt;
 
     public ControllerManager(
-        ICloudSessions cloud, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null, HubSkills? skills = null)
+        ICloudSessions cloud, IOwnerMessages owner, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null, HubSkills? skills = null)
     {
         _skills = skills;
         _time = time ?? TimeProvider.System;
         _cloud = cloud;
+        _owner = owner;
         _personas = personas;
         _memory = memory;
         _config = config;
@@ -132,7 +134,8 @@ public sealed partial class ControllerManager
                 catch (CloudSessionApiException e) when (e.Status == 404) { }
             }
 
-            await _cloud.SendMessageAsync(id, prompt, ct);
+            // The adoption prompt is Fyrd's own text, but the session only honours it as the owner's turn (a peer-wrapped one is rejected).
+            await _owner.SendAsync(id, prompt, ct);
             lock (_stateLock)
             {
                 SaveState(new State(id, hash, instructionsHash));

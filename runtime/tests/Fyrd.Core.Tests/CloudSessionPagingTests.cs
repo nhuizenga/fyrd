@@ -76,7 +76,6 @@ public class CloudSessionPagingTests
         }
         public Task<CloudSession> CreateAsync(CreateSessionRequest request, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<CloudSession> GetAsync(string sessionId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default) => throw new NotImplementedException();
         public Task InterruptAsync(string sessionId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task ArchiveAsync(string sessionId, CancellationToken ct = default) => throw new NotImplementedException();

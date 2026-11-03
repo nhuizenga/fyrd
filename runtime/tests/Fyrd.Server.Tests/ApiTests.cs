@@ -286,13 +286,13 @@ public class ApiTests
 
         var same = await c.PutAsJsonAsync("/api/config", new { squadCap = 4 });
         Assert.Equal(HttpStatusCode.OK, same.StatusCode);
-        Assert.Empty(f.Cloud.Sent);
+        Assert.Empty(f.Owner.Sent);
 
         var changed = await c.PutAsJsonAsync("/api/config", new { squadCap = 6 });
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
-        Assert.Contains("\"squadCap\":6", Assert.Single(f.Cloud.Sent).Text);
+        Assert.Contains("\"squadCap\":6", Assert.Single(f.Owner.Sent).Text);
 
-        f.Cloud.ThrowOnNextCall(new HttpRequestException("down"));
+        f.Owner.ThrowOnNextCall(new HttpRequestException("down"));
         var failed = await c.PutAsJsonAsync("/api/config", new { squadCap = 7 });
         Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
         Assert.Equal("down", (await ReadJson(failed)).GetProperty("relayError").GetString());

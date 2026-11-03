@@ -104,13 +104,6 @@ public sealed partial class CloudSessionClient : ICloudSessions
             Str(root, "last_id"));
     }
 
-    public async Task SendMessageAsync(string sessionId, string text, CancellationToken ct = default)
-    {
-        ValidateSessionId(sessionId);
-        var body = new JsonObject { ["events"] = new JsonArray(UserEvent(text, sessionId)) };
-        using var _ = await SendAsync(HttpMethod.Post, $"/v1/sessions/{sessionId}/events", body, ct);
-    }
-
     public async Task<IReadOnlyList<CloudSession>> ListByTagAsync(string tag, CancellationToken ct = default)
     {
         var sessions = new List<CloudSession>();

@@ -14,6 +14,7 @@ public sealed class CostGuardTests : IDisposable
     private readonly TempHome _home = new();
     private readonly string _seeds = Path.Combine(Path.GetTempPath(), "fyrd-seeds-" + Guid.NewGuid());
     private readonly FakeCloudSessions _cloud = new();
+    private readonly FakeOwnerMessages _owner = new();
     private readonly FixedTime _time = new(DateTimeOffset.Parse("2026-11-01T12:00:00Z"));
     private readonly ConfigStore _config;
     private readonly ControllerManager _controller;
@@ -26,9 +27,9 @@ public sealed class CostGuardTests : IDisposable
         File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-opus-5-5\nlocked: true\n---\nControl.");
         _config = new ConfigStore(_home.Paths);
         _config.Save(new FyrdConfig(EnvironmentId: "env_abc123", TimeZone: "UTC"));
-        _controller = new ControllerManager(_cloud, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), _config, _home.Paths);
+        _controller = new ControllerManager(_cloud, _owner, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), _config, _home.Paths);
         _ledger = new CostLedger(_home.Paths, _config, _time);
-        _guard = new CostGuard(_ledger, _config, _cloud, _controller);
+        _guard = new CostGuard(_ledger, _config, _cloud, _owner, _controller);
     }
 
     public void Dispose()
@@ -41,7 +42,7 @@ public sealed class CostGuardTests : IDisposable
     {
         _cloud.SetSession(FakeCloudSessions.Session(Ctl));
         await _controller.AdoptAsync(Ctl, default);
-        _cloud.Sent.Clear();
+        _owner.Sent.Clear();
     }
 
     private void Spend(string id, decimal cost, string uuid = "")
@@ -74,7 +75,7 @@ public sealed class CostGuardTests : IDisposable
         Assert.Equal(0.2, v.Ratio, 3);
         Assert.False(v.CanExtend);
         Assert.Empty(_cloud.Interrupted);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
     }
 
     [Fact]
@@ -88,7 +89,7 @@ public sealed class CostGuardTests : IDisposable
             Assert.Equal("session", pass.Views[Peasant].Blocked);
         }
         Assert.Equal([Peasant], _cloud.Interrupted);
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.Equal(Ctl, sent.SessionId);
         Assert.Contains("Fyrd budget: session session_p1 (session_p1) reached its 50.00 USD daily limit (51.00 USD spent)", sent.Text);
     }
@@ -107,7 +108,7 @@ public sealed class CostGuardTests : IDisposable
         var second = await Run(true, Peasant, Ctl);
         Assert.Null(second.Error);
         Assert.Equal([Peasant], _cloud.Interrupted);
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
         Assert.Equal(50m, _ledger.NotifiedAtLimit(Peasant));
     }
 
@@ -116,14 +117,13 @@ public sealed class CostGuardTests : IDisposable
     {
         await AdoptController();
         Spend(Peasant, 60);
-        _cloud.SkipCalls(1); // the interrupt succeeds
-        _cloud.ThrowOnNextCall(new HttpRequestException("send failed"));
+        _owner.ThrowOnNextCall(new HttpRequestException("send failed")); // the interrupt succeeds, the notice fails
         var first = await Run(true, Peasant, Ctl);
         Assert.NotNull(first.Error);
         Assert.Null(_ledger.NotifiedAtLimit(Peasant));
         await Run(true, Peasant, Ctl);
         Assert.Equal(50m, _ledger.NotifiedAtLimit(Peasant));
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
         Assert.Equal([Peasant], _cloud.Interrupted); // the retry only sends: no second interrupt
     }
 
@@ -134,13 +134,13 @@ public sealed class CostGuardTests : IDisposable
         Spend(Peasant, 60);
         await Run(false, Peasant); // the Controller could not be read this pass
         Assert.Equal([Peasant], _cloud.Interrupted);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
         Assert.Null(_ledger.NotifiedAtLimit(Peasant));
 
         await Run(true, Peasant, Ctl);
         await Run(true, Peasant, Ctl);
         Assert.Equal([Peasant], _cloud.Interrupted);
-        Assert.Single(_cloud.Sent);
+        Assert.Single(_owner.Sent);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public sealed class CostGuardTests : IDisposable
         Spend(Peasant, 25); // 102 >= 100
         await Run(true, Peasant, Ctl);
         Assert.Equal([Peasant, Peasant], _cloud.Interrupted);
-        Assert.Equal(2, _cloud.Sent.Count);
+        Assert.Equal(2, _owner.Sent.Count);
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public sealed class CostGuardTests : IDisposable
         Assert.Null(v.Blocked);
         Assert.False(v.CanExtend);
         Assert.Empty(_cloud.Interrupted);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
     }
 
     [Fact]
@@ -245,7 +245,7 @@ public sealed class CostGuardTests : IDisposable
             Assert.Null(pass.Views[Ctl].Blocked);
         }
         Assert.Empty(_cloud.Interrupted);
-        var sent = Assert.Single(_cloud.Sent);
+        var sent = Assert.Single(_owner.Sent);
         Assert.Contains("the fyrd reached its 100.00 USD daily limit (110.00 USD spent)", sent.Text);
 
         // Raised and crossed again: one more message.
@@ -253,7 +253,7 @@ public sealed class CostGuardTests : IDisposable
         Assert.False((await Run(true, Peasant, Other, Ctl)).Budget.FyrdBlocked);
         Spend(Ctl, 50);
         await Run(true, Peasant, Other, Ctl);
-        Assert.Equal(2, _cloud.Sent.Count);
+        Assert.Equal(2, _owner.Sent.Count);
     }
 
     [Fact]
@@ -285,7 +285,7 @@ public sealed class CostGuardTests : IDisposable
         Spend(Peasant, 60);
         await Run(false, Peasant);
         Assert.Equal([Peasant], _cloud.Interrupted);
-        Assert.Empty(_cloud.Sent);
+        Assert.Empty(_owner.Sent);
         Assert.Equal(50m, _ledger.NotifiedAtLimit(Peasant));
     }
 

@@ -240,12 +240,12 @@ internal static partial class HubEndpoints
                 return Results.NoContent();
             }));
 
-        group.MapPost("/sessions/{id}/resume", (string id, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+        group.MapPost("/sessions/{id}/resume", (string id, HubState state, IOwnerMessages owner, CancellationToken ct) =>
             InHub(id, state, () => BlockedError(id, state) is { } blocked
                 ? Task.FromResult(blocked)
                 : Cloud(async () =>
                 {
-                    await cloud.SendMessageAsync(id, ResumeText, ct);
+                    await owner.SendAsync(id, ResumeText, ct);
                     return Results.NoContent();
                 })));
 
