@@ -292,10 +292,10 @@ public class ApiTests
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
         Assert.Contains("\"squadCap\":6", Assert.Single(f.Owner.Sent).Text);
 
-        f.Owner.ThrowOnNextCall(new HttpRequestException("down"));
+        f.Owner.ThrowOnNextCall(new Fyrd.Core.CloudSessions.OwnerMessageException("down"));
         var failed = await c.PutAsJsonAsync("/api/config", new { squadCap = 7 });
         Assert.Equal(HttpStatusCode.OK, failed.StatusCode);
-        Assert.Equal("down", (await ReadJson(failed)).GetProperty("relayError").GetString());
+        Assert.Contains("down", (await ReadJson(failed)).GetProperty("relayError").GetString());
         Assert.Equal(7, (await ReadJson(await c.GetAsync("/api/config"))).GetProperty("squadCap").GetInt32());
     }
 

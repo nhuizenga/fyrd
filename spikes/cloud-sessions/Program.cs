@@ -63,6 +63,7 @@ if (unknown.Count > 0)
 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
 var creds = new ClaudeCredentials();
 var client = new CloudSessionClient(http, creds);
+var owner = new ClaudeCliOwnerMessages(); // CloudSessionClient no longer has a send method: every message goes through the owner path
 var raw = new RawApi(http, creds);
 
 try
@@ -145,7 +146,7 @@ async Task Q2()
     {
         id = leadOpt;
         baseline = await Baseline(id); // only events after this point count as the lead's response
-        await client.SendMessageAsync(id, prompt);
+        await owner.SendAsync(id, prompt);
         Log(q, "sent-prompt-to-existing-lead", new JsonObject { ["session"] = id });
     }
     else
@@ -275,7 +276,7 @@ async Task Q4Answer(string id)
     var envLogsBefore = before.Count(IsEnvManagerLog);
     Console.WriteLine($"[q4] events before: {before.Count}; env_manager_log events: {envLogsBefore}");
 
-    await client.SendMessageAsync(id, "The owner answers: blue. Now reply with ONE line only: the codeword I told you at the very start, then a space, then the owner's answer.");
+    await owner.SendAsync(id, "The owner answers: blue. Now reply with ONE line only: the codeword I told you at the very start, then a space, then the owner's answer.");
     Log(q, "sent-answer", new JsonObject { ["session"] = id });
     var seen = new StatusSeen();
     var knownIds = before.Select(e => e.Uuid).ToHashSet();
@@ -452,7 +453,7 @@ async Task Q8()
         LogSession(q, "existing", s);
         Console.WriteLine($"[q8] existing session: {s.Id} (status {s.SessionStatus})");
         var b0 = await Baseline(s.Id);
-        await client.SendMessageAsync(s.Id, first);
+        await owner.SendAsync(s.Id, first);
         Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), b0)}");
     }
     var replyA = LastAssistant(await FetchAllEvents(q, s.Id))?.Text;
@@ -472,7 +473,7 @@ async Task Q8()
     Console.WriteLine($"[q8] context after /clear: {await ContextUsage(s.Id)}");
 
     baseline = await Baseline(s.Id);
-    await client.SendMessageAsync(s.Id,
+    await owner.SendAsync(s.Id,
         "Without using any tools, answer from memory only: what word did I ask you to remember earlier? If you have no memory of earlier messages, reply NONE.");
     Console.WriteLine($"[q8] {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
     var replyB = LastAssistant(await FetchAllEvents(q, s.Id))?.Text;
@@ -485,7 +486,7 @@ async Task Q8()
     Console.WriteLine($"[q8] archived {s.Id}");
 }
 
-// --via api (default): CloudSessionClient.SendMessageAsync, POST /v1/sessions/{id}/events. Run 2 showed /clear arrives as text.
+// --via api (default): the removed CloudSessionClient.SendMessageAsync (peer path; now ClaudeCliOwnerMessages), POST /v1/sessions/{id}/events. Run 2 showed /clear arrives as text.
 // --via code: the web UI's route, POST /v1/code/sessions/cse_<suffix>/events with {"events":[{"payload":<user event>}]}.
 // --via code-init: as code, preceded by the UI's {"subtype":"initialize"} control_request.
 async Task SendClear(string q, string sessionId)
@@ -493,7 +494,7 @@ async Task SendClear(string q, string sessionId)
     var via = viaOpt ?? "api";
     if (via == "api")
     {
-        await client.SendMessageAsync(sessionId, "/clear");
+        await owner.SendAsync(sessionId, "/clear");
     }
     else
     {
@@ -556,7 +557,7 @@ async Task Q10()
         Console.WriteLine($"[q10] first init mcp_servers: {(init.Raw.TryGetProperty("mcp_servers", out var ms) ? ms.GetRawText() : "(none)")}");
 }
 
-// Q11: how does a plain user turn posted by Fyrd's console route (SendMessageAsync) read to the receiving session?
+// Q11: how does a plain user turn posted by Fyrd's console route (now ClaudeCliOwnerMessages) read to the receiving session?
 // Runs a persona-free session, then one with the builder persona (and its model); posts the owner-or-peer question to each,
 // prints the full stored event and the reply, and archives both unless --keep. These are top-level API sessions: a
 // Controller-spawned child is checked by hand (see docs/superpowers/spikes/2026-11-02-owner-turn-probe.md).
@@ -583,7 +584,7 @@ async Task Q11()
         {
             Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin))}");
             var baseline = await Baseline(s.Id);
-            await client.SendMessageAsync(s.Id, Question);
+            await owner.SendAsync(s.Id, Question);
             Console.WriteLine($"[q11] {label}: {await WaitSettled(q, s.Id, seen, TimeSpan.FromMinutes(timeoutMin), baseline)}");
             var events = await FetchAllEvents(q, s.Id);
             var posted = events.Where(e => !baseline.Contains(e.Uuid)).ToList();

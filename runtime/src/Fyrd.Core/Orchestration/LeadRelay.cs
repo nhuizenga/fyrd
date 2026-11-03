@@ -63,8 +63,14 @@ public sealed class LeadRelay(SpecStore specs, IOwnerMessages owner, RunnerState
     public async Task RelayConfigAsync(int squadCap, CancellationToken ct)
     {
         var message = Protocol.FormatConfig(squadCap);
+        // One failing lead must not keep the rest from learning the new cap: send to all, then report every failure.
+        var failures = new List<string>();
         foreach (var run in specs.ListActive())
             if (run.Status != SpecStatus.Researching && !string.IsNullOrEmpty(run.SessionId))
-                await owner.SendAsync(run.SessionId, message, ct);
+            {
+                try { await owner.SendAsync(run.SessionId, message, ct); }
+                catch (OwnerMessageException e) { failures.Add($"{run.SessionId}: {e.Message}"); }
+            }
+        if (failures.Count > 0) throw new OwnerMessageException(string.Join("; ", failures));
     }
 }

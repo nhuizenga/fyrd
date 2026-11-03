@@ -250,7 +250,6 @@ public class HubApiTests
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_other/message", new { text = "hi" });
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Empty(f.Owner.Sent);
-        Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
@@ -287,7 +286,16 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.BadRequest,
             (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = new string('x', 20_001) })).StatusCode);
         Assert.Empty(f.Owner.Sent);
-        Assert.Empty(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Resume_OwnerSendFails_Is502()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        f.Owner.Fail = new OwnerMessageException("claude is not on PATH");
+        var r = await f.CreateClient().PostAsync($"/api/hub/sessions/{SessionId}/resume", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
     }
 
     [Fact]
@@ -1143,7 +1151,6 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.Conflict, m.StatusCode);
         Assert.Equal(detail, (await ReadJson(m)).GetProperty("detail").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await c.PostAsync($"/api/hub/sessions/{SessionId}/resume", null)).StatusCode);
-        Assert.Empty(f.Owner.Sent);
         Assert.Empty(f.Owner.Sent);
         // Pause stays available so the owner can still stop a running session.
         Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsync($"/api/hub/sessions/{SessionId}/pause", null)).StatusCode);

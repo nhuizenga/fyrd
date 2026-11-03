@@ -88,4 +88,18 @@ public class LeadRelayTests
         Assert.Contains("```fyrd-config", sent.Text);
         Assert.Contains("\"squadCap\":6", sent.Text);
     }
+
+    [Fact]
+    public async Task RelayConfig_OneLeadFails_StillSendsToTheRestAndReportsAll()
+    {
+        using var h = new TempHome(); var (specs, _, owner, relay, run) = Setup(h);
+        var second = specs.Create("Other thing", Repo, "x");
+        specs.SetLead(second.Id, "sess-second"); specs.UpdateStatus(second.Id, SpecStatus.Building);
+        owner.ThrowOnNextCall(new Fyrd.Core.CloudSessions.OwnerMessageException("first is archived"));
+
+        var e = await Assert.ThrowsAsync<Fyrd.Core.CloudSessions.OwnerMessageException>(() => relay.RelayConfigAsync(6, default));
+
+        Assert.Contains("first is archived", e.Message);
+        Assert.Single(owner.Sent);
+    }
 }

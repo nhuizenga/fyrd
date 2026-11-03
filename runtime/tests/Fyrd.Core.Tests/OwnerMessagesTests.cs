@@ -50,4 +50,55 @@ public class OwnerMessagesTests
     {
         Assert.Throws<OwnerMessageException>(() => ClaudeCliOwnerMessages.CheckResult(0, "hello", ""));
     }
+
+    [Fact]
+    public async Task SendAsync_CliExitsBeforeReadingStdin_SurfacesTheCliError()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Path.Combine(Path.GetTempPath(), "fyrd-fakeclaude-" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+        var script = Path.Combine(dir, "claude");
+        File.WriteAllText(script, "#!/bin/sh\necho 'Error: not logged in' >&2\nexit 1\n");
+        File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var oldPath = Environment.GetEnvironmentVariable("PATH");
+        Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + oldPath);
+        try
+        {
+            // A message large enough to overflow the pipe buffer, so the write hits the closed pipe.
+            var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
+                new ClaudeCliOwnerMessages().SendAsync("session_abc", new string('x', 1_000_000)));
+            Assert.Equal("Error: not logged in", e.Message);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_CallerCancels_KillsTheChildAndRethrowsCancellation()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var dir = Path.Combine(Path.GetTempPath(), "fyrd-fakeclaude-" + Guid.NewGuid());
+        Directory.CreateDirectory(dir);
+        var script = Path.Combine(dir, "claude");
+        File.WriteAllText(script, "#!/bin/sh\ncat >/dev/null\nsleep 30\n");
+        File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var oldPath = Environment.GetEnvironmentVariable("PATH");
+        Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + oldPath);
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new ClaudeCliOwnerMessages().SendAsync("session_abc", "hi", cts.Token));
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", oldPath);
+            Directory.Delete(dir, true);
+        }
+    }
 }

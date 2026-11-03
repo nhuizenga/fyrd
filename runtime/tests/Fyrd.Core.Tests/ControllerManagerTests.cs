@@ -67,6 +67,17 @@ public sealed class ControllerManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Adopt_SendFails_PropagatesAndStoresNothing()
+    {
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        _owner.Fail = new OwnerMessageException("claude is not on PATH");
+
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().AdoptAsync(Ctl, default));
+
+        Assert.Null(Make().CurrentId);
+    }
+
+    [Fact]
     public async Task Adopt_NoEnvironment_StillAdopts()
     {
         _cloud.SetSession(FakeCloudSessions.Session(Ctl));

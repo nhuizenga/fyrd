@@ -485,6 +485,38 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_MemoryChanged_ControllerRunning_StillPostsViaOwnerPath()
+    {
+        await Adopt("session_ctl", "controller");
+        _cloud.SetSession(new CloudSession("session_ctl", "controller", "running", "connected", null, [], FakeCloudSessions.Empty));
+        _cloud.SetByTag("fyrd-hub");
+        _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
+
+        await Make().PollOnceAsync(default);
+
+        var sent = Assert.Single(_owner.Sent);
+        Assert.Equal("session_ctl", sent.SessionId);
+        Assert.StartsWith("Fyrd memory update.", sent.Text);
+    }
+
+    [Fact]
+    public async Task Poll_InstructionsRefreshFails_MemoryUpdateStillPosted()
+    {
+        WithSkills();
+        await Adopt("session_ctl", "controller");
+        _cloud.SetByTag("fyrd-hub");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
+        _owner.ThrowOnNextCall(new OwnerMessageException("claude timed out"));
+
+        await Make().PollOnceAsync(default);
+
+        // The refresh (first send) failed; the memory update (second send) still went out.
+        var sent = Assert.Single(_owner.Sent);
+        Assert.StartsWith("Fyrd memory update.", sent.Text);
+    }
+
+    [Fact]
     public async Task Poll_AdoptDuringPass_NoMemoryPostToOldController()
     {
         await Adopt("session_old", "controller");

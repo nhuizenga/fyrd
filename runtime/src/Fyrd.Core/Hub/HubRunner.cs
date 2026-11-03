@@ -126,15 +126,16 @@ public sealed partial class HubRunner(
 
         state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, costPass?.Budget ?? state.Budget, PullRequestStatuses(views));
 
-        try
+        // Separate tries: a failed or slow instructions refresh must not skip the memory update for the pass.
+        var liveIds = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var post in new Func<Task>[] { () => PostInstructionsRefreshAsync(sessions, ct), () => PostMemoryUpdateAsync(liveIds, ct) })
         {
-            await PostInstructionsRefreshAsync(sessions, ct);
-            await PostMemoryUpdateAsync(sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal), ct);
-        }
-        catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
-                                  && (e is not OperationCanceledException || !ct.IsCancellationRequested))
-        {
-            lastError ??= $"controller update: {e.Message}";
+            try { await post(); }
+            catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
+                                      && (e is not OperationCanceledException || !ct.IsCancellationRequested))
+            {
+                lastError ??= $"controller update: {e.Message}";
+            }
         }
 
         if (costPass is not null)
