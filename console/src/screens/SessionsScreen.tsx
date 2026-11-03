@@ -477,7 +477,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
       return `${prLabel(u)} ${st.title ? `${st.title} ` : ""}(${st.draft ? "draft" : st.state}${health !== "none" ? `, ${HEALTH_LABEL[health].toLowerCase()}` : ""})`;
     }).join(", ");
     return (
-      <span className="pr-chip" title={tip} aria-label={`${s.pullRequests.length} pull request${s.pullRequests.length === 1 ? "" : "s"}`}>
+      <span className="pr-chip" role="group" title={tip} aria-label={`${s.pullRequests.length} pull request${s.pullRequests.length === 1 ? "" : "s"}`}>
         <PrStatusIcon statuses={statuses} />
         {stacked && <span className="pr-stack" role="img" aria-label="Stacked PR" title="Part of a stack">⇅</span>}
         {merging && <span className="pr-spinner" role="img" aria-label="Merging stack" title="A stack merge is running">⟳</span>}

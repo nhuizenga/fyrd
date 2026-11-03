@@ -78,6 +78,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 /* Shown after a short hover (the delay keeps them from flashing as the pointer crosses the list); instantly on keyboard focus. */
 .session-item:hover .session-item-actions { opacity: 1; visibility: visible; transition: opacity 0.12s 0.4s, visibility 0s linear 0.4s; }
 .session-item:focus-within .session-item-actions { opacity: 1; visibility: visible; transition: none; }
+@media (hover: none) { .session-item-actions { opacity: 1; visibility: visible; } }
 .adopt { display: flex; flex-direction: column; gap: 6px; }
 .details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 0.875rem; }
 .details dt { color: var(--a2-foreground-color-subdued); }
@@ -126,22 +127,14 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .msg-sending { opacity: 0.6; white-space: pre-wrap; }
 .rename-form { display: flex; flex-direction: column; gap: 6px; }
 .msg-progress-detail { margin: 0; padding: 6px 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--a2-font-family-mono, monospace); font-size: 0.85em; background: var(--a2-background-color-primary-subdued); border-radius: 4px; }
-.session-row-chips .chip-branch { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .pr-item { flex-direction: column; align-items: stretch; gap: 4px; }
 .pr-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pr-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .pr-line .pr-actions { flex: none; margin-left: auto; }
 .pr-badges { flex-wrap: wrap; }
-.pr-row-chip { display: inline-flex; align-items: center; gap: 3px; }
-.pr-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
-.pr-dot-failing { background: #d32f2f; }
-.pr-dot-pending { background: #f5a623; }
-.pr-dot-passing { background: #2e9e4f; }
-.pr-conflict { font-size: 12px; line-height: 1; color: #d32f2f; }
 .pr-also-on { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .pr-also-on-link { background: none; border: 0; padding: 0; cursor: pointer; font-size: 12px; color: var(--a2-foreground-color-link, #0b5fff); text-decoration: underline; }
-.pr-stack-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .pr-chain { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
 .pr-stack { font-size: 12px; line-height: 1; color: var(--a2-foreground-color-subdued); }
 .pr-job-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

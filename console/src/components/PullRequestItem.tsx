@@ -44,14 +44,13 @@ interface Props {
 }
 
 /** One pull request in the details pane: title line, status badges, actions and its own inline error. */
-
 export default function PullRequestItem({ url, status: st, actionsHidden, error, onReady, onMerge, alsoOn = [], onOpenSession, nudges = [], onNudge, notice, canMergeStack, onMergeStack, jobLine, jobFailed, onCancelJob }: Props) {
   const label = prLabel(url);
   const known = st && st.state !== "unknown";
   const title = known ? st.title : "";
   const checksShown = known && st.checks !== "none";
   return (
-    <li className="pr-item" id={st?.number ? `pr-item-${st.number}` : undefined}>
+    <li className="pr-item">
       <div className="pr-line">
         <Chip label={label} size="small" title={title ? `${label} ${title}` : url} />
         {title && <span className="pr-title" title={title}>{title}</span>}
