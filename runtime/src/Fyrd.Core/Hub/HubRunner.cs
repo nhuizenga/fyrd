@@ -280,6 +280,8 @@ public sealed partial class HubRunner(
                 return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
             CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
         {
+            Repos = Repos(s.Raw),
+            Branches = Branches(s.Raw),
             PullRequests = owned?.Urls ?? [],
             StackedPullRequests = owned?.Stacked ?? [],
         };
@@ -309,16 +311,31 @@ public sealed partial class HubRunner(
     private static DateTimeOffset? CreatedAt(JsonElement raw) =>
         Str(raw, "created_at") is { } v && DateTimeOffset.TryParse(v, out var at) ? at : null;
 
+    private static string RepoName(string url)
+    {
+        const string gh = "https://github.com/";
+        var repo = url.StartsWith(gh, StringComparison.OrdinalIgnoreCase) ? url[gh.Length..].TrimEnd('/') : url;
+        return repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase) ? repo[..^4] : repo;
+    }
+
+    /// <summary>Every attached repo, in source order, without duplicates.</summary>
+    private static IReadOnlyList<string> Repos(JsonElement raw)
+    {
+        var list = new List<string>();
+        if (raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var ctx)
+            && ctx.ValueKind == JsonValueKind.Object && ctx.TryGetProperty("sources", out var sources)
+            && sources.ValueKind == JsonValueKind.Array)
+            foreach (var src in sources.EnumerateArray())
+                if (Str(src, "url") is { Length: > 0 } url) list.Add(RepoName(url));
+        return list.Distinct(StringComparer.Ordinal).ToList();
+    }
+
     private static (string? Repo, string? Branch) RepoAndBranch(JsonElement raw)
     {
         var ctx = raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty("session_context", out var c) ? c : default;
         string? repo = null;
         if (First(ctx, "sources") is { } src && Str(src, "url") is { Length: > 0 } url)
-        {
-            const string gh = "https://github.com/";
-            repo = url.StartsWith(gh, StringComparison.OrdinalIgnoreCase) ? url[gh.Length..].TrimEnd('/') : url;
-            if (repo.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) repo = repo[..^4];
-        }
+            repo = RepoName(url);
         // The live branch comes first: builders' outcomes are empty, so it is usually the only source.
         var branch = LiveBranch(raw);
         if (branch is null && First(ctx, "outcomes") is { } outcome

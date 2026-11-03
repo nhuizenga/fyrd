@@ -19,6 +19,12 @@ public sealed record HubSessionView(
     /// </summary>
     public IReadOnlyList<string> PullRequests { get; init; } = [];
 
+    /// <summary>Every repository attached to the session (<c>Repo</c> is the first).</summary>
+    public IReadOnlyList<string> Repos { get; init; } = [];
+
+    /// <summary>Every branch the session is on or has pushed (<c>Branch</c> is the first live one).</summary>
+    public IReadOnlyList<string> Branches { get; init; } = [];
+
     /// <summary>The subset of <see cref="PullRequests"/> owned only through a stack.</summary>
     public IReadOnlyList<string> StackedPullRequests { get; init; } = [];
     /// <summary>Tag a peasant puts on itself while a background worker runs (see the persona's Workers section).</summary>

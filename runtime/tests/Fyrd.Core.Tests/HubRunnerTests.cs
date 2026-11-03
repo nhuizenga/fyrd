@@ -637,6 +637,22 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_SessionView_ListsEveryAttachedRepoAndBranch()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: """
+            {"session_context":{"sources":[{"url":"https://github.com/acme/widgets"},{"url":"https://github.com/acme/other.git"}]},
+             "external_metadata":{"current_branches":{"/a":"b1","/b":"b2"}}}
+            """));
+
+        await Make().PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal(["acme/widgets", "acme/other"], v.Repos);
+        Assert.Equal(["b1", "b2"], v.Branches);
+        Assert.Equal("acme/widgets", v.Repo);
+    }
+
+    [Fact]
     public async Task Poll_SessionView_OwnedPullRequestsAreThoseOnTheSessionsRepoAndBranch()
     {
         var gh = new StubGitHub();
