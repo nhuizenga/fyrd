@@ -19,6 +19,14 @@ public sealed class FakeCloudSessions : ICloudSessions
     /// <summary>Events returned per call; a smaller value forces multi-page listing.</summary>
     public int PageSize { get; set; } = 100;
 
+    /// <summary>Simulated network delay of each <see cref="ListEventsAsync"/> call.</summary>
+    public TimeSpan EventLatency { get; set; }
+
+    private int _listEventCalls, _inFlight, _maxInFlight;
+    public int ListEventCalls => _listEventCalls;
+    /// <summary>Highest number of <see cref="ListEventsAsync"/> calls that were running at the same time.</summary>
+    public int MaxConcurrentListEvents => _maxInFlight;
+
     public List<CreateSessionRequest> Created { get; } = [];
     public List<string?> EventAfterIds { get; } = [];
     public List<string> Interrupted { get; } = [];
@@ -63,8 +71,9 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     private void MaybeThrow()
     {
-        if (_next.Count == 0) return;
-        if (_next.Dequeue() is { } e) throw e;
+        Exception? e;
+        lock (_next) e = _next.Count == 0 ? null : _next.Dequeue();
+        if (e is not null) throw e;
     }
 
     public Task<CloudSession> CreateAsync(CreateSessionRequest request, CancellationToken ct = default)
@@ -100,8 +109,17 @@ public sealed class FakeCloudSessions : ICloudSessions
             BeforeNextListEvents = null;
             await hook();
         }
+        Interlocked.Increment(ref _listEventCalls);
+        var now = Interlocked.Increment(ref _inFlight);
+        int seen;
+        while ((seen = _maxInFlight) < now && Interlocked.CompareExchange(ref _maxInFlight, now, seen) != seen) { }
+        try
+        {
+            if (EventLatency > TimeSpan.Zero) await Task.Delay(EventLatency, ct);
+        }
+        finally { Interlocked.Decrement(ref _inFlight); }
         MaybeThrow();
-        EventAfterIds.Add(afterId);
+        lock (EventAfterIds) EventAfterIds.Add(afterId);
         var all = _events.TryGetValue(sessionId, out var l) ? l : [];
         var start = 0;
         if (afterId is not null)

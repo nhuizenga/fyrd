@@ -21,6 +21,8 @@ public sealed partial class HubRunner(
     private const string RequiresAction = "requires_action";
     private const int RecentEvents = 200;
     private const int PageLimit = 100;
+    /// <summary>History reads in flight at once; the first pass after a start reads every session's whole history.</summary>
+    private const int FetchConcurrency = 8;
 
     /// <summary>In-memory per-session tail used for question scanning; rebuilt from the start after a restart.</summary>
     private sealed class Window
@@ -84,12 +86,23 @@ public sealed partial class HubRunner(
                 questions.AddRange(previousQuestions[cid]);
             }
         }
+
+        // Nothing to show yet (first pass after a start): publish the bare list now, so the console does not wait for
+        // every session's history to be read. Later passes keep showing the previous views until they finish.
+        if (previousViews.Count == 0 && sessions.Count > 0)
+            state.Publish(sessions.Select(s => View(s, null)).ToList(), [], null, state.Budget);
+
+        // The reads are the slow part and independent, so they overlap; everything that touches shared state stays sequential.
+        using var fetchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var fetches = StartFetches(sessions, fetchCts.Token);
+        try
+        {
         foreach (var s in sessions)
         {
             ct.ThrowIfCancellationRequested();
             try
             {
-                var w = await PollSessionAsync(s, ct);
+                var w = await PollSessionAsync(s, fetches[s.Id], ct);
                 var owned = ownedPrs is null ? OwnedSet.Empty : await ownedPrs.FindOwnedAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
                 views.Add(View(s, w.LastActivity, owned));
                 // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
@@ -105,6 +118,13 @@ public sealed partial class HubRunner(
                 views.Add(previousViews.TryGetValue(s.Id, out var old) ? old : View(s, null));
                 questions.AddRange(previousQuestions[s.Id]);
             }
+        }
+        }
+        finally
+        {
+            // An aborted pass (sign-out, shutdown) must not leave reads running or their failures unobserved.
+            fetchCts.Cancel();
+            foreach (var t in fetches.Values) _ = t.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
 
         Prune(sessions.Select(s => s.Id).Concat(failed).ToHashSet(StringComparer.Ordinal));
@@ -157,11 +177,30 @@ public sealed partial class HubRunner(
         state.LastPollAt = time.GetUtcNow();
     }
 
-    private async Task<Window> PollSessionAsync(CloudSession s, CancellationToken ct)
+    /// <summary>Starts every session's event read, at most <see cref="FetchConcurrency"/> at a time.</summary>
+    private Dictionary<string, Task<List<SessionEvent>>> StartFetches(IEnumerable<CloudSession> sessions, CancellationToken ct)
+    {
+        var gate = new SemaphoreSlim(FetchConcurrency);
+        var tasks = new Dictionary<string, Task<List<SessionEvent>>>(StringComparer.Ordinal);
+        foreach (var s in sessions)
+        {
+            var after = _windows.TryGetValue(s.Id, out var w) ? w.After : null;
+            var id = s.Id;
+            tasks[id] = Task.Run(async () =>
+            {
+                await gate.WaitAsync(ct);
+                try { return await FetchAfterAsync(id, after, ct); }
+                finally { gate.Release(); }
+            }, ct);
+        }
+        return tasks;
+    }
+
+    private async Task<Window> PollSessionAsync(CloudSession s, Task<List<SessionEvent>> fetch, CancellationToken ct)
     {
         _windows.TryGetValue(s.Id, out var w);
         var firstSight = w is null;
-        var fetched = await FetchAfterAsync(s.Id, w?.After, ct);
+        var fetched = await fetch;
 
         // Memory capture follows the persisted cursor. After a restart the window starts over from the beginning,
         // so skip everything up to the stored cursor; if that event is gone, capture nothing rather than duplicate.
