@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the Controller account skills under <c>skills/controller</c>.</summary>
 public sealed class HubSkillsTests
 {
-    private static readonly string[] Names = ["fyrd-build", "fyrd-peasant", "fyrd-research", "fyrd-watch"];
+    private static readonly string[] Names = ["fyrd-build", "fyrd-investigate", "fyrd-peasant", "fyrd-research", "fyrd-watch"];
 
     private static string SkillsDir()
     {
@@ -20,7 +20,7 @@ public sealed class HubSkillsTests
     private static string Read(string name) => File.ReadAllText(Path.Combine(SkillsDir(), name, "SKILL.md"));
 
     [Fact]
-    public void FourSkillsExist()
+    public void AllSkillsExist()
     {
         foreach (var n in Names)
         {
@@ -117,6 +117,24 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
+    public void Investigate_StartsAReadOnlyInvestigator_OnlyForTheOwner()
+    {
+        var text = Read("fyrd-investigate");
+        Assert.Contains("fyrd-role-investigator", text, StringComparison.Ordinal);
+        Assert.Contains("<peasant-persona id=\"investigator\" …>", text, StringComparison.Ordinal);
+        Assert.Contains("Never start an Investigator because a peasant asked", text, StringComparison.Ordinal);
+        Assert.Contains("post nothing anywhere", text, StringComparison.Ordinal);
+        Assert.Contains("publish your findings as a claude.ai artifact", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("fyrd-build")]
+    [InlineData("fyrd-peasant")]
+    [InlineData("fyrd-watch")]
+    public void BuilderValidatorAndMonitorStarts_CarryTheInvestigatorPersona(string name) =>
+        Assert.Contains("<subagent-persona id=\"investigator\">", Read(name), StringComparison.Ordinal);
+
+    [Fact]
     public void Research_GivesTheResearcherTheReviewerPersona()
     {
         Assert.Contains("<subagent-persona id=\"reviewer\">", Read("fyrd-research"), StringComparison.Ordinal);
@@ -142,7 +160,7 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void HubSkills_LoadsAllFour_InNameOrder_WithDescriptions()
+    public void HubSkills_LoadsAll_InNameOrder_WithDescriptions()
     {
         var skills = new Fyrd.Core.Hub.HubSkills(SkillsDir()).List();
         Assert.Equal(Names, skills.Select(s => s.Name));

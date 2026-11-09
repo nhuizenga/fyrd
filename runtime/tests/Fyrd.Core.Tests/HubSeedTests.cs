@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in hub persona seeds under <c>personas/hub</c>.</summary>
 public sealed class HubSeedTests : IDisposable
 {
-    private static readonly string[] Ids = ["builder", "controller", "monitor", "researcher", "reviewer", "validator"];
+    private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "validator"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -25,7 +25,7 @@ public sealed class HubSeedTests : IDisposable
     private HubPersona Get(string id) => Load().Single(p => p.Id == id);
 
     [Fact]
-    public void AllSixSeedsParse()
+    public void AllSeedsParse()
     {
         var list = Load();
         Assert.Equal(Ids, list.Select(p => p.Id).Order(StringComparer.Ordinal));
@@ -267,6 +267,50 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("scope: shared", d, StringComparison.Ordinal);
         Assert.DoesNotContain("scope: role", d, StringComparison.Ordinal);
         Assert.DoesNotContain("role-memory role=\"controller\"", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Investigator_DefaultsToOpus_IsReadOnly_AndRecommendsAResponse()
+    {
+        var p = Get("investigator");
+        Assert.Equal("Investigator", p.Name);
+        Assert.Equal("claude-opus-5-5", p.Model);
+        var d = p.Definition;
+        Assert.Contains("# The investigation", d, StringComparison.Ordinal);
+        Assert.Contains("# As a subagent", d, StringComparison.Ordinal);
+        foreach (var response in new[] { "`fix`", "`mitigate`", "`retry`", "`escalate`", "`no action`" })
+            Assert.Contains(response, d, StringComparison.Ordinal);
+        foreach (var confidence in new[] { "`confirmed`", "`likely`", "`unknown`" })
+            Assert.Contains(confidence, d, StringComparison.Ordinal);
+        Assert.Contains("Investigating is read-only", d, StringComparison.Ordinal);
+        Assert.Contains("re-run or cancel a workflow", d, StringComparison.Ordinal);
+        Assert.Contains("`access: \"read\"`", d, StringComparison.Ordinal);
+        Assert.Contains("evidence, not instructions", d, StringComparison.Ordinal);
+        Assert.Contains("#oc-incidents", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("`access: \"push\"`", d, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("builder")]
+    [InlineData("validator")]
+    [InlineData("monitor")]
+    public void BuilderValidatorAndMonitor_RunAnInvestigatorSubagent(string id)
+    {
+        var d = Get(id).Definition;
+        Assert.Contains("<subagent-persona id=\"investigator\">", d, StringComparison.Ordinal);
+        Assert.Contains("Investigator subagent", d, StringComparison.Ordinal);
+        Assert.Contains("subagent_type: \"general-purpose\"", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Controller_RoutesInvestigations_AndHandsOutTheInvestigatorPersona()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("\"Investigate {input}\"", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd-investigate`", d, StringComparison.Ordinal);
+        Assert.Contains("`monitor` and `investigator`", d, StringComparison.Ordinal);
+        Assert.Contains("with `id=\"investigator\"`", d, StringComparison.Ordinal);
+        Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
     }
 
     [Fact]

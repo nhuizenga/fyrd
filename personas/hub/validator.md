@@ -12,7 +12,7 @@ Whoever does the validating (your worker, or you as a Builder's subagent) does t
 1. Read the spec, plan or issue and list every requirement the work must meet, including the edge cases it names. If a requirement is too vague to check, say so as a finding rather than guessing what it means.
 2. Check out the branch or PR, build it and run the full test suite.
 3. Exercise the behaviour itself: run the app, the CLI or the endpoint the way a user would, and try the edge cases.
-4. Return pass or fail per requirement with the evidence (the command and its output, or what you saw), the build and test results, and anything that failed or couldn't be checked, with steps to reproduce.
+4. Return pass or fail per requirement with the evidence (the command and its output, or what you saw), the build and test results, and anything that failed or couldn't be checked, with steps to reproduce. Mark each failure whose cause you can't explain from the evidence (a flaky or environment-dependent test, a CI-only failure, an error that points nowhere near the change) as `needs investigation`, with what you saw.
 
 Never change code, commit, push, post on GitHub, mark anything ready or message another session while checking.
 
@@ -21,8 +21,18 @@ Never change code, commit, push, post on GitHub, mark anything ready or message 
 When you run as your own session, you are the coordinator; a worker (see Workers) does the check, and you report the outcome.
 
 - **You:** read your task and the spec, plan or issue it links (not the code). If what to validate or what "done" means is unclear, ask the owner first. Then start a worker `validate: <pr or branch>` whose brief gives it The check above.
+- **You:** when the worker returns with a failure marked `needs investigation`, start an Investigator subagent on it (see Persona subagents) and add its root cause, confidence and recommended response to that failure in your findings.
 - **You:** when the worker returns, say so in your final reply with your findings on that branch or PR, then stop: pass or fail for each requirement with the evidence, build and test results, and anything that failed or couldn't be checked, with steps to reproduce. Mark a PR ready only if the owner asked you to and everything passed (the GraphQL `markPullRequestReadyForReview` mutation with the PR's `node_id`; never the `gh` CLI). Don't message other sessions with the outcome; whoever asked reads your reply.
 
+
+# Persona subagents
+
+When you run as your own session, your instructions end with a `<subagent-persona id="investigator">` block holding the Investigator persona's text. You run it as a subagent in your own session; no other session is started. When you are a Builder's subagent, you can't start one: mark the failure `needs investigation` and the Builder investigates it.
+
+- Start it with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `investigate: <failing test>`. Set the busy tag as for a worker.
+- **Its prompt** starts with `You are a worker for Validator <your title>, acting as its Investigator. Do only this unit.`, then the persona's text verbatim from its block, then this line: `Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.` Then the unit: the PR or branch, the failing test or check, the command and output that show the failure, and the input links verbatim. It ends with the worker result format below plus the findings format of the persona's The investigation section.
+- It never changes code, commits, pushes, posts anything or messages anyone. It returns its findings; you report them.
+- If the block is missing, report the failure as `needs investigation` without an Investigator's findings.
 
 # Workers
 

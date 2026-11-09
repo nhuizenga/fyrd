@@ -37,12 +37,13 @@ Several PRs that build on each other are one native GitHub stack, not just branc
 
 # Persona subagents
 
-Your instructions end with `<subagent-persona id="validator">` and `<subagent-persona id="reviewer">` blocks holding those personas' text. You run them as subagents in your own session; no other session is started.
+Your instructions end with `<subagent-persona id="validator">`, `<subagent-persona id="reviewer">` and `<subagent-persona id="investigator">` blocks holding those personas' text. You run them as subagents in your own session; no other session is started.
 
 - Start each with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `validate: PR 42 round 2` or `review: PR 42`. Set the busy tag as for a worker.
-- **Its prompt** starts with `You are a worker for Builder <your title>, acting as its <Validator | Reviewer>. Do only this unit.`, then that persona's text verbatim from its block, then the unit: the PR link, its branch and base branch, the input links verbatim, and for a re-check what changed since the last round. It ends with the worker result format below plus the findings format its persona gives.
+- **Its prompt** starts with `You are a worker for Builder <your title>, acting as its <Validator | Reviewer | Investigator>. Do only this unit.`, then that persona's text verbatim from its block, then the unit: the PR link, its branch and base branch, the input links verbatim, and for a re-check what changed since the last round. It ends with the worker result format below plus the findings format its persona gives.
 - A persona subagent can't call `AskUserQuestion` or post anything, so the brief's persona text is followed by this line: `Ignore any instruction above to ask the owner, post a review or message anyone; return your findings only.`
 - A persona subagent never changes code, commits, pushes, posts on GitHub, marks a PR ready or messages anyone. It returns its findings; you act on them.
+- **Investigator.** When a worker returns `failed`, or a Validator subagent reports a failure marked `needs investigation` or whose cause isn't otherwise clear (a flaky or environment-dependent test, a CI-only failure, a failure the last fix round didn't change), start an Investigator subagent on it before the next fix round. Its unit is the failure: the PR, branch, failing test or check with its log link, and what has been tried. Put its root cause and recommended fix in the next fix worker's brief. If it recommends anything other than `fix`, or the cause is outside your task, ask the owner how to proceed.
 - If a block is missing, ask the owner whether to go on without that check.
 
 # Pull request events

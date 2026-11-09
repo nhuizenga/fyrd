@@ -1,6 +1,6 @@
 # Controller skills
 
-Four skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build`, `fyrd-peasant`, `fyrd-watch`. Each description starts with `Fyrd Controller only:`. The rules live in `personas/hub/controller.md`; each skill gives the tool-call steps for one request type.
+Five skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build`, `fyrd-investigate`, `fyrd-peasant`, `fyrd-watch`. Each description starts with `Fyrd Controller only:`. The rules live in `personas/hub/controller.md`; each skill gives the tool-call steps for one request type.
 
 ## Delivery (automatic)
 

@@ -1,6 +1,6 @@
 ---
 name: fyrd-peasant
-description: "Fyrd Controller only: use when the Fyrd Controller is asked to start a new builder, reviewer, validator or other peasant, to recycle one, or to tear one down. Never use this outside the Fyrd Controller session."
+description: "Fyrd Controller only: use when the Fyrd Controller is asked to start a new builder, reviewer, validator, investigator or other peasant, to recycle one, or to tear one down. Never use this outside the Fyrd Controller session."
 ---
 
 # fyrd-peasant
@@ -11,7 +11,7 @@ The Lead role is not defined. For "Start a new lead…", reply "The Lead role is
 
 ## Start (or recycle) a peasant
 
-Request: "Start a new builder/reviewer/validator [suffix]". The task is `Wait for your task.`
+Request: "Start a new builder/reviewer/validator/investigator [suffix]". The task is `Wait for your task.`
 
 Decide first, ask second, change last: nothing is archived and no trigger is deleted until the session-cap check has passed and you know which sessions are actually being started.
 
@@ -33,7 +33,7 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `environment_id`: from `<hub-settings>` (omit when empty).
    - `permission_mode`: `"auto"`.
    - `model`: the `model` attribute of that role's `<peasant-persona>`.
-   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`; then for a Builder a blank line, `<subagent-persona id="validator">…</subagent-persona>` and `<subagent-persona id="reviewer">…</subagent-persona>` with those personas' text, and for a Researcher only the reviewer one.
+   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`; then for a Builder a blank line, `<subagent-persona id="validator">…</subagent-persona>`, `<subagent-persona id="reviewer">…</subagent-persona>` and `<subagent-persona id="investigator">…</subagent-persona>` with those personas' text, for a Researcher only the reviewer one, and for a Validator or a Monitor only the investigator one.
    - `prompt`: `Wait for your task.`
    - `source_url`: from step 4 (omit only for `No repo`).
 8. Reply with the title and session id, and stop.
@@ -42,7 +42,7 @@ A later task for a running peasant goes in `mcp__claude-code-remote__send_messag
 
 ## Owner asks for a validation or review
 
-Builders validate and review their own pull requests, and Researchers review their own plans, with persona subagents. Never start a Validator or Reviewer because a peasant asked, and never relay findings between peasants. This section covers only the owner's own requests: "Validate PR <url>", `PR #{n} is ready` (or `PR #{n} is ready: <url>`), "Review PR <url>" and "Review this plan".
+Builders validate and review their own pull requests, and Researchers review their own plans, with persona subagents. Never start a Validator or Reviewer because a peasant asked, and never relay findings between peasants. The same goes for Investigators: Builders, Validators and Monitors run Investigator subagents themselves, and an owner's "Investigate …" request goes to `fyrd-investigate`. This section covers only the owner's own requests: "Validate PR <url>", `PR #{n} is ready` (or `PR #{n} is ready: <url>`), "Review PR <url>" and "Review this plan".
 
 The console sends a validation as `Validate PR <url>. Base branch: <base>. Builder: <title> (<id>).` Any of those lines may be missing, and the PR is then all you have:
 - **No `Builder:` line.** Look the Builder up by branch: read the PR's head branch, then find the live session with role `builder` whose branch equals it (`list_sessions`, then `get_session`). If there is none, there is no Builder.
