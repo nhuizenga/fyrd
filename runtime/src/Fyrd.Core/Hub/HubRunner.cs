@@ -23,6 +23,12 @@ public sealed partial class HubRunner(
     private const int PageLimit = 100;
     /// <summary>History reads in flight at once; the first pass after a start reads every session's whole history.</summary>
     private const int FetchConcurrency = 8;
+    /// <summary>Sessions whose reads may be started ahead of the one being processed (bounds buffered history).</summary>
+    private const int ReadAhead = 16;
+    /// <summary>Repos listed on GitHub at once.</summary>
+    private const int OwnedConcurrency = 4;
+    /// <summary>On the first pass, sessions processed between progressive publishes.</summary>
+    private const int PublishEvery = 10;
 
     /// <summary>In-memory per-session tail used for question scanning; rebuilt from the start after a restart.</summary>
     private sealed class Window
@@ -89,42 +95,58 @@ public sealed partial class HubRunner(
 
         // Nothing to show yet (first pass after a start): publish the bare list now, so the console does not wait for
         // every session's history to be read. Later passes keep showing the previous views until they finish.
-        if (previousViews.Count == 0 && sessions.Count > 0)
+        var firstPass = previousViews.Count == 0 && sessions.Count > 0;
+        if (firstPass)
             state.Publish(sessions.Select(s => View(s, null)).ToList(), [], null, state.Budget);
 
         // The reads are the slow part and independent, so they overlap; everything that touches shared state stays sequential.
         using var fetchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var fetches = StartFetches(sessions, fetchCts.Token);
+        var fetches = new Fetches(this, sessions, fetchCts.Token);
+        var ownedWarm = WarmOwned(sessions, fetchCts.Token);
         try
         {
-        foreach (var s in sessions)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
+            for (var i = 0; i < sessions.Count; i++)
             {
-                var w = await PollSessionAsync(s, fetches[s.Id], ct);
-                var owned = ownedPrs is null ? OwnedSet.Empty : await ownedPrs.FindOwnedAsync(RepoAndBranch(s.Raw).Repo, Branches(s.Raw), ct);
-                views.Add(View(s, w.LastActivity, owned));
-                // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
-                // waiting on the owner has a live question.
-                if (s.SessionStatus == RequiresAction)
-                    questions.AddRange(PendingQuestions.Find(s.Id, Title(s), w.Recent));
+                var s = sessions[i];
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var w = await PollSessionAsync(s, fetches.Take(s), ct);
+                    var (repo, _) = RepoAndBranch(s.Raw);
+                    var owned = OwnedSet.Empty;
+                    if (ownedPrs is not null)
+                    {
+                        // The repo's listing is fetched once, up front and concurrently; wait for it so it is not fetched twice.
+                        if (repo is not null && ownedWarm.TryGetValue(repo, out var warm)) await warm;
+                        owned = await ownedPrs.FindOwnedAsync(repo, Branches(s.Raw), ct);
+                    }
+                    views.Add(View(s, w.LastActivity, owned));
+                    // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
+                    // waiting on the owner has a live question.
+                    if (s.SessionStatus == RequiresAction)
+                        questions.AddRange(PendingQuestions.Find(s.Id, Title(s), w.Recent));
+                }
+                catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
+                                          && (e is not OperationCanceledException || !ct.IsCancellationRequested))
+                {
+                    lastError ??= $"{s.Id}: {e.Message}";
+                    failed.Add(s.Id);
+                    views.Add(previousViews.TryGetValue(s.Id, out var old) ? old : View(s, null));
+                    questions.AddRange(previousQuestions[s.Id]);
+                }
+
+                // First pass only: let rows fill in as they are read instead of all at the end.
+                if (firstPass && (i + 1) % PublishEvery == 0 && i + 1 < sessions.Count)
+                    state.Publish(views.Concat(sessions.Skip(i + 1).Select(r => View(r, null))).ToList(),
+                        questions.OrderBy(q => q.AskedAt).ToList(), null, state.Budget);
             }
-            catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
-                                      && (e is not OperationCanceledException || !ct.IsCancellationRequested))
-            {
-                lastError ??= $"{s.Id}: {e.Message}";
-                failed.Add(s.Id);
-                views.Add(previousViews.TryGetValue(s.Id, out var old) ? old : View(s, null));
-                questions.AddRange(previousQuestions[s.Id]);
-            }
-        }
         }
         finally
         {
             // An aborted pass (sign-out, shutdown) must not leave reads running or their failures unobserved.
             fetchCts.Cancel();
-            foreach (var t in fetches.Values) _ = t.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            fetches.Observe();
+            foreach (var t in ownedWarm.Values) _ = t.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
         }
 
         Prune(sessions.Select(s => s.Id).Concat(failed).ToHashSet(StringComparer.Ordinal));
@@ -177,23 +199,82 @@ public sealed partial class HubRunner(
         state.LastPollAt = time.GetUtcNow();
     }
 
-    /// <summary>Starts every session's event read, at most <see cref="FetchConcurrency"/> at a time.</summary>
-    private Dictionary<string, Task<List<SessionEvent>>> StartFetches(IEnumerable<CloudSession> sessions, CancellationToken ct)
+    /// <summary>
+    /// Lists each distinct repo's pull requests once, concurrently, so the sequential loop only waits on a repo's own listing
+    /// (which <see cref="OwnedPullRequests"/> then caches) instead of paying one GitHub round trip per repo in turn.
+    /// A failure here is left for the loop's own call to hit and report.
+    /// </summary>
+    private Dictionary<string, Task> WarmOwned(IReadOnlyList<CloudSession> sessions, CancellationToken ct)
     {
-        var gate = new SemaphoreSlim(FetchConcurrency);
-        var tasks = new Dictionary<string, Task<List<SessionEvent>>>(StringComparer.Ordinal);
+        var warm = new Dictionary<string, Task>(StringComparer.OrdinalIgnoreCase);
+        if (ownedPrs is null) return warm;
+        var gate = new SemaphoreSlim(OwnedConcurrency);
         foreach (var s in sessions)
         {
-            var after = _windows.TryGetValue(s.Id, out var w) ? w.After : null;
-            var id = s.Id;
-            tasks[id] = Task.Run(async () =>
+            var (repo, _) = RepoAndBranch(s.Raw);
+            if (repo is null || warm.ContainsKey(repo)) continue;
+            var branches = Branches(s.Raw);
+            warm[repo] = Task.Run(async () =>
             {
                 await gate.WaitAsync(ct);
-                try { return await FetchAfterAsync(id, after, ct); }
+                try { await ownedPrs.FindOwnedAsync(repo, branches, ct); }
+                catch (Exception) when (!ct.IsCancellationRequested) { }
                 finally { gate.Release(); }
             }, ct);
         }
-        return tasks;
+        return warm;
+    }
+
+    /// <summary>
+    /// The sessions' event reads: at most <see cref="FetchConcurrency"/> in flight and at most <see cref="ReadAhead"/>
+    /// sessions ahead of the one being processed, so a long list does not buffer every history at once. A result is
+    /// released once taken.
+    /// </summary>
+    private sealed class Fetches
+    {
+        private readonly HubRunner _runner;
+        private readonly IReadOnlyList<CloudSession> _sessions;
+        private readonly CancellationToken _ct;
+        private readonly SemaphoreSlim _gate = new(FetchConcurrency);
+        private readonly Dictionary<string, Task<List<SessionEvent>>> _tasks = new(StringComparer.Ordinal);
+        private int _started;
+        private int _taken;
+
+        public Fetches(HubRunner runner, IReadOnlyList<CloudSession> sessions, CancellationToken ct)
+        {
+            (_runner, _sessions, _ct) = (runner, sessions, ct);
+            Pump(0);
+        }
+
+        private void Pump(int consumed)
+        {
+            while (_started < _sessions.Count && _started < consumed + ReadAhead)
+            {
+                var id = _sessions[_started++].Id;
+                if (_tasks.ContainsKey(id)) continue; // a duplicate id shares the first read
+                var after = _runner._windows.TryGetValue(id, out var w) ? w.After : null;
+                _tasks.Add(id, Task.Run(async () =>
+                {
+                    await _gate.WaitAsync(_ct);
+                    try { return await _runner.FetchAfterAsync(id, after, _ct); }
+                    finally { _gate.Release(); }
+                }, _ct));
+            }
+        }
+
+        public Task<List<SessionEvent>> Take(CloudSession s)
+        {
+            Pump(++_taken);
+            if (_tasks.Remove(s.Id, out var t)) return t;
+            // Only a duplicate id gets here: its first read was already taken.
+            return _runner.FetchAfterAsync(s.Id, _runner._windows.TryGetValue(s.Id, out var w) ? w.After : null, _ct);
+        }
+
+        /// <summary>Marks every read still held as observed, so an abandoned one never raises an unobserved fault.</summary>
+        public void Observe()
+        {
+            foreach (var t in _tasks.Values) _ = t.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        }
     }
 
     private async Task<Window> PollSessionAsync(CloudSession s, Task<List<SessionEvent>> fetch, CancellationToken ct)
