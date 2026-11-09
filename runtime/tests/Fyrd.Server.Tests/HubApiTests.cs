@@ -965,6 +965,134 @@ public class HubApiTests
         Assert.Equal("Mango", Assert.Single(f.Cloud.Answered).Answers["Pick a fruit"]);
     }
 
+    private static async Task<string> UploadAsync(HttpClient c, string name = "notes.txt", string content = "hello file", string mime = "text/plain")
+    {
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(content));
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mime);
+        form.Add(part, "file", name);
+        var r = await c.PostAsync("/api/hub/uploads", form);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        return (await r.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetString()!;
+    }
+
+    [Fact]
+    public async Task Upload_StoresFileAndReturnsItsId()
+    {
+        using var f = new FyrdFactory();
+        using var form = new MultipartFormDataContent();
+        form.Add(new ByteArrayContent([1, 2, 3]), "file", "a.bin");
+        var r = await f.CreateClient().PostAsync("/api/hub/uploads", form);
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var j = await r.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("file_1", j.GetProperty("id").GetString());
+        Assert.Equal("a.bin", j.GetProperty("name").GetString());
+        Assert.Equal(3, j.GetProperty("size").GetInt64());
+        Assert.Equal(("a.bin", 3L), (f.Files.Uploads.Single().Name, f.Files.Uploads.Single().Length));
+    }
+
+    [Fact]
+    public async Task Upload_BadRequests()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsJsonAsync("/api/hub/uploads", new { })).StatusCode);
+        using var none = new MultipartFormDataContent { { new StringContent("x"), "other" } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsync("/api/hub/uploads", none)).StatusCode);
+        using var empty = new MultipartFormDataContent { { new ByteArrayContent([]), "file", "e.txt" } };
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PostAsync("/api/hub/uploads", empty)).StatusCode);
+        Assert.Empty(f.Files.Uploads);
+    }
+
+    [Fact]
+    public async Task Upload_Over25Mb_413_NothingUploaded()
+    {
+        using var f = new FyrdFactory();
+        using var big = new MultipartFormDataContent { { new ByteArrayContent(new byte[25 * 1024 * 1024 + 1]), "file", "big.bin" } };
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await f.CreateClient().PostAsync("/api/hub/uploads", big)).StatusCode);
+        Assert.Empty(f.Files.Uploads);
+    }
+
+    [Fact]
+    public async Task Upload_FilesApiRejectsCredentials_502()
+    {
+        using var f = new FyrdFactory();
+        f.Files.Fail = new CloudSessionAuthException(401);
+        using var form = new MultipartFormDataContent { { new ByteArrayContent([1]), "file", "a.txt" } };
+        Assert.Equal(HttpStatusCode.BadGateway, (await f.CreateClient().PostAsync("/api/hub/uploads", form)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Message_WithFiles_AppendsDownloadInstructions_AndConsumesIds()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c);
+        var r = await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "see attached", fileIds = new[] { id } });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        var text = Assert.Single(f.Owner.Sent).Text;
+        Assert.StartsWith("see attached\n\n", text);
+        Assert.Contains("https://api.anthropic.com/v1/files/<file id>/content", text);
+        Assert.Contains($"notes.txt (text/plain, 10 bytes): file id {id}", text);
+        Assert.DoesNotContain("Bearer", text);
+        // The id was consumed: sending it again is refused.
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "again", fileIds = new[] { id } })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Message_OnlyFiles_NoText_Sends()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "", fileIds = new[] { id } })).StatusCode);
+        Assert.StartsWith("The owner attached a file", Assert.Single(f.Owner.Sent).Text);
+    }
+
+    [Fact]
+    public async Task Message_UnknownOrTooManyFileIds_400_NothingSent()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "x", fileIds = new[] { "file_made_up" } })).StatusCode);
+        var many = Enumerable.Range(0, 11).Select(i => $"file_{i}").ToArray();
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "x", fileIds = many })).StatusCode);
+        Assert.Empty(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Answer_FreeTextWithFiles_AppendsDownloadInstructions()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c, "photo.png", "png", "image/png");
+        var r = await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { text = "None of those, see file", fileIds = new[] { id } });
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        var answer = Assert.Single(f.Cloud.Answered).Answers["Pick a fruit"];
+        Assert.StartsWith("None of those, see file\n\n", answer);
+        Assert.Contains($"photo.png (image/png, 3 bytes): file id {id}", answer);
+    }
+
+    [Fact]
+    public async Task Answer_ChoiceWithFiles_400()
+    {
+        using var f = new FyrdFactory();
+        Seed(f, withQuestion: true);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { choice = "Banana", fileIds = new[] { id } })).StatusCode);
+        Assert.Empty(f.Cloud.Answered);
+    }
+
     [Fact]
     public async Task Answer_NotPending_409()
     {

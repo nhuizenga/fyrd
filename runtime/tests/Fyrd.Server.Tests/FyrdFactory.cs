@@ -21,6 +21,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
 
     public FakeOwnerMessages Owner { get; } = new();
 
+    public FakeFiles Files { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting("Fyrd:Home", Home.Paths.Root);
@@ -35,6 +37,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
             s.AddSingleton<IGitHub>(GitHub);
             s.RemoveAll<IOwnerMessages>();
             s.AddSingleton<IOwnerMessages>(Owner);
+            s.RemoveAll<IFiles>();
+            s.AddSingleton<IFiles>(Files);
         });
     }
 
