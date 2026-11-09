@@ -1034,7 +1034,8 @@ public class HubApiTests
         var text = Assert.Single(f.Owner.Sent).Text;
         Assert.StartsWith("see attached\n\n", text);
         Assert.Contains("https://api.anthropic.com/v1/files/<file id>/content", text);
-        Assert.Contains($"notes.txt (text/plain, 10 bytes): file id {id}", text);
+        Assert.Contains("anthropic-beta: oauth-2025-04-20", text);
+        Assert.Contains($"\"notes.txt\" (text/plain, 10 bytes): file id {id}", text);
         Assert.DoesNotContain("Bearer", text);
         // The id was consumed: sending it again is refused.
         Assert.Equal(HttpStatusCode.BadRequest,
@@ -1078,7 +1079,117 @@ public class HubApiTests
         Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
         var answer = Assert.Single(f.Cloud.Answered).Answers["Pick a fruit"];
         Assert.StartsWith("None of those, see file\n\n", answer);
-        Assert.Contains($"photo.png (image/png, 3 bytes): file id {id}", answer);
+        Assert.Contains($"\"photo.png\" (image/png, 3 bytes): file id {id}", answer);
+    }
+
+    [Fact]
+    public async Task Upload_Over26MbBody_413_NothingUploaded()
+    {
+        using var f = new FyrdFactory();
+        using var big = new MultipartFormDataContent { { new ByteArrayContent(new byte[30 * 1024 * 1024]), "file", "huge.bin" } };
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await f.CreateClient().PostAsync("/api/hub/uploads", big)).StatusCode);
+        Assert.Empty(f.Files.Uploads);
+    }
+
+    [Fact]
+    public async Task Upload_TooManyOutstandingFiles_429_NothingMoreUploaded()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        for (var i = 0; i < UploadStore.MaxOutstandingFiles; i++) await UploadAsync(c, $"f{i}.txt");
+        using var form = new MultipartFormDataContent { { new ByteArrayContent([1]), "file", "one-more.txt" } };
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await c.PostAsync("/api/hub/uploads", form)).StatusCode);
+        Assert.Equal(UploadStore.MaxOutstandingFiles, f.Files.Uploads.Count);
+    }
+
+    [Fact]
+    public async Task Message_NullOrBlankFileIds_400_Not500()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        foreach (var body in new[] { "{\"text\":\"x\",\"fileIds\":[null]}", "{\"text\":\"x\",\"fileIds\":[\"\"]}", "{\"text\":\"x\",\"fileIds\":[\"  \"]}" })
+        {
+            var r = await c.PostAsync($"/api/hub/sessions/{SessionId}/message", new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        }
+        Assert.Empty(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Message_HugeFileIdArray_400_BeforeAnyLookup()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var many = Enumerable.Repeat("file_1", 5000).ToArray();
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "x", fileIds = many })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Message_SendFails_FilesAreHandedBack_AndRetrySucceeds()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c);
+        f.Owner.Fail = new Fyrd.Core.CloudSessions.OwnerMessageException("cli failed");
+        var url = $"/api/hub/sessions/{SessionId}/message";
+        Assert.Equal(HttpStatusCode.BadGateway, (await c.PostAsJsonAsync(url, new { text = "x", fileIds = new[] { id } })).StatusCode);
+        f.Owner.Fail = null;
+        Assert.Equal(HttpStatusCode.NoContent, (await c.PostAsJsonAsync(url, new { text = "x", fileIds = new[] { id } })).StatusCode);
+        Assert.Single(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Message_ConcurrentSendsOfTheSameFile_OnlyOneWins()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c);
+        var url = $"/api/hub/sessions/{SessionId}/message";
+        var results = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => c.PostAsJsonAsync(url, new { text = "x", fileIds = new[] { id } })));
+        Assert.Equal(1, results.Count(r => r.StatusCode == HttpStatusCode.NoContent));
+        Assert.Equal(5, results.Count(r => r.StatusCode == HttpStatusCode.BadRequest));
+        Assert.Single(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Message_TextPlusFileNotesTooLong_400()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var c = f.CreateClient();
+        var id = await UploadAsync(c);
+        var r = await c.PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = new string('x', 19_900), fileIds = new[] { id } });
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+        Assert.Empty(f.Owner.Sent);
+    }
+
+    [Fact]
+    public async Task Answer_TwoQuestionRequest_FilesAreConsumedWhenRecorded_AndRestoredOnFailedSend()
+    {
+        using var f = new FyrdFactory();
+        var state = f.Services.GetRequiredService<HubState>();
+        state.Publish([View()], [Sibling("q1", "Pick a fruit"), Sibling("q2", "Pick a colour")]);
+        var c = f.CreateClient();
+        var first = await UploadAsync(c, "one.txt");
+        var second = await UploadAsync(c, "two.txt");
+
+        // The first answer is only recorded (202), but its file is already spent: it cannot be attached again.
+        Assert.Equal(HttpStatusCode.Accepted,
+            (await c.PostAsJsonAsync("/api/hub/questions/q1/answer", new { text = "see file", fileIds = new[] { first } })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await c.PostAsJsonAsync("/api/hub/questions/q2/answer", new { text = "again", fileIds = new[] { first } })).StatusCode);
+
+        // The final send fails: its own file is handed back so the owner can retry; the earlier answer stays recorded.
+        f.Cloud.ThrowOnNextCall(new Fyrd.Core.CloudSessions.CloudSessionApiException(500, "boom"));
+        Assert.Equal(HttpStatusCode.BadGateway,
+            (await c.PostAsJsonAsync("/api/hub/questions/q2/answer", new { text = "blue", fileIds = new[] { second } })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await c.PostAsJsonAsync("/api/hub/questions/q2/answer", new { text = "blue", fileIds = new[] { second } })).StatusCode);
+        Assert.Single(f.Cloud.Answered);
     }
 
     [Fact]

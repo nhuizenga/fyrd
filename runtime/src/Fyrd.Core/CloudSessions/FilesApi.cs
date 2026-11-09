@@ -17,15 +17,28 @@ public interface IFiles
 /// <c>POST /v1/files</c> with Fyrd's Claude OAuth token. The file cannot be scoped to a session, so it expires after
 /// an hour and the session is told its id (see <see cref="Fyrd.Core.Hub.Attachments"/>).
 /// </summary>
-public sealed class FilesApi(HttpClient http, ClaudeCredentials credentials) : IFiles
+public sealed class FilesApi(HttpClient http, ClaudeCredentials credentials, TimeProvider? time = null) : IFiles
 {
     public const int ExpiresInSeconds = 3600;
+
+    // Pinned from https://platform.claude.com/docs/en/build-with-claude/files (the Files API is out of beta, so the
+    // old files-api-2025-04-14 header is not needed). The one thing the docs don't show is an OAuth token on this
+    // endpoint, which the owner validated separately; the oauth beta flag is what OAuth tokens need elsewhere on
+    // api.anthropic.com and is UNVERIFIED for /v1/files. The upload and the download instructions share these.
     public const string ApiVersion = "2026-10-21";
-    private static readonly Uri Endpoint = new("https://api.anthropic.com/v1/files");
+    public const string OAuthBeta = "oauth-2025-04-20";
+    private const string BaseUrl = "https://api.anthropic.com/v1/files";
+    private static readonly Uri Endpoint = new(BaseUrl);
+
+    /// <summary>The download request the session is told to make, with the same headers the upload sent.</summary>
+    public static string DownloadRequest =>
+        $"GET {BaseUrl}/<file id>/content with headers anthropic-version: {ApiVersion} and anthropic-beta: {OAuthBeta}";
 
     public async Task<UploadedFile> UploadAsync(Stream content, string fileName, string? mimeType, CancellationToken ct = default)
     {
         var auth = credentials.Read();
+        // An expired token would only be refused (and sent to the API for nothing); the CLI refreshes it on next use.
+        if (auth.ExpiresAt <= (time ?? TimeProvider.System).GetUtcNow()) throw new CloudSessionAuthException(401);
         using var form = new MultipartFormDataContent();
         var file = new StreamContent(content);
         file.Headers.ContentType = MediaTypeHeaderValue.TryParse(mimeType, out var ct2)
@@ -37,7 +50,7 @@ public sealed class FilesApi(HttpClient http, ClaudeCredentials credentials) : I
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", auth.AccessToken);
         req.Headers.Add("anthropic-version", ApiVersion);
         // OAuth tokens (as opposed to API keys) are only honoured on api.anthropic.com with this beta flag.
-        req.Headers.Add("anthropic-beta", "oauth-2025-04-20");
+        req.Headers.Add("anthropic-beta", OAuthBeta);
 
         using var resp = await http.SendAsync(req, ct);
         var text = await resp.Content.ReadAsStringAsync(ct);

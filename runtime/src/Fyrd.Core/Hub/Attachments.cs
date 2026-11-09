@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Fyrd.Core.CloudSessions;
 
@@ -16,12 +17,11 @@ public static class Attachments
         var sb = new StringBuilder(text.TrimEnd());
         if (sb.Length > 0) sb.Append("\n\n");
         sb.Append("The owner attached ").Append(files.Count == 1 ? "a file" : $"{files.Count} files")
-          .Append(" to this message. Download each one before you read it: GET https://api.anthropic.com/v1/files/<file id>/content")
-          .Append(" with header anthropic-version: ").Append(FilesApi.ApiVersion)
+          .Append(" to this message. Download each one before you read it: ").Append(FilesApi.DownloadRequest)
           .Append(", authenticated with your own Anthropic credentials. Files are deleted about an hour after upload.");
         foreach (var f in files)
         {
-            sb.Append("\n- ").Append(SafeName(f.Filename)).Append(" (").Append(SafeMime(f.MimeType)).Append(", ")
+            sb.Append("\n- \"").Append(SafeName(f.Filename)).Append("\" (").Append(SafeMime(f.MimeType)).Append(", ")
               .Append(Size(f.SizeBytes)).Append("): file id ").Append(f.Id);
         }
         return sb.ToString();
@@ -29,7 +29,18 @@ public static class Attachments
 
     private static string SafeName(string name)
     {
-        var clean = new string(name.Where(c => !char.IsControl(c) && c is not ('`' or '"' or '\'' or '<' or '>')).ToArray()).Trim();
+        // Names reach the agent as text, so drop anything that could end the quoted name or hide/reorder it: control,
+        // format (bidi overrides, zero-width), line/paragraph separators, unassigned and private-use characters.
+        var sb = new StringBuilder();
+        foreach (var r in name.EnumerateRunes())
+        {
+            if (Rune.GetUnicodeCategory(r) is UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator
+                or UnicodeCategory.ParagraphSeparator or UnicodeCategory.OtherNotAssigned or UnicodeCategory.PrivateUse
+                or UnicodeCategory.Surrogate) continue;
+            if (r.Value is '`' or '"' or '\'' or '<' or '>' or '\\') continue;
+            sb.Append(r.ToString());
+        }
+        var clean = sb.ToString().Trim();
         if (clean.Length > 200) clean = clean[..200];
         return clean.Length == 0 ? "file" : clean;
     }
