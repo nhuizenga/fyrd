@@ -6,7 +6,7 @@ import * as api from "../api";
 import { navigate } from "../route";
 import { relativeTime } from "../time";
 import { getItemLimit, MAX_ITEM_LIMIT, MIN_ITEM_LIMIT, setItemLimit } from "../useTranscript";
-import type { HubBudgetView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
+import type { HubBudgetView, SecretName, SecretsView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 
 const MODELS = [
@@ -27,6 +27,98 @@ const parseWholeNumber = (v: string, min: number, max: number) => {
   return /^\d+$/.test(t) && n >= min && n <= max ? n : null;
 };
 const rangeMessage = (min: number, max: number) => `Enter a whole number from ${min} to ${max}.`;
+
+const SECRET_FIELDS: { name: SecretName; label: string; envHint: string }[] = [
+  { name: "anthropic-api-key", label: "Anthropic API Key", envHint: "ANTHROPIC_API_KEY" },
+  { name: "github-token", label: "GitHub Token", envHint: "GH_TOKEN" },
+];
+
+/** One optional secret: a write-only password field, a status line and a way to remove the saved value. */
+function SecretField({ field, view, supported, onChange }: {
+  field: (typeof SECRET_FIELDS)[number];
+  view: SecretsView["secrets"][number] | undefined;
+  supported: boolean;
+  onChange: (v: SecretsView) => void;
+}) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const run = async (action: () => Promise<SecretsView>, done: string) => {
+    setError(null);
+    setSaved(null);
+    try {
+      const v = await action();
+      setValue("");
+      setSaved(done);
+      if (v) onChange(v);
+    } catch (e) {
+      setError(errText(e));
+    }
+  };
+
+  const status = !view || !view.set
+    ? "Not set."
+    : view.source === "saved" ? "A saved value is in use (it overrides the environment variable)." : `Using the ${field.envHint} environment variable.`;
+
+  return (
+    <div className="secret-field">
+      {error && <Alert status="danger" title={error} role="alert" />}
+      <TextField
+        label={`${field.label} (optional)`}
+        description={status}
+        type="password"
+        autoComplete="off"
+        placeholder={view?.source === "saved" ? "Saved. Type to replace." : ""}
+        value={value}
+        disabled={!supported}
+        onChange={(e) => setValue(e.target.value)}
+      />
+      {saved && <Text role="status" size="small">{saved}</Text>}
+      <div className="row">
+        <Button appearance="primary" aria-label={`Save ${field.label}`} disabled={!supported || !value.trim()}
+          onClick={() => run(() => api.saveSecret(field.name, value.trim()), `${field.label} saved.`)}>
+          Save
+        </Button>
+        {view?.source === "saved" && (
+          <Button aria-label={`Remove saved ${field.label}`}
+            onClick={() => run(() => api.removeSecret(field.name), `Saved ${field.label} removed.`)}>
+            Remove saved value
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SecretsSection() {
+  const [secrets, setSecrets] = useState<SecretsView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const v = await api.getSecrets();
+        if (v) setSecrets(v);
+      } catch (e) {
+        setError(errText(e));
+      }
+    })();
+  }, []);
+
+  return (
+    <>
+      <Text variant="headline" el="h4" size="small">Optional keys</Text>
+      <Text subdued>Saved encrypted on this computer (Windows DPAPI) and never shown again. A saved value overrides the environment variable; remove it to go back to the environment variable.</Text>
+      {error && <Alert status="danger" title={error} role="alert" />}
+      {secrets && !secrets.supported && <Alert status="warning" title="Saving keys needs Windows. Set the environment variable instead." />}
+      {SECRET_FIELDS.map((f) => (
+        <SecretField key={f.name} field={f} supported={secrets?.supported ?? true}
+          view={secrets?.secrets.find((s) => s.name === f.name)} onChange={setSecrets} />
+      ))}
+    </>
+  );
+}
 
 function EnvironmentCard(_: CardProps) {
   const [env, setEnv] = useState("");
@@ -93,6 +185,7 @@ function EnvironmentCard(_: CardProps) {
         <Button appearance="primary" aria-label="Save session cap" onClick={saveCap}>Save</Button>
       </div>
       <Text size="small" subdued>{APPLY_NOTE}</Text>
+      <SecretsSection />
     </section>
   );
 }
