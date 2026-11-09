@@ -98,6 +98,7 @@ export interface MockOptions {
 /** Serves a fake Fyrd API to the page and records the requests the console sends. */
 export async function mockApi(page: Page, opts: MockOptions = {}) {
   const sent: { url: string; body: unknown }[] = [];
+  let uploads = 0;
   const state: HubState = {
     sessions: [...(opts.sessions ?? SESSIONS), ...(opts.stack ? [STACK_SESSION] : [])].map((x) => (opts.prs && x.id === "session_b1" ? { ...x, pullRequests: opts.prs.map((p) => p.url) } : x)), questions: opts.questions ?? [], signedOut: false, lastError: null,
     lastPollAt: new Date().toISOString(),
@@ -112,6 +113,12 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     const req = route.request();
     const url = new URL(req.url());
     const path = url.pathname;
+    // Uploads are multipart (not JSON): record the file name and hand back an id.
+    if (req.method() === "POST" && path === "/api/hub/uploads") {
+      const name = /filename="([^"]*)"/.exec(req.postData() ?? "")?.[1] ?? "file";
+      sent.push({ url: path, body: { name } });
+      return route.fulfill({ json: { id: `file_${(uploads += 1)}`, name, mimeType: "text/plain", size: 5 } });
+    }
     if (req.method() !== "GET") sent.push({ url: path, body: req.postData() ? req.postDataJSON() : null });
     const stream = /^\/api\/hub\/sessions\/([^/]+)\/stream$/.exec(path);
     if (stream) {

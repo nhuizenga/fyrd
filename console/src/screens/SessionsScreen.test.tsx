@@ -1567,3 +1567,17 @@ it("the in-progress bubble lists running workers with their latest tool", async 
   expect(within(list).getByText("build: initial task")).toBeInTheDocument();
   expect(within(list).getByText(/Running Bash · 42s/)).toBeInTheDocument();
 });
+
+it("sends attached file ids with the message and shows the file names in the pending bubble", async () => {
+  vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+  vi.mocked(api.uploadFile).mockResolvedValue({ id: "file_1", name: "notes.txt", mimeType: "text/plain", size: 5 });
+  renderScreen(two());
+  await userEvent.click(screen.getByRole("button", { name: /^(?!Archive|Rename|Export).*alpha-1/ }));
+  await userEvent.upload(screen.getByTestId("attach-input"), new File(["hello"], "notes.txt", { type: "text/plain" }));
+  await screen.findByText("notes.txt");
+  await userEvent.type(screen.getByLabelText("Message this session"), "see attached");
+  await vi.waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(api.sendMessage).toHaveBeenCalledWith("a", "see attached", ["file_1"]);
+  expect(await screen.findByText(/📎 notes\.txt/)).toBeInTheDocument();
+});

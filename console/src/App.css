@@ -168,3 +168,15 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .cost-meter { display: flex; align-items: center; gap: 8px; }
 .cost-meter-bar { flex: 1 1 auto; min-width: 0; }
 .cost-raises { display: flex; gap: 4px; flex: none; }
+
+/* Attached files: a chip per file under the message box / "Other" answer. */
+.attachments { display: flex; flex-direction: column; gap: 4px; }
+.attachment-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 0 4px 0 8px; height: 24px; border-radius: 12px; font-size: 12px;
+  border: 1px solid var(--a2-border-color-subdued); background: var(--a2-background-color-subdued, transparent); }
+.attachment-uploading { opacity: 0.7; }
+.attachment-error { font-size: 12px; color: var(--a2-foreground-color-danger, #b3261e); }
+.attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.attachment-meta { color: var(--a2-foreground-color-subdued); white-space: nowrap; }
+.attachment-remove { display: inline-flex; align-items: center; border: 0; background: transparent; padding: 2px; border-radius: 50%; cursor: pointer; color: inherit; }
+.attachment-remove:hover:not(:disabled), .attachment-remove:focus-visible { background: var(--a2-border-color-subdued); }
