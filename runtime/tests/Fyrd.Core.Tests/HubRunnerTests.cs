@@ -295,8 +295,7 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default);
         Assert.Equal(2, _state.Sessions.Count);
 
-        _cloud.SkipCalls(1); // the tag listing succeeds
-        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom")); // GetAsync on the Controller fails
+        _cloud.ThrowOnGetFor("session_ctl", new CloudSessionApiException(500, "boom")); // GetAsync on the Controller fails
         await runner.PollOnceAsync(default);
 
         Assert.Contains("session_ctl", _state.LastError);
@@ -335,8 +334,7 @@ public sealed class HubRunnerTests : IDisposable
         Assert.True(_state.TryClaim(q.RequestId, q.SessionId));
         _state.CompleteRequest(q.RequestId);
 
-        _cloud.SkipCalls(1); // the tag listing succeeds
-        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom")); // reading q1's events fails
+        _cloud.ThrowOnListEventsFor("q1", new CloudSessionApiException(500, "boom")); // reading q1's events fails
         await runner.PollOnceAsync(default);
         Assert.Empty(_state.Questions);
 
@@ -594,8 +592,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_ClaudeAuthMissing_SetsSignedOut()
     {
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
-        _cloud.SkipCalls(1); // ListByTag succeeds; the events call fails
-        _cloud.ThrowOnNextCall(new ClaudeAuthMissingException());
+        _cloud.ThrowOnListEventsFor("s1", new ClaudeAuthMissingException()); // the events call fails
 
         await Make().PollOnceAsync(default);
 
@@ -607,8 +604,7 @@ public sealed class HubRunnerTests : IDisposable
     {
         _cloud.SetByTag("fyrd-hub", Hub("bad", "builder-1", role: "builder"), Hub("good", "builder-2", role: "builder"));
         _cloud.AddAssistantEvent("good", "e1", Remember("role", "Kept."));
-        _cloud.SkipCalls(1);
-        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom"));
+        _cloud.ThrowOnListEventsFor("bad", new CloudSessionApiException(500, "boom"));
 
         await Make().PollOnceAsync(default);
 
