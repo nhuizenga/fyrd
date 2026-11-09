@@ -39,6 +39,11 @@ public sealed class FakeCloudSessions : ICloudSessions
     /// <summary>The next <paramref name="n"/> calls succeed; use before <see cref="ThrowOnNextCall"/> to fail a later call.</summary>
     public void SkipCalls(int n) { for (var i = 0; i < n; i++) _next.Enqueue(null); }
 
+    private readonly Dictionary<string, Exception> _listEventsFailures = new();
+
+    /// <summary>The next <see cref="ListEventsAsync"/> call for <paramref name="sessionId"/> throws this once. Unlike <see cref="ThrowOnNextCall"/> it does not depend on call order, so it is safe with concurrent reads.</summary>
+    public void ThrowOnListEventsFor(string sessionId, Exception e) { lock (_listEventsFailures) _listEventsFailures[sessionId] = e; }
+
     public void AddEvent(string sessionId, SessionEvent e)
     {
         if (!_events.TryGetValue(sessionId, out var list)) _events[sessionId] = list = [];
@@ -118,6 +123,10 @@ public sealed class FakeCloudSessions : ICloudSessions
             if (EventLatency > TimeSpan.Zero) await Task.Delay(EventLatency, ct);
         }
         finally { Interlocked.Decrement(ref _inFlight); }
+        Exception? forSession;
+        lock (_listEventsFailures)
+            if (_listEventsFailures.Remove(sessionId, out forSession)) { } else forSession = null;
+        if (forSession is not null) throw forSession;
         MaybeThrow();
         lock (EventAfterIds) EventAfterIds.Add(afterId);
         var all = _events.TryGetValue(sessionId, out var l) ? l : [];
