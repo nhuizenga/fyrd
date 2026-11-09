@@ -64,15 +64,30 @@ public sealed class GitHubRateLimitException(DateTimeOffset resetAt)
 }
 
 /// <summary>
-/// The GitHub token, read once at startup from <c>GH_TOKEN</c>, else <c>GITHUB_TOKEN</c>. It is kept in memory only:
-/// <see cref="ToString"/> never shows it, so it cannot reach a log or an error message by accident.
+/// The GitHub token: a saved token (set from Settings) wins over the one read at startup from <c>GH_TOKEN</c>, else
+/// <c>GITHUB_TOKEN</c>. It is kept in memory only: <see cref="ToString"/> never shows it, so it cannot reach a log or an
+/// error message by accident. Removing the saved token reverts to the environment token.
 /// </summary>
 public sealed class GitHubToken(string? value)
 {
-    private readonly string? _value = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private readonly string? _env = Clean(value);
+    private volatile string? _saved;
 
-    public bool Present => _value is not null;
-    public string Value => _value ?? throw new GitHubNotConfiguredException();
+    private static string? Clean(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+
+    /// <summary>Raised after <see cref="SetSaved"/> changes the effective token.</summary>
+    public event Action? Changed;
+
+    public bool Present => (_saved ?? _env) is not null;
+    public string Value => _saved ?? _env ?? throw new GitHubNotConfiguredException();
+    public bool FromEnvironmentOnly => _saved is null && _env is not null;
+
+    /// <summary>Sets (or, with null/blank, clears) the saved token that overrides the environment one.</summary>
+    public void SetSaved(string? token)
+    {
+        _saved = Clean(token);
+        Changed?.Invoke();
+    }
 
     public static GitHubToken FromEnvironment() =>
         new(Environment.GetEnvironmentVariable("GH_TOKEN") is { Length: > 0 } t ? t : Environment.GetEnvironmentVariable("GITHUB_TOKEN"));
