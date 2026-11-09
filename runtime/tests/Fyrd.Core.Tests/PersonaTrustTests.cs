@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>The hub personas must tell sessions who an owner turn is, and never call peer messages the owner's.</summary>
 public sealed class PersonaTrustTests : IDisposable
 {
-    private static readonly string[] Peasants = ["builder", "researcher", "reviewer", "validator", "monitor"];
+    private static readonly string[] Peasants = ["builder", "researcher", "reviewer", "validator", "monitor", "investigator"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();

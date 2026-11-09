@@ -14,7 +14,7 @@ Request: "Build the following: {uri list}". Start one Builder per uri, all at on
 5. **Create.** Call `mcp__claude-code-remote__create_session` once per uri, in parallel, with:
    - `title` from step 1; `tags: ["fyrd-hub", "fyrd-role-builder"]`.
    - `environment_id` from `<hub-settings>` (omit when empty), `permission_mode: "auto"`, `model` from `<peasant-persona id="builder" …>`.
-   - `append_system_prompt`: the builder persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="builder">…</role-memory>`, then a blank line, `<subagent-persona id="validator">…</subagent-persona>` (the validator persona text), a blank line and `<subagent-persona id="reviewer">…</subagent-persona>` (the reviewer persona text).
+   - `append_system_prompt`: the builder persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="builder">…</role-memory>`, then a blank line, `<subagent-persona id="validator">…</subagent-persona>` (the validator persona text), a blank line, `<subagent-persona id="reviewer">…</subagent-persona>` (the reviewer persona text), a blank line and `<subagent-persona id="investigator">…</subagent-persona>` (the investigator persona text).
    - `prompt`, followed by the uri verbatim on its own line:
      ```
      Build what the input below describes.
