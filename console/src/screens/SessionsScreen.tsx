@@ -370,17 +370,18 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   // The newest loaded item's seq (not an index: the thread shows only a window of the items, which shifts as new ones arrive).
   const latestSeq = useRef(-1);
   latestSeq.current = transcript.items.reduce((m, i) => Math.max(m, i.seq), -1);
-  const send = async (text: string): Promise<boolean> => {
+  const send = async (text: string, fileIds: string[] = [], fileNames: string[] = []): Promise<boolean> => {
     if (!selected) return false;
     const sentTo = selected.id;
-    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text, seqAtSend: latestSeq.current, sentAt: Date.now(), acked: false };
+    const shown = [text, ...fileNames.map((n) => `📎 ${n}`)].filter(Boolean).join("\n");
+    const entry = { id: `out-${(outboxSeq.current += 1)}`, sessionId: sentTo, text: shown, seqAtSend: latestSeq.current, sentAt: Date.now(), acked: false };
     following.current = true;
     setSendingIds((ids) => [...ids, sentTo]);
     setOutbox((o) => [...o, entry]);
     setError(null);
     const drop = () => setOutbox((o) => o.filter((x) => x.id !== entry.id));
     try {
-      await api.sendMessage(sentTo, text);
+      await (fileIds.length ? api.sendMessage(sentTo, text, fileIds) : api.sendMessage(sentTo, text));
       // The server has the message: the next user item replaces the bubble whatever its text. Backstop in case no echo ever arrives.
       setOutbox((o) => o.map((x) => (x.id === entry.id ? { ...x, acked: true } : x)));
       setTimeout(drop, 15_000);

@@ -32,8 +32,24 @@ export const adoptController = (sessionId: string) =>
   call<ControllerInfo>("POST", "/api/hub/controller/adopt", { sessionId });
 /** Archives the current Controller; the owner then adopts a new one. */
 export const retireController = () => call<void>("POST", "/api/hub/controller/retire");
-export const sendMessage = (sessionId: string, text: string) =>
-  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/message`, { text });
+/** `fileIds` are uploads from `uploadFile`; the text may be empty when files are attached. */
+export const sendMessage = (sessionId: string, text: string, fileIds?: string[]) =>
+  call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/message`, fileIds?.length ? { text, fileIds } : { text });
+export interface UploadedFile { id: string; name: string; mimeType: string; size: number }
+/** Uploads one attachment (the runtime puts it in the Files API for an hour); send its `id` with the message or answer. */
+export const uploadFile = async (file: File): Promise<UploadedFile> => {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await fetch("/api/hub/uploads", { method: "POST", body: form });
+  if (!res.ok) {
+    let detail: string | undefined;
+    try { detail = (await res.json())?.detail; } catch { /* non-JSON error body */ }
+    throw Object.assign(new Error(detail ?? `Upload failed (${res.status})`), { status: res.status });
+  }
+  return (await res.json()) as UploadedFile;
+};
+/** Forgets an upload the owner removed before sending. */
+export const deleteUpload = (fileId: string) => call<void>("DELETE", `/api/hub/uploads/${enc(fileId)}`);
 export const pause = (sessionId: string) => call<void>("POST", `/api/hub/sessions/${enc(sessionId)}/pause`);
 /** Renames a session (the pencil button); the new title shows on the next poll. */
 export const renameSession = (sessionId: string, title: string) =>
