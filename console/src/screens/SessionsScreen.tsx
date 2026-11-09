@@ -6,6 +6,9 @@ import DownloadIcon from "@servicetitan/anvil2/assets/icons/material/round/downl
 import OpenIcon from "@servicetitan/anvil2/assets/icons/material/round/open_in_new.svg?react";
 import RobotIcon from "@servicetitan/anvil2/assets/icons/material/round/smart_toy.svg?react";
 import ReplaceIcon from "@servicetitan/anvil2/assets/icons/material/round/swap_horiz.svg?react";
+import UpIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_arrow_up.svg?react";
+import DownIcon from "@servicetitan/anvil2/assets/icons/material/round/keyboard_arrow_down.svg?react";
+import DragIcon from "@servicetitan/anvil2/assets/icons/material/round/drag_indicator.svg?react";
 import * as api from "../api";
 import ColumnDivider from "../components/ColumnDivider";
 import AddRepo from "../components/AddRepo";
@@ -23,6 +26,7 @@ import type { HubCostView, HubSessionView, PullRequestStatus } from "../types";
 import { lastSession, navigate, rememberSession, replaceRoute } from "../route";
 import { fullTime, relativeTime } from "../time";
 import { useTranscript } from "../useTranscript";
+import { EMPTY_ORDER, dropGroup, dropSession, groupSessions, moveGroupBy, moveSessionBy, orderOf, personaLabel, type SessionOrder } from "../sessionOrder";
 import type { ScreenProps } from "./ScreenProps";
 
 const COMPOSER_KEY = "fyrd.composerHeight";
@@ -35,6 +39,16 @@ const ATTRS_KEY = "fyrd.attrsWidth";
 const SIDE_MIN = 200;
 const SIDE_MAX = 560;
 const SIDE_DEFAULT = 280;
+const COLLAPSED_KEY = "fyrd.collapsedPersonas";
+
+const readCollapsed = (): string[] => {
+  try {
+    const v = JSON.parse(readStored(COLLAPSED_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+};
 
 const repoName = (repo: string) => repo.split("/").pop() || repo;
 
@@ -109,6 +123,22 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   // A raise's response, shown until the poll catches up (the server only requests a poll, so the next state can be stale).
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
   const [adoptId, setAdoptId] = useState("");
+  const [order, setOrder] = useState<SessionOrder>(EMPTY_ORDER);
+  const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
+  const [dragging, setDragging] = useState<{ kind: "session" | "group"; id: string } | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const o = await api.getSessionOrder();
+        if (o) setOrder({ sessions: o.sessions ?? [], groups: o.groups ?? [] });
+      } catch { /* the default order is fine */ }
+    })();
+  }, []);
+  const toggleGroup = (persona: string) => setCollapsed((c) => {
+    const next = c.includes(persona) ? c.filter((p) => p !== persona) : [...c, persona];
+    writeStored(COLLAPSED_KEY, JSON.stringify(next));
+    return next;
+  });
   const transcript = useTranscript(selectedId);
   // Optimistic messages show until the transcript has their echo: a newer user item (seq above the newest one loaded
   // at send time) with the same whitespace-normalised text, or, once the server has accepted the message, any such
@@ -145,6 +175,17 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const others = all.filter((s) => !isController(s)).sort(byRoleThenName);
   const q = search.trim().toLowerCase();
   const sessions = q ? others.filter((s) => s.title.toLowerCase().includes(q)) : others;
+  const groups = groupSessions(sessions, order);
+  // Reordering works on what is shown, so it is off while a search hides sessions.
+  const canReorder = q === "";
+  const applyGroups = (next: typeof groups) => {
+    if (next === groups) return;
+    const saved = orderOf(next, order);
+    setOrder(saved);
+    void (async () => {
+      try { await api.saveSessionOrder(saved); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    })();
+  };
   const selected = all.find((s) => s.id === selectedId) ?? null;
   const hasThread = selected !== null;
   // No token, or a bad one: there are no PR statuses or actions, only a note saying why.
@@ -489,8 +530,15 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
 
   const workerCount = (s: HubSessionView) => Math.max(state?.progress?.[s.id]?.workers?.length ?? 0, s.workersRunning ? 1 : 0);
 
-  const row = (s: HubSessionView, actions?: ReactNode) => (
-    <li key={s.id} className="session-item">
+  const row = (s: HubSessionView, actions?: ReactNode, drag?: { onDrop: () => void; onStart: () => void; onEnd: () => void }) => (
+    <li
+      key={s.id} className="session-item"
+      draggable={!!drag} data-session-id={s.id}
+      onDragStart={drag ? (e) => { e.dataTransfer.effectAllowed = "move"; drag.onStart(); } : undefined}
+      onDragEnd={drag?.onEnd}
+      onDragOver={drag ? (e) => { if (dragging?.kind === "session") e.preventDefault(); } : undefined}
+      onDrop={drag ? (e) => { e.preventDefault(); drag.onDrop(); } : undefined}
+    >
       <button type="button" className="row-btn session-row" aria-current={s.id === selectedId} onClick={() => navigate("sessions", s.id)}>
         <StatusIcon status={s.status} />
         <span className="session-row-text">
@@ -590,15 +638,66 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
               </div>
             </form>
           )}
-          <ul className="session-list pane-scroll">
-            {sessions.map((s) => row(s, (
-              <>
-                {exportButton(s)}
-                <Button appearance="ghost" size="small" icon={EditIcon} aria-label={`Rename ${s.title}`} title="Rename session" onClick={() => setRenaming({ session: s, title: s.title })} />
-                <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
-              </>
-            )))}
-          </ul>
+          <div className="session-groups pane-scroll">
+            {groups.map((g, gi) => {
+              const open = !collapsed.includes(g.persona);
+              const name = personaLabel(g.persona);
+              return (
+                <section
+                  key={g.persona} className="session-group" aria-label={`${name} sessions`} data-persona={g.persona}
+                  onDragOver={(e) => { if (dragging?.kind === "group") e.preventDefault(); }}
+                  onDrop={(e) => {
+                    if (dragging?.kind !== "group") return;
+                    e.preventDefault();
+                    applyGroups(dropGroup(groups, dragging.id, g.persona));
+                    setDragging(null);
+                  }}
+                >
+                  <div className="session-group-head">
+                    {canReorder && (
+                      <span
+                        className="drag-handle" draggable aria-hidden="true" title={`Drag to move ${name}`}
+                        onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragging({ kind: "group", id: g.persona }); }}
+                        onDragEnd={() => setDragging(null)}
+                      ><DragIcon /></span>
+                    )}
+                    <button type="button" className="session-group-toggle" aria-expanded={open} onClick={() => toggleGroup(g.persona)}>
+                      <span aria-hidden="true">{open ? "▾" : "▸"}</span>
+                      <span className="session-group-name">{name}</span>
+                      <Chip label={String(g.sessions.length)} size="small" aria-label={`${g.sessions.length} session${g.sessions.length === 1 ? "" : "s"}`} />
+                    </button>
+                    {canReorder && groups.length > 1 && (
+                      <span className="session-group-move">
+                        <Button appearance="ghost" size="small" icon={UpIcon} aria-label={`Move ${name} group up`} title="Move group up" disabled={gi === 0} onClick={() => applyGroups(moveGroupBy(groups, g.persona, -1))} />
+                        <Button appearance="ghost" size="small" icon={DownIcon} aria-label={`Move ${name} group down`} title="Move group down" disabled={gi === groups.length - 1} onClick={() => applyGroups(moveGroupBy(groups, g.persona, 1))} />
+                      </span>
+                    )}
+                  </div>
+                  {open && (
+                    <ul className="session-list">
+                      {g.sessions.map((s, si) => row(s, (
+                        <>
+                          {canReorder && (
+                            <>
+                              <Button appearance="ghost" size="small" icon={UpIcon} aria-label={`Move ${s.title} up`} title="Move up" disabled={si === 0} onClick={() => applyGroups(moveSessionBy(groups, s.id, -1))} />
+                              <Button appearance="ghost" size="small" icon={DownIcon} aria-label={`Move ${s.title} down`} title="Move down" disabled={si === g.sessions.length - 1} onClick={() => applyGroups(moveSessionBy(groups, s.id, 1))} />
+                            </>
+                          )}
+                          {exportButton(s)}
+                          <Button appearance="ghost" size="small" icon={EditIcon} aria-label={`Rename ${s.title}`} title="Rename session" onClick={() => setRenaming({ session: s, title: s.title })} />
+                          <Button appearance="ghost" size="small" icon={TrashIcon} aria-label={`Archive ${s.title}`} title="Archive session" onClick={() => setConfirmArchive(s)} />
+                        </>
+                      ), canReorder ? {
+                        onStart: () => setDragging({ kind: "session", id: s.id }),
+                        onEnd: () => setDragging(null),
+                        onDrop: () => { if (dragging?.kind === "session") applyGroups(dropSession(groups, dragging.id, s.id)); setDragging(null); },
+                      } : undefined))}
+                    </ul>
+                  )}
+                </section>
+              );
+            })}
+          </div>
         </aside>
         <ColumnDivider label="Resize session list" width={listWidth} min={SIDE_MIN} max={SIDE_MAX} direction={1} onChange={resizeList} />
         <section className="pane pane-thread" aria-label="Conversation">

@@ -29,6 +29,8 @@ const enc = encodeURIComponent;
 export const getSecrets = () => call<SecretsView>("GET", "/api/secrets");
 export const saveSecret = (name: SecretName, value: string) => call<SecretsView>("PUT", `/api/secrets/${name}`, { value });
 export const removeSecret = (name: SecretName) => call<SecretsView>("DELETE", `/api/secrets/${name}`);
+export const getSessionOrder = () => call<{ sessions: string[]; groups: string[] }>("GET", "/api/session-order");
+export const saveSessionOrder = (o: { sessions: string[]; groups: string[] }) => call<{ sessions: string[]; groups: string[] }>("PUT", "/api/session-order", o);
 export const getHubState = () => call<HubState>("GET", "/api/hub/state");
 /** The live adopted Controller; rejects with status 404 when there is none. */
 export const openController = () => call<ControllerInfo>("POST", "/api/hub/controller");
