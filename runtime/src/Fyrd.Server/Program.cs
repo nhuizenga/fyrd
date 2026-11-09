@@ -29,6 +29,7 @@ builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
 builder.Services.AddSingleton<SecretStore>();
+builder.Services.AddSingleton<SessionOrderStore>();
 // The token is read from GH_TOKEN (else GITHUB_TOKEN) and kept in memory only; a token saved in Settings overrides it.
 builder.Services.AddSingleton(sp =>
 {
@@ -121,6 +122,7 @@ app.MapSpecs();
 app.MapInbox();
 app.MapConfig();
 app.MapSecrets();
+app.MapSessionOrder();
 app.MapBoard();
 app.MapMemory();
 app.MapHub();
