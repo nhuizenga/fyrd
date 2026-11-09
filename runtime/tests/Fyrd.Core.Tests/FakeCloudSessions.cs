@@ -24,6 +24,12 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     private int _listEventCalls, _inFlight, _maxInFlight;
     public int ListEventCalls => _listEventCalls;
+    /// <summary>Number of <see cref="ListEventsAsync"/> calls running right now.</summary>
+    public int InFlightListEvents => Volatile.Read(ref _inFlight);
+    /// <summary>When set, every <see cref="ListEventsAsync"/> call blocks (after being counted) until it completes, so tests can observe the calls at quiescence instead of sleeping.</summary>
+    public TaskCompletionSource? EventGate { get; set; }
+    /// <summary>Limits <see cref="EventGate"/> to the sessions this returns true for (all sessions when null).</summary>
+    public Func<string, bool>? EventGateWhen { get; set; }
     /// <summary>Highest number of <see cref="ListEventsAsync"/> calls that were running at the same time.</summary>
     public int MaxConcurrentListEvents => _maxInFlight;
 
@@ -43,6 +49,11 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     /// <summary>The next <see cref="ListEventsAsync"/> call for <paramref name="sessionId"/> throws this once. Unlike <see cref="ThrowOnNextCall"/> it does not depend on call order, so it is safe with concurrent reads.</summary>
     public void ThrowOnListEventsFor(string sessionId, Exception e) { lock (_listEventsFailures) _listEventsFailures[sessionId] = e; }
+
+    private readonly Dictionary<string, Exception> _getFailures = new();
+
+    /// <summary>The next <see cref="GetAsync"/> call for <paramref name="sessionId"/> throws this once, independent of call order.</summary>
+    public void ThrowOnGetFor(string sessionId, Exception e) { lock (_getFailures) _getFailures[sessionId] = e; }
 
     public void AddEvent(string sessionId, SessionEvent e)
     {
@@ -100,6 +111,10 @@ public sealed class FakeCloudSessions : ICloudSessions
 
     public Task<CloudSession> GetAsync(string sessionId, CancellationToken ct = default)
     {
+        Exception? forSession;
+        lock (_getFailures)
+            if (_getFailures.Remove(sessionId, out forSession)) { } else forSession = null;
+        if (forSession is not null) throw forSession;
         MaybeThrow();
         return _sessions.TryGetValue(sessionId, out var s)
             ? Task.FromResult(s)
@@ -120,6 +135,7 @@ public sealed class FakeCloudSessions : ICloudSessions
         while ((seen = _maxInFlight) < now && Interlocked.CompareExchange(ref _maxInFlight, now, seen) != seen) { }
         try
         {
+            if (EventGate is { } gate && (EventGateWhen?.Invoke(sessionId) ?? true)) await gate.Task.WaitAsync(ct);
             if (EventLatency > TimeSpan.Zero) await Task.Delay(EventLatency, ct);
         }
         finally { Interlocked.Decrement(ref _inFlight); }

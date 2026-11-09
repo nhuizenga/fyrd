@@ -295,8 +295,7 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default);
         Assert.Equal(2, _state.Sessions.Count);
 
-        _cloud.SkipCalls(1); // the tag listing succeeds
-        _cloud.ThrowOnNextCall(new CloudSessionApiException(500, "boom")); // GetAsync on the Controller fails
+        _cloud.ThrowOnGetFor("session_ctl", new CloudSessionApiException(500, "boom")); // GetAsync on the Controller fails
         await runner.PollOnceAsync(default);
 
         Assert.Contains("session_ctl", _state.LastError);

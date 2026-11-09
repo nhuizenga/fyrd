@@ -63,37 +63,45 @@ public sealed class HubRunnerFirstLoadTests(ITestOutputHelper output) : IDisposa
     {
         var rig = Build(Sessions, EventsPerSession, Latency);
         var (cloud, state) = (rig.Cloud, rig.State);
+        // Hold every history read until the list has been observed, so "the list is visible before any history is read" is checked at quiescence, not by racing the poll.
+        cloud.EventGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var clock = Stopwatch.StartNew();
         var poll = rig.Runner.PollOnceAsync(default);
-        TimeSpan? listShown = null;
-        IReadOnlyList<HubSessionView>? firstSnapshot = null;
-        var progressive = false;
-        while (!poll.IsCompleted)
-        {
-            var snap = state.Sessions;
-            if (listShown is null && snap.Count == Sessions && !poll.IsCompleted)
-            {
-                listShown = clock.Elapsed;
-                firstSnapshot = snap;
-            }
-            // Rows fill in before the pass ends: some have activity while others are still bare.
-            if (snap.Count == Sessions && snap.Any(v => v.LastActivity is not null) && snap.Any(v => v.LastActivity is null) && !poll.IsCompleted)
-                progressive = true;
-            await Task.Delay(1);
-        }
+        await WaitUntil(() => state.Sessions.Count == Sessions, "the session list to be published");
+        var listShown = clock.Elapsed;
+        var firstSnapshot = state.Sessions;
+        Assert.False(poll.IsCompleted);
+        Assert.All(firstSnapshot, v => Assert.Null(v.LastActivity));
+
+        cloud.EventGate.SetResult();
         await poll;
         var total = clock.Elapsed;
 
         output.WriteLine($"sessions={Sessions} listEventCalls={cloud.ListEventCalls} maxConcurrent={cloud.MaxConcurrentListEvents} " +
-                         $"listVisibleMs={listShown?.TotalMilliseconds:F0} firstPollMs={total.TotalMilliseconds:F0}");
+                         $"listVisibleMs={listShown.TotalMilliseconds:F0} firstPollMs={total.TotalMilliseconds:F0}");
         Assert.Equal(Sessions * (EventsPerSession / PageSize), cloud.ListEventCalls);
-        // The full list was observed while the poll was still running, as bare rows. Timings are only printed: wall-clock bounds are flaky under load.
-        Assert.NotNull(listShown);
-        Assert.All(firstSnapshot!, v => Assert.Null(v.LastActivity));
-        Assert.True(progressive, "no snapshot mixed filled and bare rows before the pass ended");
         Assert.True(cloud.MaxConcurrentListEvents > 1);
         Assert.All(state.Sessions, v => Assert.NotNull(v.LastActivity));
+    }
+
+    [Fact]
+    public async Task FirstPoll_PublishesRowsProgressivelyBeforeThePassEnds()
+    {
+        var rig = Build(Sessions, EventsPerSession, TimeSpan.Zero);
+        // Hold the reads of the last sessions so the pass cannot finish; the first ones fill in and are published meanwhile.
+        rig.Cloud.EventGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.Cloud.EventGateWhen = id => int.Parse(id[1..]) >= 30;
+
+        var poll = rig.Runner.PollOnceAsync(default);
+        await WaitUntil(() => rig.State.Sessions.Count(v => v.LastActivity is not null) >= 10, "the first rows to be published");
+        Assert.False(poll.IsCompleted);
+        Assert.Equal(Sessions, rig.State.Sessions.Count);
+        Assert.Contains(rig.State.Sessions, v => v.LastActivity is null); // mixed: filled rows and bare rows
+
+        rig.Cloud.EventGate.SetResult();
+        await poll;
+        Assert.All(rig.State.Sessions, v => Assert.NotNull(v.LastActivity));
     }
 
     [Fact]
@@ -128,6 +136,17 @@ public sealed class HubRunnerFirstLoadTests(ITestOutputHelper output) : IDisposa
         Assert.False(rig.State.SignedOut);
     }
 
+    /// <summary>Polls a condition instead of sleeping a fixed time; the generous timeout only bounds a hang.</summary>
+    private static async Task WaitUntil(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("timed out waiting for " + what);
+            await Task.Delay(2);
+        }
+    }
+
     [Fact]
     public async Task AuthErrorFromAConcurrentRead_SignsOutAndStopsReading()
     {
@@ -135,8 +154,9 @@ public sealed class HubRunnerFirstLoadTests(ITestOutputHelper output) : IDisposa
         rig.Cloud.ThrowOnListEventsFor("s0", new CloudSessionAuthException(401));
 
         await rig.Runner.PollOnceAsync(default);
+        await WaitUntil(() => rig.Cloud.InFlightListEvents == 0, "in-flight reads to drain");
         var calls = rig.Cloud.ListEventCalls;
-        await Task.Delay(300);
+        await Task.Delay(50); // settle: a read started after the abort would be a bug; this can only hide it, never cause a failure
 
         Assert.True(rig.State.SignedOut);
         Assert.Equal(calls, rig.Cloud.ListEventCalls); // no reads left running after the pass aborted
@@ -150,11 +170,12 @@ public sealed class HubRunnerFirstLoadTests(ITestOutputHelper output) : IDisposa
         using var cts = new CancellationTokenSource();
 
         var poll = rig.Runner.PollOnceAsync(cts.Token);
-        await Task.Delay(120);
+        await WaitUntil(() => rig.Cloud.ListEventCalls >= 1, "the first read to start");
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => poll);
+        await WaitUntil(() => rig.Cloud.InFlightListEvents == 0, "in-flight reads to drain");
         var calls = rig.Cloud.ListEventCalls;
-        await Task.Delay(300);
+        await Task.Delay(50); // settle (see above)
 
         Assert.Equal(calls, rig.Cloud.ListEventCalls);
         Assert.True(calls < 60 * 1);
@@ -163,16 +184,21 @@ public sealed class HubRunnerFirstLoadTests(ITestOutputHelper output) : IDisposa
     [Fact]
     public async Task ReadAhead_IsBounded()
     {
-        // Each read is slow and 60 sessions are listed: reads must not all be started before the first is consumed.
-        var rig = Build(60, 4, TimeSpan.FromMilliseconds(40));
+        // Reads block on a gate and 60 sessions are listed: reads must not all be started before the first is consumed.
+        // With the gate closed nothing completes, so the number of started reads is observed at quiescence, not after a sleep.
+        var rig = Build(60, 4, TimeSpan.Zero);
+        rig.Cloud.EventGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var cts = new CancellationTokenSource();
         var poll = rig.Runner.PollOnceAsync(cts.Token);
-        await Task.Delay(100);
+        await WaitUntil(() => rig.Cloud.ListEventCalls >= 8, "the first reads to start");
+        await Task.Delay(50); // settle: more reads starting than the bound allows would be a bug
         var started = rig.Cloud.ListEventCalls;
+        var maxConcurrent = rig.Cloud.MaxConcurrentListEvents;
         cts.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => poll);
 
-        Assert.True(started <= 16 + 8, $"{started} reads started within 100 ms");
+        Assert.True(started <= 16 + 8, $"{started} reads started while none had completed");
+        Assert.True(maxConcurrent <= 8, $"{maxConcurrent} reads were in flight at once");
     }
 
     /// <summary>A GitHub fake with per-listing latency and concurrency counters.</summary>
