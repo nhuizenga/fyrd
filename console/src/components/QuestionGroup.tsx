@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Alert, Button, Checkbox, Text, Textarea } from "@servicetitan/anvil2";
 import * as api from "../api";
+import { AttachButton, AttachmentChips, attachmentHandlers, useAttachments } from "./AttachmentPicker";
 import type { HubQuestion } from "../types";
 
 type OnChanged = () => void | Promise<void>;
@@ -17,8 +18,9 @@ function QuestionBlock({ q, onAnswered, onChanged }: QuestionProps) {
   const [other, setOther] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const att = useAttachments();
 
-  const send = async (body: { choice?: string; text?: string }) => {
+  const send = async (body: { choice?: string; text?: string; fileIds?: string[] }) => {
     setBusy(true);
     setError(null);
     try {
@@ -34,7 +36,11 @@ function QuestionBlock({ q, onAnswered, onChanged }: QuestionProps) {
 
   const stale = error !== null && /no longer waiting/i.test(error);
   const otherText = text.trim();
+  // Files belong to the "Other" answer: they count only while Other is chosen.
+  const fileIds = other ? att.ids : [];
+  const withFiles = <T extends object>(body: T) => (fileIds.length ? { ...body, fileIds } : body);
   const multiAnswer = [...picked, ...(other && otherText ? [otherText] : [])];
+  const canSendOther = !busy && !att.uploading && (otherText !== "" || fileIds.length > 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <Text variant="headline" el="h3" size="small">{q.question}</Text>
@@ -62,17 +68,22 @@ function QuestionBlock({ q, onAnswered, onChanged }: QuestionProps) {
         </div>
       )}
       {other && (
-        <Textarea label="Your answer" rows={2} value={text} autoFocus onChange={(e) => setText(e.target.value)} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }} {...attachmentHandlers(att, busy)}>
+          <Textarea label="Your answer" rows={2} value={text} autoFocus onChange={(e) => setText(e.target.value)} />
+          <div><AttachButton att={att} disabled={busy} /></div>
+          <AttachmentChips att={att} disabled={busy} />
+        </div>
       )}
       {q.multiSelect ? (
         <div>
-          <Button appearance="primary" disabled={busy || multiAnswer.length === 0} onClick={() => send({ text: multiAnswer.join(", ") })}>
+          <Button appearance="primary" disabled={busy || att.uploading || (multiAnswer.length === 0 && fileIds.length === 0)}
+            onClick={() => send(withFiles({ text: multiAnswer.join(", ") }))}>
             Send
           </Button>
         </div>
       ) : other && (
         <div>
-          <Button appearance="primary" disabled={busy || otherText === ""} onClick={() => send({ text: otherText })}>Send answer</Button>
+          <Button appearance="primary" disabled={!canSendOther} onClick={() => send(withFiles({ text: otherText }))}>Send answer</Button>
         </div>
       )}
       {error && (

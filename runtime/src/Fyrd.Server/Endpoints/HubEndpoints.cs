@@ -23,12 +23,12 @@ internal static partial class HubEndpoints
     private static readonly TimeSpan ReopenDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(10);
 
-    private sealed record TextBody(string? Text);
+    private sealed record TextBody(string? Text, string[]? FileIds = null);
     private sealed record AdoptBody(string? SessionId);
     private sealed record BudgetBody(JsonElement? AmountUsd);
     private sealed record RenameBody(string? Title);
     private sealed record PrBody(string? Url, bool? Force = null);
-    private sealed record AnswerBody(string? Choice, string? Text);
+    private sealed record AnswerBody(string? Choice, string? Text, string[]? FileIds = null);
 
     public static IEndpointRouteBuilder MapHub(this IEndpointRouteBuilder app)
     {
@@ -122,15 +122,64 @@ internal static partial class HubEndpoints
                 }
             })));
 
+        // An owner-attached file goes to the Files API now (expiring in an hour); its id waits here until the message or
+        // answer that carries it is sent.
+        group.MapPost("/uploads", (HttpRequest request, IFiles files, UploadStore uploads, CancellationToken ct) =>
+            Cloud(async () =>
+            {
+                request.HttpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()
+                    ?.MaxRequestBodySize = UploadStore.MaxBytes + 1024 * 1024;
+                if (!request.HasFormContentType) return Bad("Send the file as multipart form data.");
+                IFormFile? file;
+                try { file = (await request.ReadFormAsync(ct)).Files.GetFile("file"); }
+                catch (Exception e) when (e is InvalidDataException or BadHttpRequestException or IOException)
+                {
+                    return Results.Problem($"The file is too large (the limit is {UploadStore.MaxBytes / 1024 / 1024} MB).", statusCode: StatusCodes.Status413PayloadTooLarge);
+                }
+                if (file is null) return Bad("Body { file } is required.");
+                if (file.Length == 0) return Bad("That file is empty.");
+                if (file.Length > UploadStore.MaxBytes)
+                    return Results.Problem($"The file is too large (the limit is {UploadStore.MaxBytes / 1024 / 1024} MB).", statusCode: StatusCodes.Status413PayloadTooLarge);
+                if (!uploads.HasRoom(file.Length))
+                    return Results.Problem("Too many attached files are waiting to be sent — send or remove some first.", statusCode: StatusCodes.Status429TooManyRequests);
+                await using var content = file.OpenReadStream();
+                var uploaded = await files.UploadAsync(content, Path.GetFileName(file.FileName), file.ContentType, ct);
+                uploads.Add(uploaded);
+                return Results.Ok(new { id = uploaded.Id, name = uploaded.Filename, mimeType = uploaded.MimeType, size = uploaded.SizeBytes });
+            }));
+
+        // Removing a chip in the console forgets the id (the file itself expires on its own).
+        group.MapDelete("/uploads/{fileId}", (string fileId, UploadStore uploads) =>
+        {
+            uploads.Forget(fileId);
+            return Results.NoContent();
+        });
+
         // The owner typed this, so it goes through the owner's CLI and reads as theirs, not as a peer message.
-        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, IOwnerMessages owner, CancellationToken ct) =>
+        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, IOwnerMessages owner, UploadStore uploads, CancellationToken ct) =>
             InHub(id, state, () =>
             {
                 if (BlockedError(id, state) is { } blocked) return Task.FromResult(blocked);
-                if (TextError(body?.Text) is { } error) return Task.FromResult(error);
+                if (FilesError(body?.FileIds, uploads, out var files) is { } fileError) return Task.FromResult(fileError);
+                // With files the text may be empty (the files are the message); without them it is required.
+                if (files.Count == 0 || !string.IsNullOrWhiteSpace(body?.Text))
+                    if (TextError(body?.Text) is { } error) return Task.FromResult(error);
+                var message = Attachments.Append(body?.Text?.Trim() ?? "", files);
+                if (message.Length > MaxText) return Task.FromResult(Bad($"Text and attachment notes are longer than {MaxText} characters."));
                 return Cloud(async () =>
                 {
-                    await owner.SendAsync(id, body!.Text!, ct);
+                    // Taking the ids and sending are separate steps so a failed send hands the files back for a retry.
+                    if (uploads.TryClaim(body?.FileIds ?? []) is not { } claim)
+                        return Bad("An attached file was already sent or has expired — attach it again.");
+                    try
+                    {
+                        await owner.SendAsync(id, message, ct);
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        claim.Restore();
+                        throw;
+                    }
                     return Results.NoContent();
                 });
             }));
@@ -271,29 +320,47 @@ internal static partial class HubEndpoints
                 };
             }))));
 
-        group.MapPost("/questions/{id}/answer", (string id, AnswerBody? body, HubState state, ICloudSessions cloud, CancellationToken ct) =>
+        group.MapPost("/questions/{id}/answer", (string id, AnswerBody? body, HubState state, ICloudSessions cloud, UploadStore uploads, CancellationToken ct) =>
         {
             var q = state.Questions.FirstOrDefault(x => x.Id == id);
             if (q is null) return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
             // Answering resumes the session, so a budget block applies here too.
             if (BlockedError(q.SessionId, state) is { } blocked) return Task.FromResult(blocked);
 
+            if (FilesError(body?.FileIds, uploads, out var files) is { } fileError) return Task.FromResult(fileError);
             var hasChoice = !string.IsNullOrEmpty(body?.Choice);
-            var hasText = !string.IsNullOrWhiteSpace(body?.Text);
+            if (hasChoice && files.Count > 0) return Task.FromResult(Bad("Files go with a typed answer, not an option."));
+            // An answer with files is always free text (a typed answer, or just the files).
+            var hasText = !string.IsNullOrWhiteSpace(body?.Text) || (files.Count > 0 && !hasChoice);
             if (hasChoice == hasText)
                 return Task.FromResult(Bad("Send exactly one of choice or text."));
             if (hasChoice && !q.Options.Contains(body!.Choice!))
                 return Task.FromResult(Bad($"'{body.Choice}' is not one of this question's options."));
-            if (hasText && body!.Text!.Length > MaxText)
+            if (hasText && body?.Text?.Length > MaxText)
                 return Task.FromResult(Bad($"Text is longer than {MaxText} characters."));
 
             // One can_use_tool request can carry several questions; it gets exactly one control_response with all answers.
-            var progress = state.RecordAnswer(q.Id, hasChoice ? body!.Choice! : body!.Text!);
-            if (!progress.Pending) return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
+            var answer = hasChoice ? body!.Choice! : Attachments.Append(body?.Text?.Trim() ?? "", files);
+            if (answer.Length > MaxText)
+                return Task.FromResult(Bad($"Text and attachment notes are longer than {MaxText} characters."));
+
+            // The files are taken now (recorded in the answer text), so they cannot be reused by a later request; they
+            // go back to the store if this answer turns out not to be accepted or its send fails.
+            if (uploads.TryClaim(body?.FileIds ?? []) is not { } fileClaim)
+                return Task.FromResult(Bad("An attached file was already sent or has expired — attach it again."));
+            var progress = state.RecordAnswer(q.Id, answer);
+            if (!progress.Pending)
+            {
+                fileClaim.Restore();
+                return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
+            }
             if (!progress.Ready)
                 return Task.FromResult(Results.Json(new { waitingFor = progress.WaitingFor }, statusCode: StatusCodes.Status202Accepted));
             if (!state.TryClaim(q.RequestId, q.SessionId))
+            {
+                fileClaim.Restore();
                 return Task.FromResult(Results.Problem(NotPending, statusCode: StatusCodes.Status409Conflict));
+            }
             return Cloud(async () =>
             {
                 try
@@ -304,6 +371,7 @@ internal static partial class HubEndpoints
                 catch (Exception e) when (e is not OperationCanceledException)
                 {
                     state.Release(q.RequestId);
+                    fileClaim.Restore();
                     throw;
                 }
                 state.CompleteRequest(q.RequestId);
@@ -577,6 +645,20 @@ internal static partial class HubEndpoints
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")
         : text.Length > MaxText ? Bad($"Text is longer than {MaxText} characters.")
         : null;
+
+    /// <summary>400 when the ids are too many, blank, or not files Fyrd uploaded in the last hour; otherwise the files in order (nothing is taken yet).</summary>
+    private static IResult? FilesError(string[]? ids, UploadStore uploads, out IReadOnlyList<UploadedFile> files)
+    {
+        files = [];
+        if (ids is null || ids.Length == 0) return null;
+        // Bound the raw array before doing any work on it, then refuse null / blank entries.
+        if (ids.Length > UploadStore.MaxFiles) return Bad($"Attach at most {UploadStore.MaxFiles} files.");
+        if (ids.Any(string.IsNullOrWhiteSpace)) return Bad("File ids must be non-empty strings.");
+        var (found, missing) = uploads.Resolve(ids);
+        if (found is null) return Bad($"File '{missing}' is not an uploaded file (uploads are kept for an hour).");
+        files = found;
+        return null;
+    }
 
     /// <summary>409 when the last poll blocked this session (its own limit, or the fyrd's); the Controller is never blocked.</summary>
     private static IResult? BlockedError(string id, HubState state) =>

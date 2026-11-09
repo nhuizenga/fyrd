@@ -57,3 +57,33 @@ test("a failed send puts the text back and unlocks the box", async ({ page }) =>
   await expect(box).not.toHaveAttribute("readonly", "");
   await expect(page.getByRole("alert")).toContainText("Upstream down");
 });
+
+test("attached files upload at once and go with the message", async ({ page }) => {
+  const { sent } = await mockApi(page);
+  await page.goto("/#/sessions/session_b1");
+  await page.getByTestId("attach-input").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+  await expect(page.getByRole("list", { name: "Attached files" }).getByText("notes.txt")).toBeVisible();
+  await expect.poll(() => sent).toContainEqual({ url: "/api/hub/uploads", body: { name: "notes.txt" } });
+  await page.getByLabel("Message this session").fill("see attached");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect.poll(() => sent).toContainEqual({ url: "/api/hub/sessions/session_b1/message", body: { text: "see attached", fileIds: ["file_1"] } });
+  await expect(page.getByRole("list", { name: "Attached files" })).toHaveCount(0);
+});
+
+test("files can be attached to an Other answer", async ({ page }) => {
+  const q = {
+    id: "session_b2:req1:0", sessionId: "session_b2", sessionTitle: "builder-b2", question: "Which format?", options: ["Markdown", "HTML"],
+    multiSelect: false, askedAt: new Date().toISOString(), toolUseId: "t1", requestId: "req1", input: {},
+  };
+  const { sent } = await mockApi(page, { questions: [q] });
+  await page.goto("/#/sessions/session_b2");
+  const card = page.getByRole("region", { name: "Question waiting for you" });
+  await card.getByRole("button", { name: "Other" }).click();
+  await card.getByLabel("Your answer").fill("see the file");
+  await card.getByTestId("attach-input").setInputFiles({ name: "spec.md", mimeType: "text/markdown", buffer: Buffer.from("# spec") });
+  await expect(card.getByText("spec.md")).toBeVisible();
+  await card.getByRole("button", { name: "Send answer" }).click();
+  await expect.poll(() => sent).toContainEqual({
+    url: "/api/hub/questions/session_b2%3Areq1%3A0/answer", body: { text: "see the file", fileIds: ["file_1"] },
+  });
+});

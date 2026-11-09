@@ -45,6 +45,8 @@ builder.Services.AddSingleton<IGitHub>(sp =>
 });
 builder.Services.AddSingleton<GitHubSignIn>();
 builder.Services.AddSingleton<IOwnerMessages, ClaudeCliOwnerMessages>();
+builder.Services.AddSingleton<IFiles>(sp => new FilesApi(new HttpClient { Timeout = TimeSpan.FromMinutes(5) }, sp.GetRequiredService<ClaudeCredentials>()));
+builder.Services.AddSingleton<UploadStore>();
 builder.Services.AddSingleton<OwnedPullRequests>();
 builder.Services.AddSingleton(sp => new StackMergeJobs(sp.GetRequiredService<IGitHub>(), sp.GetRequiredService<TimeProvider>(),
     sp.GetRequiredService<OwnedPullRequests>(), sp.GetRequiredService<HubState>(),

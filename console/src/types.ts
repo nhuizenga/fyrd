@@ -220,4 +220,6 @@ export interface HubMemory {
 export interface AnswerBody {
   choice?: string;
   text?: string;
+  /** Uploads attached to a typed answer. */
+  fileIds?: string[];
 }
