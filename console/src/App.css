@@ -76,7 +76,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-item-actions { position: absolute; bottom: calc(100% - 2px); right: 2px; z-index: 2; display: flex; border-radius: 6px; background: var(--a2-background-color-default, #fff);
   box-shadow: 0 0 0 1px var(--a2-border-color-default, #ddd), 0 2px 6px rgba(0, 0, 0, 0.12); opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s linear 0.12s; }
 /* The scrolling list clips anything above its first item, so that item's actions drop just below it instead. */
-.session-list.pane-scroll > .session-item:first-child .session-item-actions { bottom: auto; top: calc(100% - 2px); }
+@media (hover: hover) { .session-list.pane-scroll > .session-item:first-child .session-item-actions { bottom: auto; top: calc(100% - 2px); } }
 /* Shown after a deliberate hover (the delay keeps them from flashing as the pointer crosses the list); instantly on keyboard focus. */
 .session-item:hover .session-item-actions { opacity: 1; visibility: visible; transition: opacity 0.12s 0.8s, visibility 0s linear 0.8s; }
 .session-item:focus-within .session-item-actions { opacity: 1; visibility: visible; transition: none; }
