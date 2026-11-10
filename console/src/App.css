@@ -181,3 +181,11 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .attachment-meta { color: var(--a2-foreground-color-subdued); white-space: nowrap; }
 .attachment-remove { display: inline-flex; align-items: center; border: 0; background: transparent; padding: 2px; border-radius: 50%; cursor: pointer; color: inherit; }
 .attachment-remove:hover:not(:disabled), .attachment-remove:focus-visible { background: var(--a2-border-color-subdued); }
+
+/* Persona groups in the session list. */
+.session-group { margin-bottom: 4px; }
+.session-group-head { display: flex; align-items: center; gap: 4px; }
+.session-group-toggle { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 6px; border: 0; background: none; font: inherit; font-weight: 600; cursor: pointer; text-align: left; color: inherit; }
+.session-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drag-handle { display: inline-flex; cursor: grab; opacity: 0.6; }
+.session-group-move { display: flex; }

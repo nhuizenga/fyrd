@@ -154,6 +154,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     if (/^\/api\/hub\/memory\/pending\/[^/]+\/approve$/.test(path)) return route.fulfill({ json: { id: "approved", text: "approved", source: "agent", at: new Date().toISOString() } });
     if (path === "/api/hub/memory/pending") return route.fulfill({ json: opts.pending ?? [] });
     if (path === "/api/hub/memory") return route.fulfill({ json: { scopes: [{ scope: "shared", label: "Shared", entries: opts.memory ?? [] }] } });
+    if (path === "/api/session-order") return route.fulfill({ json: { sessions: [], groups: [] } });
     if (path === "/api/config") {
       return route.fulfill({ json: { squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5", sessionDailyLimitUsd: 50, fyrdDailyLimitUsd: 500, timeZone: "UTC" } });
     }
