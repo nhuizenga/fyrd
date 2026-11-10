@@ -1,6 +1,6 @@
 import { useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { Button, Icon } from "@servicetitan/anvil2";
-import AttachIcon from "@servicetitan/anvil2/assets/icons/material/round/attach_file.svg?react";
+import AddIcon from "@servicetitan/anvil2/assets/icons/material/round/add.svg?react";
 import CloseIcon from "@servicetitan/anvil2/assets/icons/material/round/close.svg?react";
 import * as api from "../api";
 
@@ -133,9 +133,10 @@ export function AttachButton({ att, disabled }: { att: Attachments; disabled?: b
           e.target.value = "";
         }}
       />
-      <Button appearance="ghost" disabled={disabled} aria-label="Attach files" title={`Attach files (up to ${MAX_FILES}, ${MAX_FILE_BYTES / 1024 / 1024} MB each)`}
+      <Button type="button" appearance="ghost" disabled={disabled} title={`Attach files (up to ${MAX_FILES}, ${MAX_FILE_BYTES / 1024 / 1024} MB each)`}
         onClick={() => input.current?.click()}>
-        <Icon svg={AttachIcon} size="small" />
+        <Icon svg={AddIcon} size="small" aria-hidden />
+        Add files
       </Button>
     </>
   );
