@@ -105,13 +105,13 @@ test.describe("Sessions", () => {
     const open = list.getByRole("button", { name: "Open Controller" });
     const search = list.getByLabel("Search sessions");
     const first = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-prime-sieve/ });
-    // Open/Replace are icons on the Controller's row, to the right of its name; they appear after a short hover.
+    // Open/Replace are icons just above the Controller's row, right-aligned; they appear after a deliberate hover.
     await expect(open).toBeHidden();
     await ctl.hover();
     await expect(open).toBeVisible();
     const replace = list.getByRole("button", { name: "Replace Controller" });
     for (const b of [open, replace]) {
-      expect(Math.abs((await y(b)) + (await box(b)).height / 2 - ((await y(ctl)) + (await box(ctl)).height / 2))).toBeLessThan(6);
+      expect((await y(b)) + (await box(b)).height).toBeLessThanOrEqual((await y(ctl)) + 4);
       expect((await box(b)).x).toBeGreaterThan((await box(ctl)).x + 100);
       await expect(b).toHaveText("");
       await expect(b.locator("svg")).toBeVisible();
