@@ -8,7 +8,7 @@ const ids = (g: ReturnType<typeof groupSessions>) => g.map((x) => `${x.persona}:
 
 describe("sessionOrder", () => {
   it("groups by persona, default alphabetical, with a blank role in Other", () => {
-    expect(ids(groupSessions(all, { sessions: [], groups: [] }))).toEqual(["builder:b1,b2", "other:x", "validator:v1"]);
+    expect(ids(groupSessions(all, { sessions: [], groups: [] }))).toEqual(["builder:b1,b2", "validator:v1", "other:x"]);
   });
   it("applies the saved order; unlisted sessions and personas go last", () => {
     const g = groupSessions([...all, s("b3", "builder")], { sessions: ["b2", "b1"], groups: ["validator"] });

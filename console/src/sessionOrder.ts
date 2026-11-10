@@ -27,7 +27,7 @@ const byName = (a: HubSessionView, b: HubSessionView) =>
   a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" });
 
 /**
- * Groups sessions by persona. Groups follow `order.groups` (unlisted personas go last, alphabetically); inside a group
+ * Groups sessions by persona. Groups follow `order.groups` (unlisted personas go last, alphabetically, with "other" after them); inside a group
  * sessions follow `order.sessions` (unlisted sessions go to the bottom of their group, by name).
  */
 export function groupSessions(sessions: HubSessionView[], order: SessionOrder): SessionGroup[] {
@@ -51,6 +51,8 @@ export function groupSessions(sessions: HubSessionView[], order: SessionOrder): 
       if (ra !== undefined && rb !== undefined) return ra - rb;
       if (ra !== undefined) return -1;
       if (rb !== undefined) return 1;
+      if (a.persona === OTHER_PERSONA) return 1;
+      if (b.persona === OTHER_PERSONA) return -1;
       return a.persona.localeCompare(b.persona);
     });
 }
