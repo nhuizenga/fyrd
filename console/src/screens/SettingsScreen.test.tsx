@@ -362,3 +362,23 @@ it("pending buttons are disabled while a request is in flight", async () => {
   expect(api.rejectPendingMemory).not.toHaveBeenCalled();
   finish();
 });
+
+it("optional keys: saving sends the value, never shows it back, and a saved one can be removed", async () => {
+  const view = (source: "saved" | "none") => ({ supported: true, secrets: [
+    { name: "anthropic-api-key" as const, set: source === "saved", source },
+    { name: "github-token" as const, set: false, source: "none" as const },
+  ] });
+  vi.mocked(api.getSecrets).mockResolvedValue(view("none"));
+  vi.mocked(api.saveSecret).mockResolvedValue(view("saved"));
+  vi.mocked(api.removeSecret).mockResolvedValue(view("none"));
+  await renderSettings("Environment");
+  const field = await screen.findByLabelText("Anthropic API Key (optional)");
+  expect(field).toHaveAttribute("type", "password");
+  expect(screen.getByLabelText("GitHub Token (optional)")).toBeInTheDocument();
+  await userEvent.type(field, "sk-ant-secret");
+  await userEvent.click(screen.getByRole("button", { name: "Save Anthropic API Key" }));
+  expect(api.saveSecret).toHaveBeenCalledWith("anthropic-api-key", "sk-ant-secret");
+  expect(field).toHaveValue("");
+  await userEvent.click(await screen.findByRole("button", { name: "Remove saved Anthropic API Key" }));
+  expect(api.removeSecret).toHaveBeenCalledWith("anthropic-api-key");
+});

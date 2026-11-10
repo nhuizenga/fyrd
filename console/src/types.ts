@@ -223,3 +223,8 @@ export interface AnswerBody {
   /** Uploads attached to a typed answer. */
   fileIds?: string[];
 }
+
+export type SecretName = "anthropic-api-key" | "github-token";
+/** Whether a value is set and where it comes from; the value itself never reaches the browser. */
+export interface SecretView { name: SecretName; set: boolean; source: "saved" | "env" | "none" }
+export interface SecretsView { supported: boolean; secrets: SecretView[] }

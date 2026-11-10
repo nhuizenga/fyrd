@@ -1,4 +1,5 @@
 using Fyrd.Core.CloudSessions;
+using Fyrd.Core.Config;
 using Fyrd.Core.Hub;
 using Fyrd.Core.Tests;
 using Microsoft.AspNetCore.TestHost;
@@ -33,6 +34,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
         {
             s.RemoveAll<ICloudSessions>();
             s.AddSingleton<ICloudSessions>(Cloud);
+            s.RemoveAll<ISecretProtector>();
+            s.AddSingleton<ISecretProtector>(new FakeSecretProtector());
             s.RemoveAll<IGitHub>();
             s.AddSingleton<IGitHub>(GitHub);
             s.RemoveAll<IOwnerMessages>();
