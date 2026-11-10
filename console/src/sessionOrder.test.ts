@@ -18,7 +18,7 @@ describe("sessionOrder", () => {
     const g = groupSessions(all, { sessions: [], groups: [] });
     expect(ids(moveSessionBy(g, "b2", -1))[0]).toBe("builder:b2,b1");
     expect(ids(moveSessionBy(g, "b1", -1))[0]).toBe("builder:b1,b2");
-    expect(ids(moveGroupBy(g, "validator", -1))).toEqual(["builder:b1,b2", "validator:v1", "other:x"]);
+    expect(ids(moveGroupBy(g, "validator", -1))).toEqual(["validator:v1", "builder:b1,b2", "other:x"]);
   });
   it("drops within a group, across groups (moves the group) and groups on groups", () => {
     const g = groupSessions(all, { sessions: [], groups: [] });
@@ -29,8 +29,8 @@ describe("sessionOrder", () => {
   it("orderOf reproduces the display and keeps unlisted ids", () => {
     const g = moveSessionBy(groupSessions(all, { sessions: ["gone"], groups: ["old"] }), "b2", -1);
     const o = orderOf(g, { sessions: ["gone"], groups: ["old"] });
-    expect(o.sessions).toEqual(["b2", "b1", "x", "v1", "gone"]);
-    expect(o.groups).toEqual(["builder", "other", "validator", "old"]);
+    expect(o.sessions).toEqual(["b2", "b1", "v1", "x", "gone"]);
+    expect(o.groups).toEqual(["builder", "validator", "other", "old"]);
     expect(ids(groupSessions(all, o))[0]).toBe("builder:b2,b1");
   });
   it("labels personas", () => {
