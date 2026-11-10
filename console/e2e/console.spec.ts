@@ -97,6 +97,20 @@ test.describe("Sessions", () => {
     expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
   });
 
+  test("the first listed session's actions still appear above it, over the search field, and stay clickable", async ({ page }) => {
+    await page.goto("/#/sessions");
+    const list = page.getByRole("complementary", { name: "Session list" });
+    const firstItem = list.locator(".session-list.pane-scroll > .session-item").first();
+    const row = firstItem.locator(".row-btn");
+    const actions = firstItem.locator(".session-item-actions");
+    await row.hover();
+    await expect(actions).toBeVisible();
+    expect((await box(actions)).y + (await box(actions)).height).toBeLessThanOrEqual((await box(row)).y + 4);
+    const download = page.waitForEvent("download");
+    await actions.getByRole("button", { name: /^Export / }).click();
+    expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
+  });
+
   test("list: Controller, its controls, search, then others with status icons; rows highlight on hover", async ({ page }) => {
     await page.goto("/#/sessions");
     const list = page.getByRole("complementary", { name: "Session list" });
