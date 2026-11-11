@@ -97,6 +97,20 @@ test.describe("Sessions", () => {
     expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
   });
 
+  test("the first listed session's actions still appear above it, over its group heading, and stay clickable", async ({ page }) => {
+    await page.goto("/#/sessions");
+    const list = page.getByRole("complementary", { name: "Session list" });
+    const firstItem = list.locator(".session-groups.pane-scroll .session-item").first();
+    const row = firstItem.locator(".row-btn");
+    const actions = firstItem.locator(".session-item-actions");
+    await row.hover();
+    await expect(actions).toBeVisible();
+    expect((await box(actions)).y + (await box(actions)).height).toBeLessThanOrEqual((await box(row)).y + 4);
+    const download = page.waitForEvent("download");
+    await actions.getByRole("button", { name: /^Export / }).click();
+    expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
+  });
+
   test("list: Controller, its controls, search, then others with status icons; rows highlight on hover", async ({ page }) => {
     await page.goto("/#/sessions");
     const list = page.getByRole("complementary", { name: "Session list" });
@@ -105,13 +119,13 @@ test.describe("Sessions", () => {
     const open = list.getByRole("button", { name: "Open Controller" });
     const search = list.getByLabel("Search sessions");
     const first = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-prime-sieve/ });
-    // Open/Replace are icons on the Controller's row, to the right of its name; they appear after a short hover.
+    // Open/Replace are icons just above the Controller's row, right-aligned; they appear after a deliberate hover.
     await expect(open).toBeHidden();
     await ctl.hover();
     await expect(open).toBeVisible();
     const replace = list.getByRole("button", { name: "Replace Controller" });
     for (const b of [open, replace]) {
-      expect(Math.abs((await y(b)) + (await box(b)).height / 2 - ((await y(ctl)) + (await box(ctl)).height / 2))).toBeLessThan(6);
+      expect((await y(b)) + (await box(b)).height).toBeLessThanOrEqual((await y(ctl)) + 4);
       expect((await box(b)).x).toBeGreaterThan((await box(ctl)).x + 100);
       await expect(b).toHaveText("");
       await expect(b.locator("svg")).toBeVisible();

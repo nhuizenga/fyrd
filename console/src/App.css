@@ -70,15 +70,23 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .row-btn:hover { background: var(--a2-background-color-default-hover); }
 .row-btn[aria-current="true"], .row-btn[aria-current="page"] { background: var(--a2-background-color-primary-subdued); }
 .status-icon { display: inline-flex; flex: none; }
-/* The actions sit inside the item's box, top right, so the chips below can use the full width. */
+/* The actions float just above the hovered item, right-aligned, so they never cover its title or chips. */
 .session-item { position: relative; }
 .session-item > .row-btn { width: 100%; }
-.session-item-actions { position: absolute; top: 2px; right: 2px; display: flex; border-radius: 6px; background: var(--a2-background-color-default, #fff);
-  box-shadow: 0 0 0 1px var(--a2-border-color-default, #ddd); opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s linear 0.12s; }
-/* Shown after a short hover (the delay keeps them from flashing as the pointer crosses the list); instantly on keyboard focus. */
-.session-item:hover .session-item-actions { opacity: 1; visibility: visible; transition: opacity 0.12s 0.4s, visibility 0s linear 0.4s; }
+.session-item-actions { position: absolute; bottom: calc(100% - 2px); right: 2px; z-index: 2; display: flex; border-radius: 6px; background: var(--a2-background-color-default, #fff);
+  box-shadow: 0 0 0 1px var(--a2-border-color-default, #ddd), 0 2px 6px rgba(0, 0, 0, 0.12); opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s linear 0.12s; }
+/* Always above, even over a group heading or the search field: anchor them to their own item with position: fixed so
+   the scrolling list can't clip them. anchor-scope keeps each item's actions tied to that item. Browsers without it
+   keep the absolute placement above, which the scroller may clip for the topmost visible item. */
+@supports (anchor-scope: --session-item) {
+  .session-item { anchor-name: --session-item; anchor-scope: --session-item; }
+  .session-item-actions { position: fixed; position-anchor: --session-item; bottom: calc(anchor(top) - 2px); right: calc(anchor(right) + 2px); z-index: 10; position-visibility: anchors-visible; }
+}
+/* Shown after a deliberate hover (the delay keeps them from flashing as the pointer crosses the list); instantly on keyboard focus. */
+.session-item:hover .session-item-actions { opacity: 1; visibility: visible; transition: opacity 0.12s 0.8s, visibility 0s linear 0.8s; }
 .session-item:focus-within .session-item-actions { opacity: 1; visibility: visible; transition: none; }
-@media (hover: none) { .session-item-actions { opacity: 1; visibility: visible; } }
+/* Touch has no hover: keep them always visible, inside the item's own box so they don't cover the item above. */
+@media (hover: none) { .session-item-actions { position: absolute; opacity: 1; visibility: visible; bottom: auto; top: 2px; right: 2px; } }
 .adopt { display: flex; flex-direction: column; gap: 6px; }
 .details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 0.875rem; }
 .details dt { color: var(--a2-foreground-color-subdued); }
