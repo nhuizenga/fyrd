@@ -15,7 +15,7 @@ public sealed record HubPersona(string Id, string Name, string Model, string Def
 public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
 {
     public static readonly IReadOnlyList<string> AllowedModels =
-        ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+        ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2", "claude-fable-5-1"];
 
     private const string ControllerId = "controller";
     private const string SeededMarker = ".seeded";
