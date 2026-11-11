@@ -94,7 +94,7 @@ it("personas list, edit model and definition, save", async () => {
   await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
   await userEvent.click(screen.getByRole("combobox", { name: "Claude model" }));
   expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
-    "Opus 5.5 · claude-opus-5-5", "Sonnet 5.5 · claude-sonnet-5-5", "Haiku 5.5 · claude-haiku-5-5", "Fable 5.1 · claude-fable-5-1",
+    "Opus 5.5 · claude-opus-5-5", "Sonnet 5.5 · claude-sonnet-5-5", "Haiku 5.5 · claude-haiku-5-5", "Fable 5.2 · claude-fable-5-2", "Fable 5.1 · claude-fable-5-1",
   ]);
   await userEvent.click(screen.getByRole("option", { name: "Haiku 5.5 · claude-haiku-5-5" }));
   const def = screen.getByLabelText("Definition");
