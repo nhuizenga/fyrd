@@ -82,6 +82,7 @@ export const resume = (sessionId: string) => call<void>("POST", `/api/hub/sessio
 export const addBudget = (sessionId: string, amountUsd: 25 | 100) =>
   call<HubCostView>("POST", `/api/hub/sessions/${enc(sessionId)}/budget`, { amountUsd });
 /** 202 with `{ waitingFor }` while sibling questions of the same request are unanswered; 204 (undefined) once sent. */
+export const dismissNotification = (id: string) => call<void>("POST", `/api/hub/notifications/${enc(id)}/dismiss`);
 export const answerQuestion = (id: string, body: AnswerBody) =>
   call<{ waitingFor: number } | undefined>("POST", `/api/hub/questions/${enc(id)}/answer`, body);
 

@@ -54,6 +54,7 @@ export default function App() {
   }, []);
 
   const questions = state?.questions ?? [];
+  const inboxCount = questions.length + (state?.notifications?.length ?? 0);
   const lastError = state?.lastError && state.lastError !== dismissedError ? state.lastError : null;
 
   const navButton = (id: Screen, label: string, count?: number) => (
@@ -75,7 +76,7 @@ export default function App() {
           <div className="brand"><img src="/fyrd-icon-32.png" alt="" width={24} height={24} /><Text variant="headline" el="h1" size="medium">fyrd</Text></div>
           <nav aria-label="Primary">
             <Flex gap="2">
-              {navButton("inbox", "Inbox", questions.length)}
+              {navButton("inbox", "Inbox", inboxCount)}
               {navButton("sessions", "Sessions")}
               {navButton("settings", "Settings", state?.pendingMemory ?? 0)}
             </Flex>
