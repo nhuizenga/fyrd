@@ -40,6 +40,7 @@ public sealed partial class HubRunner(
 
     private readonly Dictionary<string, Window> _windows = new(StringComparer.Ordinal);
     private readonly string _cursorFile = Path.Combine(paths.HubDir, "cursors.json");
+    private readonly SummaryLog _summaries = new(paths, time);
     private Dictionary<string, string>? _cursors;
     private string? _controllerId;
 
@@ -109,6 +110,7 @@ public sealed partial class HubRunner(
             {
                 var s = sessions[i];
                 ct.ThrowIfCancellationRequested();
+                _summaries.RecordPolled(s.Id, Title(s), s.Raw);
                 try
                 {
                     var w = await PollSessionAsync(s, fetches.Take(s), ct);

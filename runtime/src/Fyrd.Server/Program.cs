@@ -79,6 +79,7 @@ builder.Services.AddSingleton<CostLedger>();
 builder.Services.AddSingleton<CostGuard>();
 builder.Services.AddSingleton<HubRunner>();
 builder.Services.AddSingleton<SessionProgress>();
+builder.Services.AddSingleton<SummaryLog>(sp => new SummaryLog(sp.GetRequiredService<FyrdPaths>()));
 builder.Services.AddSingleton<SessionProgressWatcher>();
 if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
 {
