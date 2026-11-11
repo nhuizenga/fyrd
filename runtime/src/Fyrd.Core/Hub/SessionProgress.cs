@@ -40,7 +40,7 @@ public sealed class SessionProgress
 /// connections, but would lose progress from turns that start within one sync interval.
 /// </para>
 /// </summary>
-public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress store) : IDisposable
+public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress store, SummaryLog? summaries = null) : IDisposable
 {
     internal static readonly TimeSpan ReopenDelay = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(30);
@@ -99,6 +99,8 @@ public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress
                 {
                     if (e.Ephemeral)
                     {
+                        if (summaries is not null && IsPostTurnSummary(e.Event.Raw))
+                            summaries.RecordStreamed(id, e.Event.CreatedAt, e.Event.Raw);
                         if (progress.Apply(e) is { } live) Publish(id, live, ct);
                         continue;
                     }
@@ -122,6 +124,11 @@ public sealed class SessionProgressWatcher(ICloudSessions cloud, SessionProgress
             catch (OperationCanceledException) { return; }
         }
     }
+
+    private static bool IsPostTurnSummary(System.Text.Json.JsonElement raw) =>
+        raw.ValueKind == System.Text.Json.JsonValueKind.Object
+        && raw.TryGetProperty("type", out var t) && t.ValueEquals("system")
+        && raw.TryGetProperty("subtype", out var s) && s.ValueEquals("post_turn_summary");
 
     public void Dispose()
     {

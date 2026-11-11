@@ -50,6 +50,28 @@ public class SessionProgressTests
     }
 
     [Fact]
+    public async Task Watcher_LogsLivePostTurnSummaries_Only()
+    {
+        using var h = new TempHome();
+        var log = new SummaryLog(h.Paths);
+        var cloud = new FakeCloudSessions();
+        cloud.Streams["session_a"] =
+        [
+            Ephemeral("""{"type":"system","subtype":"task_summary","detail":"Working"}"""),
+            Ephemeral("""{"type":"system","subtype":"post_turn_summary","status_detail":"done","is_noteworthy":true}"""),
+        ];
+        using var watcher = new SessionProgressWatcher(cloud, new SessionProgress(), log);
+
+        watcher.Sync([View("session_a")]);
+
+        await Eventually(() => File.Exists(log.FilePath));
+        var line = JsonDocument.Parse(Assert.Single(File.ReadAllLines(log.FilePath))).RootElement;
+        Assert.Equal("stream", line.GetProperty("source").GetString());
+        Assert.Equal("session_a", line.GetProperty("sessionId").GetString());
+        Assert.True(line.GetProperty("summary").GetProperty("is_noteworthy").GetBoolean());
+    }
+
+    [Fact]
     public async Task Watcher_SavedEventClearsTheLine()
     {
         var cloud = new FakeCloudSessions();
