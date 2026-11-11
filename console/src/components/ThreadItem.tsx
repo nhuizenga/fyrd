@@ -1,8 +1,18 @@
 import { Spinner, Text } from "@servicetitan/anvil2";
+import { fullTime, relativeTime } from "../time";
 import type { HubQuestion, TranscriptItem } from "../types";
 import CopyButton from "./CopyButton";
 import Markdown from "./Markdown";
 import QuestionGroup from "./QuestionGroup";
+
+export const OLD_MESSAGE_MS = 60 * 60 * 1000;
+
+/** Small timestamp for a message more than 60 minutes old; nothing for a newer or undated one. */
+export function MessageTime({ at, now = Date.now() }: { at?: string | null; now?: number }) {
+  const t = at ? new Date(at).getTime() : NaN;
+  if (!Number.isFinite(t) || now - t <= OLD_MESSAGE_MS) return null;
+  return <time className="msg-time" dateTime={at!} title={fullTime(at)}>{relativeTime(at, now)}</time>;
+}
 
 /** One transcript item as a chat bubble; a still-pending question gets its answer buttons. */
 export default function ThreadItem({ item, pending, onChanged }: {
@@ -64,6 +74,7 @@ export default function ThreadItem({ item, pending, onChanged }: {
   }
   return (
     <div className={item.role === "user" ? "msg msg-user" : "msg msg-agent"}>
+      <MessageTime at={item.at} />
       <Markdown text={item.text} />
       <CopyButton text={item.text} />
     </div>

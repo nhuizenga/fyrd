@@ -27,8 +27,16 @@ builder.Services.AddSingleton<OwnerProxy>();
 builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
-// The token is read once from GH_TOKEN (else GITHUB_TOKEN) and kept in memory only.
-builder.Services.AddSingleton(GitHubToken.FromEnvironment());
+builder.Services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
+builder.Services.AddSingleton<SecretStore>();
+builder.Services.AddSingleton<SessionOrderStore>();
+// The token is read from GH_TOKEN (else GITHUB_TOKEN) and kept in memory only; a token saved in Settings overrides it.
+builder.Services.AddSingleton(sp =>
+{
+    var token = GitHubToken.FromEnvironment();
+    token.SetSaved(sp.GetRequiredService<SecretStore>().Get(SecretStore.GitHubToken));
+    return token;
+});
 builder.Services.AddHttpClient("github", c =>
 {
     c.BaseAddress = new Uri("https://api.github.com/");
@@ -40,7 +48,9 @@ builder.Services.AddSingleton<IGitHub>(sp =>
 {
     var token = sp.GetRequiredService<GitHubToken>();
     var octokit = new Octokit.GitHubClient(new Octokit.ProductHeaderValue("fyrd"));
-    if (token.Present) octokit.Credentials = new Octokit.Credentials(token.Value);
+    void Apply() => octokit.Credentials = token.Present ? new Octokit.Credentials(token.Value) : Octokit.Credentials.Anonymous;
+    Apply();
+    token.Changed += Apply;
     return new GitHubApi(token, sp.GetRequiredService<IHttpClientFactory>().CreateClient("github"), octokit, sp.GetRequiredService<TimeProvider>());
 });
 builder.Services.AddSingleton<GitHubSignIn>();
@@ -111,6 +121,8 @@ app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
 app.MapSpecs();
 app.MapInbox();
 app.MapConfig();
+app.MapSecrets();
+app.MapSessionOrder();
 app.MapBoard();
 app.MapMemory();
 app.MapHub();

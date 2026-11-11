@@ -127,7 +127,7 @@ describe("Other answer attachments", () => {
 
   it("offers attach only under Other, and sends the ids with the typed answer", async () => {
     renderQ();
-    expect(screen.queryByLabelText("Attach files")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Add files")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Other" }));
     await userEvent.type(screen.getByLabelText("Your answer"), "See the file");
     await attach(file());

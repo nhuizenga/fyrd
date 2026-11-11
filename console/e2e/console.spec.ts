@@ -97,10 +97,10 @@ test.describe("Sessions", () => {
     expect((await download).suggestedFilename()).toMatch(/\.jsonl$/);
   });
 
-  test("the first listed session's actions still appear above it, over the search field, and stay clickable", async ({ page }) => {
+  test("the first listed session's actions still appear above it, over its group heading, and stay clickable", async ({ page }) => {
     await page.goto("/#/sessions");
     const list = page.getByRole("complementary", { name: "Session list" });
-    const firstItem = list.locator(".session-list.pane-scroll > .session-item").first();
+    const firstItem = list.locator(".session-groups.pane-scroll .session-item").first();
     const row = firstItem.locator(".row-btn");
     const actions = firstItem.locator(".session-item-actions");
     await row.hover();
@@ -137,7 +137,7 @@ test.describe("Sessions", () => {
     await expect(first.getByRole("img", { name: "Running" })).toBeVisible();
     await expect(list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-docs/ }).getByRole("img", { name: "Waiting for you" })).toBeVisible();
     const bg = (l: Locator) => l.evaluate((el) => getComputedStyle(el).backgroundColor);
-    const rows = list.locator(".session-list.pane-scroll .row-btn");
+    const rows = list.locator(".session-groups .row-btn");
     const bgs = await rows.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor));
     expect(new Set(bgs).size).toBe(1); // no zebra stripes
     const docs = list.getByRole("button", { name: /^(?!Export|Archive|Rename).*builder-docs/ });

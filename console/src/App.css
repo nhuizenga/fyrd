@@ -75,15 +75,12 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-item > .row-btn { width: 100%; }
 .session-item-actions { position: absolute; bottom: calc(100% - 2px); right: 2px; z-index: 2; display: flex; border-radius: 6px; background: var(--a2-background-color-default, #fff);
   box-shadow: 0 0 0 1px var(--a2-border-color-default, #ddd), 0 2px 6px rgba(0, 0, 0, 0.12); opacity: 0; visibility: hidden; transition: opacity 0.12s, visibility 0s linear 0.12s; }
-/* Always above, even over the search field or a heading: anchor them to their own item with position: fixed so the
-   scrolling list can't clip them. anchor-scope keeps each item's actions tied to that item. */
+/* Always above, even over a group heading or the search field: anchor them to their own item with position: fixed so
+   the scrolling list can't clip them. anchor-scope keeps each item's actions tied to that item. Browsers without it
+   keep the absolute placement above, which the scroller may clip for the topmost visible item. */
 @supports (anchor-scope: --session-item) {
   .session-item { anchor-name: --session-item; anchor-scope: --session-item; }
   .session-item-actions { position: fixed; position-anchor: --session-item; bottom: calc(anchor(top) - 2px); right: calc(anchor(right) + 2px); z-index: 10; position-visibility: anchors-visible; }
-}
-/* Without anchor positioning the scrolling list clips anything above its first item, so that item's actions drop below it. */
-@supports not (anchor-scope: --session-item) {
-  @media (hover: hover) { .session-list.pane-scroll > .session-item:first-child .session-item-actions { bottom: auto; top: calc(100% - 2px); } }
 }
 /* Shown after a deliberate hover (the delay keeps them from flashing as the pointer crosses the list); instantly on keyboard focus. */
 .session-item:hover .session-item-actions { opacity: 1; visibility: visible; transition: opacity 0.12s 0.8s, visibility 0s linear 0.8s; }
@@ -120,6 +117,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .msg-progress-head { display: flex; align-items: center; gap: 8px; color: var(--a2-foreground-color-subdued); }
 .msg-agent { align-self: stretch; margin-right: 4%; background: var(--a2-background-color-secondary); }
 .msg-user { align-self: stretch; margin-left: 4%; background: var(--a2-background-color-primary-subdued); }
+.msg-time { display: block; font-size: 11px; line-height: 1.3; color: #555; }
 /* Copy shows on hover (and keyboard focus) in the bubble's top-right corner. */
 .msg .copy-btn { position: absolute; top: 2px; right: 2px; opacity: 0; transition: opacity 0.1s; }
 .msg:hover .copy-btn, .msg .copy-btn:focus-visible { opacity: 1; }
@@ -191,3 +189,11 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .attachment-meta { color: var(--a2-foreground-color-subdued); white-space: nowrap; }
 .attachment-remove { display: inline-flex; align-items: center; border: 0; background: transparent; padding: 2px; border-radius: 50%; cursor: pointer; color: inherit; }
 .attachment-remove:hover:not(:disabled), .attachment-remove:focus-visible { background: var(--a2-border-color-subdued); }
+
+/* Persona groups in the session list. */
+.session-group { margin-bottom: 4px; }
+.session-group-head { display: flex; align-items: center; gap: 4px; }
+.session-group-toggle { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 4px 6px; border: 0; background: none; font: inherit; font-weight: 600; cursor: pointer; text-align: left; color: inherit; }
+.session-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drag-handle { display: inline-flex; cursor: grab; opacity: 0.6; }
+.session-group-move { display: flex; }
