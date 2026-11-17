@@ -104,95 +104,97 @@ public class OwnerMessagesTests
 
     // ---- Creating a session ----
 
+    /// <summary>What <c>claude --cloud "controller"</c> printed on the owner's Windows machine (CLI 2.1.326).</summary>
+    private const string ProbeOutput =
+        "Created cloud session: Controller\r\n" +
+        "View: https://claude.ai/code/session_01SQSYWZZdNyXRzob9SmbNhQ?from=cli&m=0\r\n" +
+        "Resume with: claude --teleport session_01SQSYWZZdNyXRzob9SmbNhQ\r\n" +
+        "This folder is not a git repository, so the cloud session starts empty: nothing from this folder is copied into it.\r\n";
+
     [Fact]
-    public void CreateArgs_NewSessionNamed_PromptOnStdin()
+    public void CreateCommand_InteractiveCloudWithDescription()
     {
-        Assert.Equal(["-p", "--cloud", "-n", "Fyrd Controller", "--output-format", "json"],
-            ClaudeCliOwnerMessages.CreateArgs("Fyrd Controller"));
+        Assert.Equal(["claude", "--cloud", "controller"], ClaudeCliOwnerMessages.CreateCommand("controller"));
     }
 
     [Theory]
     [InlineData("")]
     [InlineData("  ")]
     [InlineData("-p")]
-    [InlineData("a\nb")]
-    public void CreateArgs_RejectsUnusableNames(string name)
+    [InlineData("a\"b")]
+    [InlineData("x & calc")]
+    [InlineData("line\nbreak")]
+    public void CreateCommand_RejectsUnusableDescriptions(string description)
     {
-        Assert.Throws<ArgumentException>(() => ClaudeCliOwnerMessages.CreateArgs(name));
+        Assert.Throws<ArgumentException>(() => ClaudeCliOwnerMessages.CreateCommand(description));
     }
 
     [Theory]
-    [InlineData("session_abc", "session_abc")]
-    [InlineData("cse_abc", "session_abc")]
-    [InlineData("https://claude.ai/code/session_abc?from=cli&m=0", "session_abc")]
+    [InlineData("Cloud session: session_abc (https://claude.ai/code/session_abc)", "session_abc")]
+    [InlineData("https://claude.ai/code/cse_abc?from=cli", "session_abc")]
     [InlineData("nothing here", null)]
-    [InlineData("", null)]
     public void FindSessionId_NormalisesToSessionPrefix(string text, string? expected)
     {
         Assert.Equal(expected, ClaudeCliOwnerMessages.FindSessionId(text));
     }
 
+    [Fact]
+    public void FindCreatedId_TheOwnersProbeOutput()
+    {
+        Assert.Equal("session_01SQSYWZZdNyXRzob9SmbNhQ", ClaudeCliOwnerMessages.FindCreatedId(ProbeOutput));
+    }
+
+    [Fact]
+    public void FindCreatedId_WithTerminalEscapes()
+    {
+        var output = "\u001b[?25l\u001b[2J\u001b[H\u001b]0;claude\u0007\u001b[32mCreated cloud session:\u001b[39m Controller\r\n" +
+                     "\u001b[2mView:\u001b[22m \u001b]8;;https://claude.ai/code/session_X9?from=cli&m=0\u001b\\" +
+                     "https://claude.ai/code/session_X9?from=cli&m=0\u001b]8;;\u001b\\\r\n\u001b[?25h";
+        Assert.Equal("session_X9", ClaudeCliOwnerMessages.FindCreatedId(output));
+    }
+
+    [Fact]
+    public void FindCreatedId_ResumeLineAlone()
+    {
+        Assert.Equal("session_r1", ClaudeCliOwnerMessages.FindCreatedId("Resume with: claude --teleport session_r1\n"));
+    }
+
     [Theory]
-    [InlineData("Cloud session: session_abc (https://claude.ai/code/session_abc)", "session_abc")]
-    [InlineData("Cloud session: cse_abc (https://claude.ai/code/session_abc)", "session_abc")]
-    [InlineData("Error: cloud session session_abc is archived", null)]
-    [InlineData("SessionEnd hook failed", null)]
-    public void FindCreatedNote_OnlyTheCreatedLine(string line, string? expected)
+    [InlineData("")]
+    [InlineData("Created cloud session: Controller\r\n")]
+    [InlineData("Error: --cloud \"controller\" is not a cloud session ID or URL (session_ or cse_)")]
+    public void FindCreatedId_NotYet_Null(string output)
     {
-        Assert.Equal(expected, ClaudeCliOwnerMessages.FindCreatedNote(line));
+        Assert.Null(ClaudeCliOwnerMessages.FindCreatedId(output));
     }
 
     [Fact]
-    public void ParseCreated_ResultWithCloudSessionId()
+    public void FindBlockingPrompt_FolderTrust_SaysWhereToTrust()
     {
-        Assert.Equal("session_abc", ClaudeCliOwnerMessages.ParseCreated(0,
-            """{"type":"result","subtype":"success","is_error":false,"result":"Ready.","session_id":"session_abc","session_url":"https://claude.ai/code/session_abc"}""",
-            ""));
+        var prompt = ClaudeCliOwnerMessages.FindBlockingPrompt(
+            "\u001b[1mQuick safety check:\u001b[22m Is this a project you created or one you trust?\r\n> No, exit\r\n  Yes, I trust this folder",
+            @"C:\Users\o\.fyrd\hub\controller-launch");
+        Assert.NotNull(prompt);
+        Assert.Contains(@"C:\Users\o\.fyrd\hub\controller-launch", prompt);
+        Assert.Contains("Yes, I trust this folder", prompt);
+        Assert.Null(ClaudeCliOwnerMessages.FindBlockingPrompt(ProbeOutput, "x"));
     }
 
     [Fact]
-    public void ParseCreated_SessionUrlOnly()
+    public void ScriptArgs_QuotesTheCommandForUtilLinux_PassesArgvForBsd()
     {
-        Assert.Equal("session_abc", ClaudeCliOwnerMessages.ParseCreated(0,
-            """{"type":"result","session_url":"https://claude.ai/code/session_abc"}""", ""));
+        Assert.Equal(["-qfec", "'claude' '--cloud' 'it'\\''s'", "/dev/null"],
+            ScriptTerminalRunner.ScriptArgs(["claude", "--cloud", "it's"], bsd: false));
+        Assert.Equal(["-q", "/dev/null", "claude", "--cloud", "controller"],
+            ScriptTerminalRunner.ScriptArgs(["claude", "--cloud", "controller"], bsd: true));
     }
 
     [Fact]
-    public void ParseCreated_OkShape()
+    public void ConPtyCommandLine_QuotesEachArgumentUnderCmd()
     {
-        Assert.Equal("session_abc", ClaudeCliOwnerMessages.ParseCreated(0,
-            """{"ok":true,"session_id":"cse_abc","title":"Fyrd Controller","url":"https://claude.ai/code/session_abc?from=cli&m=0"}""", ""));
-    }
-
-    [Fact]
-    public void ParseCreated_TurnErroredButSessionExists_ReturnsId()
-    {
-        Assert.Equal("session_abc", ClaudeCliOwnerMessages.ParseCreated(1,
-            """{"type":"result","is_error":true,"session_id":"session_abc"}""", ""));
-    }
-
-    [Fact]
-    public void ParseCreated_NotOk_ThrowsTheCliError()
-    {
-        var e = Assert.Throws<OwnerMessageException>(() => ClaudeCliOwnerMessages.ParseCreated(1,
-            """{"ok":false,"error":"Unable to create cloud session"}""", "Error: x"));
-        Assert.Equal("Unable to create cloud session", e.Message);
-    }
-
-    [Fact]
-    public void ParseCreated_NoJson_FallsBackToTheStderrNote()
-    {
-        Assert.Equal("session_abc", ClaudeCliOwnerMessages.ParseCreated(0, "",
-            "hook noise\nCloud session: session_abc (https://claude.ai/code/session_abc)\n"));
-    }
-
-    [Fact]
-    public void ParseCreated_NothingFound_ThrowsStderrOrExitCode()
-    {
-        var e = Assert.Throws<OwnerMessageException>(() => ClaudeCliOwnerMessages.ParseCreated(1, "", "Error: not logged in\n"));
-        Assert.Equal("Error: not logged in", e.Message);
-        e = Assert.Throws<OwnerMessageException>(() => ClaudeCliOwnerMessages.ParseCreated(3, "", ""));
-        Assert.Contains("3", e.Message);
+        var line = ConPtyTerminalRunner.CommandLine(["claude", "--cloud", "controller"]);
+        Assert.EndsWith(" /d /s /c \"\"claude\" \"--cloud\" \"controller\"\"", line);
+        Assert.Throws<ArgumentException>(() => ConPtyTerminalRunner.CommandLine(["claude", "a&b"]));
     }
 
     /// <summary>Runs <paramref name="body"/> with a fake <c>claude</c> shell script first on PATH.</summary>
@@ -213,63 +215,86 @@ public class OwnerMessagesTests
         }
     }
 
+    private static bool NoScript => OperatingSystem.IsWindows() || !File.Exists("/usr/bin/script") && !File.Exists("/bin/script");
+
     [Fact]
-    public async Task CreateAsync_PassesArgsAndPromptOnStdin_ReadsFinalJson()
+    public async Task CreateAsync_RunsInATerminalInTheLaunchDir_ReadsTheId()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (NoScript) return;
         await WithFakeClaude("""
             d=$(dirname "$0")
             printf '%s\n' "$@" > "$d/args"
-            cat > "$d/stdin"
-            echo '{"type":"result","is_error":false,"session_id":"session_new1","session_url":"https://claude.ai/code/session_new1"}'
+            pwd > "$d/cwd"
+            if [ -t 0 ] && [ -t 1 ]; then echo tty > "$d/tty"; fi
+            printf 'Created cloud session: Controller\r\n'
+            printf 'View: https://claude.ai/code/session_new1?from=cli&m=0\r\n'
+            printf 'Resume with: claude --teleport session_new1\r\n'
             """, async dir =>
         {
-            var id = await new ClaudeCliOwnerMessages().CreateAsync("Fyrd Controller", "You are the Fyrd Controller.\n\nline two");
+            var launch = Path.Combine(dir, "launch");
+            var id = await new ClaudeCliOwnerMessages().CreateAsync("controller", launch);
             Assert.Equal("session_new1", id);
-            Assert.Equal("-p\n--cloud\n-n\nFyrd Controller\n--output-format\njson\n", File.ReadAllText(Path.Combine(dir, "args")));
-            Assert.Equal("You are the Fyrd Controller.\n\nline two", File.ReadAllText(Path.Combine(dir, "stdin")));
+            Assert.Equal("--cloud\ncontroller\n", File.ReadAllText(Path.Combine(dir, "args")));
+            Assert.Equal(launch, File.ReadAllText(Path.Combine(dir, "cwd")).Trim());
+            Assert.True(File.Exists(Path.Combine(dir, "tty")), "claude didn't get a terminal.");
         });
     }
 
     [Fact]
-    public async Task CreateAsync_ReturnsOnTheStderrNote_WithoutWaitingForTheTurn()
+    public async Task CreateAsync_CliKeepsRunningAfterTheId_StopsIt()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (NoScript) return;
         await WithFakeClaude("""
-            cat >/dev/null
-            echo 'Cloud session: session_new2 (https://claude.ai/code/session_new2)' >&2
-            sleep 20
-            """, async _ =>
+            printf 'View: https://claude.ai/code/session_new2?from=cli&m=0\r\n'
+            sleep 30
+            """, async dir =>
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var id = await new ClaudeCliOwnerMessages().CreateAsync("Fyrd Controller", "hi");
-            Assert.Equal("session_new2", id);
-            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
+            Assert.Equal("session_new2", await new ClaudeCliOwnerMessages().CreateAsync("controller", Path.Combine(dir, "l")));
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15));
         });
     }
 
     [Fact]
-    public async Task CreateAsync_CliFails_SurfacesTheCliError()
+    public async Task CreateAsync_FolderTrustPrompt_StopsAndSaysWhatToDo()
     {
-        if (OperatingSystem.IsWindows()) return;
-        await WithFakeClaude("echo 'Error: not logged in' >&2\nexit 1\n", async _ =>
+        if (NoScript) return;
+        await WithFakeClaude("""
+            printf 'Quick safety check: Is this a project you created or one you trust?\r\n> No, exit\r\n  Yes, I trust this folder\r\n'
+            sleep 30
+            """, async dir =>
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
+                new ClaudeCliOwnerMessages().CreateAsync("controller", Path.Combine(dir, "l")));
+            Assert.Contains("trust", e.Message);
+            Assert.Contains(Path.Combine(dir, "l"), e.Message);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(15));
+        });
+    }
+
+    [Fact]
+    public async Task CreateAsync_CliFails_SurfacesWhatItPrinted()
+    {
+        if (NoScript) return;
+        await WithFakeClaude("echo 'Error: Cloud session create failed: Request failed with status code 403' >&2\nexit 1\n", async dir =>
         {
             var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
-                new ClaudeCliOwnerMessages().CreateAsync("Fyrd Controller", new string('x', 1_000_000)));
-            Assert.Equal("Error: not logged in", e.Message);
+                new ClaudeCliOwnerMessages().CreateAsync("controller", Path.Combine(dir, "l")));
+            Assert.Contains("status code 403", e.Message);
         });
     }
 
     [Fact]
     public async Task CreateAsync_CallerCancels_KillsTheChildAndRethrowsCancellation()
     {
-        if (OperatingSystem.IsWindows()) return;
-        await WithFakeClaude("cat >/dev/null\nsleep 30\n", async _ =>
+        if (NoScript) return;
+        await WithFakeClaude("sleep 30\n", async dir =>
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
             var sw = System.Diagnostics.Stopwatch.StartNew();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                new ClaudeCliOwnerMessages().CreateAsync("Fyrd Controller", "hi", cts.Token));
+                new ClaudeCliOwnerMessages().CreateAsync("controller", Path.Combine(dir, "l"), cts.Token));
             Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
         });
     }
@@ -277,16 +302,16 @@ public class OwnerMessagesTests
     [Fact]
     public async Task CreateAsync_NoIdBeforeTimeout_KillsTheChildAndSaysItMayExist()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (NoScript) return;
         var old = ClaudeCliOwnerMessages.CreateTimeout;
         ClaudeCliOwnerMessages.CreateTimeout = TimeSpan.FromMilliseconds(500);
         try
         {
-            await WithFakeClaude("cat >/dev/null\nsleep 30\n", async _ =>
+            await WithFakeClaude("sleep 30\n", async dir =>
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
-                    new ClaudeCliOwnerMessages().CreateAsync("Fyrd Controller", "hi"));
+                    new ClaudeCliOwnerMessages().CreateAsync("controller", Path.Combine(dir, "l")));
                 Assert.Contains("may still have been created", e.Message);
                 Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
             });

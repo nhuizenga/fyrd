@@ -125,9 +125,11 @@ public class HubApiTests
         Assert.Equal("https://claude.ai/code/session_ctl1", body.GetProperty("url").GetString());
         var created = Assert.Single(f.Owner.Created);
         Assert.Equal("session_ctl1", created.SessionId);
-        Assert.Equal("Fyrd Controller", created.Name);
-        Assert.StartsWith("You are the Fyrd Controller.", created.Text);
-        Assert.Contains("environment_id: env_test1", created.Text);
+        Assert.Equal("controller", created.Description);
+        var sent = Assert.Single(f.Owner.Sent);
+        Assert.Equal("session_ctl1", sent.SessionId);
+        Assert.StartsWith("You are the Fyrd Controller.", sent.Text);
+        Assert.Contains("environment_id: env_test1", sent.Text);
         Assert.Empty(f.Cloud.Created);
         Assert.Equal("session_ctl1", f.Services.GetRequiredService<ControllerManager>().CurrentId);
     }

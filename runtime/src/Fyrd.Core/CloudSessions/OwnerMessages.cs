@@ -16,17 +16,18 @@ public interface IOwnerMessages
     Task SendAsync(string sessionId, string text, CancellationToken ct = default);
 
     /// <summary>
-    /// Creates a new cloud session as the owner, named <paramref name="name"/>, whose first turn is <paramref name="text"/>
-    /// (read as the owner's turn, like <see cref="SendAsync"/>). Returns the new session's <c>session_…</c> id.
+    /// Creates a new cloud session as the owner from <paramref name="workingDirectory"/>. <paramref name="description"/>
+    /// becomes its title and its first turn; send the real opening message with <see cref="SendAsync"/> afterwards.
+    /// Returns the new session's <c>session_…</c> id.
     /// </summary>
-    Task<string> CreateAsync(string name, string text, CancellationToken ct = default);
+    Task<string> CreateAsync(string description, string workingDirectory, CancellationToken ct = default);
 }
 
 public sealed class OwnerMessageException(string message) : Exception(message);
 
 /// <summary>
 /// Queues the turn with the owner's signed-in <c>claude</c> CLI (<c>claude -p --cloud &lt;id&gt;</c>, message on stdin),
-/// and creates sessions the same way (<c>claude -p --cloud -n &lt;name&gt;</c>, first turn on stdin).
+/// and creates sessions with <c>claude --cloud &lt;description&gt;</c> in a pseudo terminal (see <see cref="ITerminalRunner"/>).
 /// The CLI's turns are stamped with its own client platform and read as the owner's, with no peer wrapper; turns posted
 /// to the HTTP API carry no platform and are demoted to peer. See docs/superpowers/spikes/2026-11-02-owner-turn-probe.md.
 /// Fyrd never sets that platform header itself.
@@ -125,28 +126,33 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
 
     // ---- Creating a session ----------------------------------------------------------------------------------------
 
-    /// <summary>How long a create may take before Fyrd knows the new session's id (or gives up and kills the CLI).</summary>
-    public static TimeSpan CreateTimeout { get; set; } = TimeSpan.FromMinutes(10);
-
-    /// <summary>How long the CLI may keep running in the background after the id is known (it waits for the first turn).</summary>
-    public static TimeSpan CreateTailTimeout { get; set; } = TimeSpan.FromMinutes(30);
+    /// <summary>How long <c>claude --cloud</c> may take to create the session before Fyrd gives up and kills it.</summary>
+    public static TimeSpan CreateTimeout { get; set; } = TimeSpan.FromMinutes(3);
 
     [GeneratedRegex(@"\b(session|cse)_([A-Za-z0-9]+)\b")]
     private static partial Regex AnySessionIdPattern();
 
-    [GeneratedRegex(@"^Cloud session: (?:session|cse)_[A-Za-z0-9]+")]
-    private static partial Regex CreatedNotePattern();
+    // CSI (ESC [ … final), OSC (ESC ] … BEL or ESC \), other two-character escapes, and stray control characters.
+    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[@-Z\\-_]|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")]
+    private static partial Regex EscapePattern();
+
+    private readonly ITerminalRunner _terminal;
+
+    public ClaudeCliOwnerMessages() : this(TerminalRunners.ForThisPlatform()) { }
+
+    public ClaudeCliOwnerMessages(ITerminalRunner terminal) => _terminal = terminal;
 
     /// <summary>
-    /// The CLI arguments that create a session. <c>--cloud</c> with no value creates a new session; with <c>-p</c> its
-    /// task is the prompt, read from stdin (so it is never parsed as an argument or quoted), and <c>-n</c> names it.
+    /// The command that creates a session: <c>claude --cloud &lt;description&gt;</c>. The CLI only creates a session from
+    /// an interactive terminal (with <c>-p</c>, or without a terminal, <c>--cloud</c> only messages an existing session),
+    /// so it runs in a pseudo terminal. The description becomes the session's title and its first turn.
     /// </summary>
-    public static IReadOnlyList<string> CreateArgs(string name)
+    public static IReadOnlyList<string> CreateCommand(string description)
     {
-        var n = (name ?? "").Trim();
-        if (n.Length == 0 || n.StartsWith('-') || n.Any(char.IsControl))
-            throw new ArgumentException("Not a usable session name.", nameof(name));
-        return ["-p", "--cloud", "-n", n, "--output-format", "json"];
+        var d = (description ?? "").Trim();
+        if (d.Length == 0 || d.StartsWith('-') || !d.All(c => char.IsLetterOrDigit(c) || c is ' ' or '-' or '_'))
+            throw new ArgumentException("Not a usable session description.", nameof(description));
+        return ["claude", "--cloud", d];
     }
 
     /// <summary>The <c>session_…</c> id in <paramref name="text"/> (a <c>cse_…</c> id is the same session), or null.</summary>
@@ -157,124 +163,75 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
         return m.Success ? "session_" + m.Groups[2].Value : null;
     }
 
-    /// <summary>
-    /// The new session's id from the CLI's stderr note <c>Cloud session: &lt;id&gt; (&lt;url&gt;)</c>, which it prints
-    /// once the session is open, before the first turn ends; null for any other line.
-    /// </summary>
-    public static string? FindCreatedNote(string? line) =>
-        line is not null && CreatedNotePattern().IsMatch(line.Trim()) ? FindSessionId(line) : null;
+    /// <summary>Terminal output as plain lines: escape sequences removed, carriage returns treated as line breaks.</summary>
+    public static IReadOnlyList<string> PlainLines(string output) =>
+        EscapePattern().Replace(output ?? "", "")
+            .Replace("\r\n", "\n").Replace('\r', '\n')
+            .Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 
     /// <summary>
-    /// The new session's id from the CLI's final output. With <c>-p --output-format json</c> the CLI waits for the first
-    /// turn and prints its result object with the cloud <c>session_id</c> and <c>session_url</c> added (a self-hosted
-    /// environment prints <c>{"ok":true,"session_id":…,"url":…}</c> instead); both are read. A session that was created
-    /// but whose turn ended in an error still counts as created. Throws with the CLI's <c>error</c>, its stderr, or its
-    /// exit code when no session id can be found.
+    /// The new session's id from what <c>claude --cloud</c> printed, once it has printed it. The CLI (2.1.326) prints
+    /// <code>
+    /// Created cloud session: Controller
+    /// View: https://claude.ai/code/session_…?from=cli&amp;m=0
+    /// Resume with: claude --teleport session_…
+    /// </code>
+    /// and exits. The id is read from the <c>View:</c> or <c>Resume with:</c> line; null until one is printed.
     /// </summary>
-    public static string ParseCreated(int exitCode, string stdout, string stderr)
+    public static string? FindCreatedId(string output)
     {
-        string? id = null, error = null;
-        bool? ok = null;
-        try
-        {
-            using var doc = JsonDocument.Parse(stdout);
-            var r = doc.RootElement;
-            if (r.ValueKind == JsonValueKind.Object)
-            {
-                if (r.TryGetProperty("ok", out var o)) ok = o.ValueKind == JsonValueKind.True;
-                if (r.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String) error = e.GetString();
-                foreach (var key in new[] { "session_id", "session_url", "url" })
-                    if (id is null && r.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
-                        id = FindSessionId(v.GetString());
-            }
-        }
-        catch (JsonException) { }
-
-        if (id is not null && ok != false) return id;
-        if (!string.IsNullOrWhiteSpace(error)) throw new OwnerMessageException(error);
-        // The CLI's note is the fallback when its stdout was not JSON.
-        if (ok != false)
-            foreach (var line in stderr.Split('\n'))
-                if (FindCreatedNote(line) is { } noted) return noted;
-        var err = stderr.Trim();
-        throw new OwnerMessageException(err.Length > 0 ? err : $"claude exited with {exitCode} without creating a session.");
+        var lines = PlainLines(output);
+        var created = lines.ToList().FindIndex(l => l.StartsWith("Created cloud session", StringComparison.OrdinalIgnoreCase));
+        foreach (var line in created >= 0 ? lines.Skip(created) : lines)
+            if ((line.StartsWith("View:", StringComparison.OrdinalIgnoreCase) && line.Contains("claude.ai/code/")) ||
+                line.StartsWith("Resume with:", StringComparison.OrdinalIgnoreCase))
+                if (FindSessionId(line) is { } id) return id;
+        return null;
     }
 
     /// <summary>
-    /// Creates the session with <c>claude -p --cloud -n &lt;name&gt;</c> and the text on stdin. Returns as soon as the
-    /// id is known: from the CLI's stderr note while the first turn still runs (the CLI is then left to finish in the
-    /// background; stopping it would not stop the session), or from its final output. It runs in the temp directory so
-    /// no local repository is attached to the new session.
+    /// The reason the CLI is waiting for an answer nobody will give (it runs in a hidden terminal), or null. Fyrd types
+    /// nothing into it, so a first-run prompt is reported to the owner, who answers it once in a terminal of their own.
     /// </summary>
-    public async Task<string> CreateAsync(string name, string text, CancellationToken ct = default)
+    public static string? FindBlockingPrompt(string output, string workingDirectory)
     {
-        var args = CreateArgs(name);
-        var p = Start(args, Path.GetTempPath());
-        var noted = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var stderrText = new StringBuilder();
-        var stdout = p.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var stderr = Task.Run(async () =>
-        {
-            while (await p.StandardError.ReadLineAsync() is { } line)
-            {
-                lock (stderrText) stderrText.Append(line).Append('\n');
-                if (FindCreatedNote(line) is { } id) noted.TrySetResult(id);
-            }
-        });
+        var text = string.Join('\n', PlainLines(output));
+        if (text.Contains("trust this folder", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Quick safety check", StringComparison.OrdinalIgnoreCase))
+            return $"claude asked whether to trust the folder it runs in ({workingDirectory}). Open a terminal there, run " +
+                   "`claude`, choose \"Yes, I trust this folder\", then type /exit, and create the Controller again.";
+        if (text.Contains("Choose the text style", StringComparison.OrdinalIgnoreCase) ||
+            text.Contains("Select login method", StringComparison.OrdinalIgnoreCase))
+            return "claude is asking first-run setup questions. Run `claude` once in a terminal, finish its setup, then " +
+                   "type /exit and create the Controller again.";
+        return null;
+    }
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(CreateTimeout);
-        var handedOff = false;
+    /// <summary>
+    /// Creates a session with <c>claude --cloud &lt;description&gt;</c> in a pseudo terminal, run in
+    /// <paramref name="workingDirectory"/> (a folder that is not a git repository, so nothing is copied into the session),
+    /// and returns its id from what the CLI prints. Throws with the CLI's own words when it prints no id.
+    /// </summary>
+    public async Task<string> CreateAsync(string description, string workingDirectory, CancellationToken ct = default)
+    {
+        var command = CreateCommand(description);
+        Directory.CreateDirectory(workingDirectory);
+        TerminalRun run;
         try
         {
-            try
-            {
-                await p.StandardInput.WriteAsync(text.AsMemory(), cts.Token);
-                p.StandardInput.Close();
-            }
-            catch (IOException)
-            {
-                // The CLI exited before reading stdin (signed out, refused): fall through so its real error surfaces.
-            }
-
-            var exited = p.WaitForExitAsync(cts.Token);
-            var first = await Task.WhenAny(noted.Task, exited);
-            if (first == noted.Task)
-            {
-                handedOff = true;
-                _ = FinishInBackgroundAsync(p, stdout, stderr);
-                return await noted.Task;
-            }
-            await exited; // throws when cancelled or timed out
-            try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None); } catch { }
-            string err;
-            lock (stderrText) err = stderrText.ToString();
-            return ParseCreated(p.ExitCode, stdout.IsCompletedSuccessfully ? stdout.Result : "", err);
+            run = await _terminal.RunAsync(command, workingDirectory,
+                output => FindCreatedId(output) is not null || FindBlockingPrompt(output, workingDirectory) is not null,
+                CreateTimeout, ct);
         }
-        catch (OperationCanceledException)
-        {
-            try { p.Kill(true); } catch (InvalidOperationException) { }
-            try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(2), CancellationToken.None); } catch { }
-            // The note may have arrived just as the wait ended.
-            if (noted.Task.IsCompletedSuccessfully) return noted.Task.Result;
-            if (ct.IsCancellationRequested) throw;
+        catch (System.ComponentModel.Win32Exception) { throw new OwnerMessageException("The claude CLI is not installed or not on PATH."); }
+
+        if (FindCreatedId(run.Output) is { } id) return id;
+        if (FindBlockingPrompt(run.Output, workingDirectory) is { } prompt) throw new OwnerMessageException(prompt);
+        if (run.TimedOut)
             throw new OwnerMessageException("claude timed out creating the session; it may still have been created (check claude.ai/code).");
-        }
-        finally
-        {
-            if (!handedOff) p.Dispose();
-        }
-    }
-
-    /// <summary>Lets the create CLI wait for the first turn, then disposes it; kills it after <see cref="CreateTailTimeout"/>.</summary>
-    private static async Task FinishInBackgroundAsync(Process p, Task<string> stdout, Task stderr)
-    {
-        using (p)
-        {
-            try { await p.WaitForExitAsync().WaitAsync(CreateTailTimeout); }
-            catch (TimeoutException) { try { p.Kill(true); } catch (InvalidOperationException) { } }
-            catch { }
-            try { await Task.WhenAll(stdout, stderr).WaitAsync(TimeSpan.FromSeconds(2)); } catch { }
-        }
+        var tail = string.Join(' ', PlainLines(run.Output).TakeLast(4));
+        throw new OwnerMessageException(tail.Length > 0
+            ? $"claude didn't create a session: {tail}"
+            : $"claude exited with {run.ExitCode?.ToString() ?? "no exit code"} without creating a session.");
     }
 }

@@ -19,18 +19,21 @@ public sealed class HubConfigException(string message) : InvalidOperationExcepti
 
 /// <summary>
 /// Creates, finds and retires the single Controller cloud session. Fyrd creates it through the owner's signed-in
-/// <c>claude</c> CLI (<see cref="IOwnerMessages.CreateAsync"/>), so it is the owner's own session and the whole opening
-/// prompt is its first, owner-authored turn. Its id is stored in <c>controller.json</c> under the hub dir.
+/// <c>claude</c> CLI (<see cref="IOwnerMessages.CreateAsync"/>), so it is the owner's own session, then sends it the whole
+/// opening prompt as an owner-authored turn. Its id is stored in <c>controller.json</c> under the hub dir.
 /// </summary>
 public sealed partial class ControllerManager
 {
     public const string PromptPreamble =
-        "You are the Fyrd Controller. I started this session for that role, so please follow the instructions below.";
+        "You are the Fyrd Controller. I started this session for that role (its first message, \"controller\", only " +
+        "named it), so please follow the instructions below.";
 
-    /// <summary>The name the Controller session is created with.</summary>
-    public const string SessionName = "Fyrd Controller";
+    /// <summary>What <c>claude --cloud</c> is given: the new session's title and its (otherwise ignored) first turn.</summary>
+    public const string SessionDescription = "controller";
 
-    private sealed record State(string? SessionId, string? PostedMemoryHash, string? PostedInstructionsHash = null);
+    /// <param name="PendingId">A session created for a new Controller whose opening prompt hasn't been delivered yet.</param>
+    private sealed record State(string? SessionId, string? PostedMemoryHash, string? PostedInstructionsHash = null,
+        string? PendingId = null);
 
     private readonly ICloudSessions _cloud;
     private readonly IOwnerMessages _owner;
@@ -59,10 +62,18 @@ public sealed partial class ControllerManager
         _memory = memory;
         _config = config;
         _file = Path.Combine(paths.HubDir, "controller.json");
+        LaunchDirectory = Path.Combine(paths.HubDir, "controller-launch");
         _state = LoadState();
     }
 
     public string? CurrentId { get { lock (_stateLock) return _state.SessionId; } }
+
+    /// <summary>A created session still waiting for its opening prompt (see <see cref="CreateAsync"/>).</summary>
+    public string? PendingId { get { lock (_stateLock) return _state.PendingId; } }
+
+    /// <summary>The folder <c>claude --cloud</c> runs in: Fyrd's own, not a git repository, so the session starts empty,
+    /// and stable, so the owner only has to trust it once if the CLI asks.</summary>
+    public string LaunchDirectory { get; }
 
     /// <summary>When this process last created a Controller (in memory only). Until a poll that ran later has listed it,
     /// the console still reports the stored id.</summary>
@@ -117,10 +128,16 @@ public sealed partial class ControllerManager
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     /// <summary>
-    /// Creates a new Controller session as the owner with the whole Controller prompt as its first turn, stores the new id,
-    /// then archives a different live previous Controller on a best-effort basis. A create that fails leaves the current
-    /// Controller alone; once the CLI has created the session, its id is always stored, so it is never orphaned. A second
-    /// create while one runs throws <see cref="ControllerBusyException"/>.
+    /// Creates a new Controller session as the owner and sends it the whole Controller prompt, then stores it as the
+    /// Controller and archives a different live previous one on a best-effort basis.
+    /// <list type="number">
+    /// <item><c>claude --cloud controller</c> creates the session (its first turn is just "controller"). Its id is stored
+    /// as pending at once, so a session the CLI created is never orphaned.</item>
+    /// <item>The prompt is sent with <see cref="IOwnerMessages.SendAsync"/>. If that fails, the pending session is kept and
+    /// the next create re-sends the prompt to it instead of creating another session.</item>
+    /// <item>Only then does the session replace the current Controller, which is left alone until this point.</item>
+    /// </list>
+    /// A second create while one runs throws <see cref="ControllerBusyException"/>.
     /// </summary>
     public async Task<ControllerInfo> CreateAsync(CancellationToken ct)
     {
@@ -131,13 +148,29 @@ public sealed partial class ControllerManager
             // Built before any side effect, so a missing Controller persona leaves the current Controller alone.
             var (prompt, instructionsHash, hash) = BuildPrompt();
 
-            // The opening prompt is Fyrd's own text, but the session only honours it as the owner's turn: the CLI creates
-            // the session as the owner and sends the prompt as that turn, in full.
-            var id = await _owner.CreateAsync(SessionName, prompt, ct);
-            if (!SessionIdRegex().IsMatch(id))
-                throw new HubConfigException($"The claude CLI returned an unexpected session id ({id}).");
+            string id;
+            if (PendingId is { } pending && await LiveAsync(pending, ct) is not null)
+            {
+                id = pending;
+            }
+            else
+            {
+                id = await _owner.CreateAsync(SessionDescription, LaunchDirectory, ct);
+                if (!SessionIdRegex().IsMatch(id))
+                    throw new HubConfigException($"The claude CLI returned an unexpected session id ({id}).");
+                lock (_stateLock) SaveState(_state with { PendingId = id });
+            }
 
-            // From here the new session exists: store it first, and don't let the request's cancellation stop that.
+            // The opening prompt is Fyrd's own text, but the session only honours it as the owner's turn, which the CLI sends.
+            try { await _owner.SendAsync(id, prompt, CancellationToken.None); }
+            catch (OwnerMessageException e)
+            {
+                throw new OwnerMessageException(
+                    $"The Controller session was created ({id}), but its opening prompt wasn't delivered: {e.Message} " +
+                    "Create the Controller again to resend it to the same session.");
+            }
+
+            // From here the new session is the Controller: store it, and don't let the request's cancellation stop that.
             await _gate.WaitAsync(CancellationToken.None);
             try
             {
@@ -182,7 +215,7 @@ public sealed partial class ControllerManager
         {
             if (CurrentId is not { } stored) return null;
             if (await LiveAsync(stored, ct) is not null) return Info(stored);
-            lock (_stateLock) SaveState(new State(null, null));
+            lock (_stateLock) SaveState(new State(null, null, PendingId: _state.PendingId));
             return null;
         }
         finally { _gate.Release(); }
@@ -197,7 +230,7 @@ public sealed partial class ControllerManager
             if (CurrentId is not { } current) return;
             try { await _cloud.ArchiveAsync(current, ct); }
             catch (CloudSessionApiException e) when (e.Status == 404) { }
-            lock (_stateLock) SaveState(new State(null, null));
+            lock (_stateLock) SaveState(new State(null, null, PendingId: _state.PendingId));
         }
         finally { _gate.Release(); }
     }

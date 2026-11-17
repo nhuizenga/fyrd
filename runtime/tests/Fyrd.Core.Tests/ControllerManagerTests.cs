@@ -8,7 +8,8 @@ public sealed class ControllerManagerTests : IDisposable
 {
     private const string Ctl = "session_ctl1";
     private const string FirstLine =
-        "You are the Fyrd Controller. I started this session for that role, so please follow the instructions below.";
+        "You are the Fyrd Controller. I started this session for that role (its first message, \"controller\", only " +
+        "named it), so please follow the instructions below.";
 
     private readonly TempHome _home = new();
     private readonly string _seeds = Path.Combine(Path.GetTempPath(), "fyrd-seeds-" + Guid.NewGuid());
@@ -57,15 +58,19 @@ public sealed class ControllerManagerTests : IDisposable
         Assert.Equal(Ctl, Make().CurrentId);
         var created = Assert.Single(_owner.Created);
         Assert.Equal(Ctl, created.SessionId);
-        Assert.Equal(ControllerManager.SessionName, created.Name);
-        Assert.Equal(m.BuildPrompt().Prompt, created.Text);
-        Assert.StartsWith(FirstLine + "\n\nControl things.", created.Text);
-        Assert.Contains("<hub-settings>", created.Text);
-        Assert.Contains("environment_id: env_abc123", created.Text);
-        Assert.Contains("Owner likes tea.", created.Text);
-        // The opening prompt is the create's first turn: nothing else is sent, and nothing goes through the cloud API.
-        Assert.Single(_owner.Sent);
+        Assert.Equal("controller", created.Description);
+        Assert.Equal(Path.Combine(_home.Paths.HubDir, "controller-launch"), created.WorkingDirectory);
+        Assert.Equal(m.LaunchDirectory, created.WorkingDirectory);
+        // The whole opening prompt follows as one owner turn; nothing goes through the cloud API.
+        var sent = Assert.Single(_owner.Sent);
+        Assert.Equal(Ctl, sent.SessionId);
+        Assert.Equal(m.BuildPrompt().Prompt, sent.Text);
+        Assert.StartsWith(FirstLine + "\n\nControl things.", sent.Text);
+        Assert.Contains("<hub-settings>", sent.Text);
+        Assert.Contains("environment_id: env_abc123", sent.Text);
+        Assert.Contains("Owner likes tea.", sent.Text);
         Assert.Empty(_cloud.Created);
+        Assert.Null(m.PendingId);
         var expected = ControllerManager.MemoryHash(mem, new HubPersonas(_home.Paths, _seeds).List());
         Assert.Equal(expected, m.PostedMemoryHash);
         Assert.Equal(expected, Make().PostedMemoryHash);
@@ -85,6 +90,76 @@ public sealed class ControllerManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_PromptNotDelivered_KeepsSessionPendingAndCurrentController()
+    {
+        await Created("session_old");
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        _owner.CreatedIds.Enqueue(Ctl);
+        // The call after the create is the prompt's send.
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("claude timed out")); return Task.CompletedTask; };
+
+        var e = await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+
+        Assert.Contains(Ctl, e.Message);
+        Assert.Contains("wasn't delivered: claude timed out", e.Message);
+        Assert.Equal("session_old", Make().CurrentId);
+        Assert.Equal(Ctl, Make().PendingId);
+        Assert.Empty(_cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Create_AfterPromptNotDelivered_ResendsToTheSameSession()
+    {
+        await Created("session_old");
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        _owner.CreatedIds.Enqueue(Ctl);
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("claude timed out")); return Task.CompletedTask; };
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+        _owner.OnCreate = null;
+        var m = Make();
+
+        var info = await m.CreateAsync(default);
+
+        Assert.Equal(Ctl, info.SessionId);
+        Assert.Equal(2, _owner.Created.Count); // the old Controller's and this one's; the retry created nothing
+        Assert.Equal((Ctl, m.BuildPrompt().Prompt), _owner.Sent[^1]);
+        Assert.Equal(Ctl, Make().CurrentId);
+        Assert.Null(Make().PendingId);
+        Assert.Equal(["session_old"], _cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Create_PendingSessionGone_CreatesANewOne()
+    {
+        _owner.CreatedIds.Enqueue("session_lost");
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("claude timed out")); return Task.CompletedTask; };
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+        _owner.OnCreate = null;
+        _cloud.SetSession(FakeCloudSessions.Session("session_lost", "archived"));
+        _owner.CreatedIds.Enqueue(Ctl);
+
+        var info = await Make().CreateAsync(default);
+
+        Assert.Equal(Ctl, info.SessionId);
+        Assert.Equal(["session_lost", Ctl], _owner.Created.Select(c => c.SessionId));
+        Assert.Null(Make().PendingId);
+    }
+
+    [Fact]
+    public async Task Find_And_Retire_KeepAPendingSession()
+    {
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        _owner.CreatedIds.Enqueue(Ctl);
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("x")); return Task.CompletedTask; };
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+
+        Assert.Null(await Make().FindAsync(default));
+        await Make().RetireAsync(default);
+
+        Assert.Equal(Ctl, Make().PendingId);
+    }
+
+    [Fact]
     public async Task Create_CliFails_NoController_StoresNothing()
     {
         _owner.Fail = new OwnerMessageException("claude is not on PATH");
@@ -101,6 +176,8 @@ public sealed class ControllerManagerTests : IDisposable
         _owner.CreatedIds.Enqueue(id);
         await Assert.ThrowsAsync<HubConfigException>(() => Make().CreateAsync(default));
         Assert.Null(Make().CurrentId);
+        Assert.Null(Make().PendingId);
+        Assert.Empty(_owner.Sent);
     }
 
     [Fact]
