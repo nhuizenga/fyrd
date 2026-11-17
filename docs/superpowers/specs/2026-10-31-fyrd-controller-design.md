@@ -82,6 +82,8 @@ Slash commands such as `/clear` can't be triggered through any API (spike, 5 run
 
 ### The Controller itself
 
+> **Superseded (2026-11-17, PR #52).** Fyrd now creates the Controller itself through the owner's signed-in `claude` CLI (`claude -p --cloud -n "Fyrd Controller"`, opening prompt on stdin), and the paste-an-id adopt flow below is removed. See `skills/controller/README.md`. The adoption notes are kept as history.
+
 > **Adopted, not created (2026-10-31).** Sessions Fyrd creates through the API get no claude.ai connectors (its OAuth client's `mcp_connector_ids` are dropped), so a Fyrd-made Controller would have no `claude-code-remote` tools and couldn't create sessions. A session made by hand on claude.ai has every connector (hub spike, "Connectors"). So the owner creates the Controller and Fyrd adopts it. **To confirm in the smoke run:** that peasants the Controller creates with `create_session` inherit its connectors.
 
 - **Owner creates, console adopts.** The owner creates a no-repo session on claude.ai and pastes its id into the console's "Adopt Controller" panel. Fyrd rejects an id that is not live or that carries Fyrd tags (`fyrd-hub`, `fyrd-role-*`, i.e. a peasant). It archives any previous Controller and stores the id. "Open Controller" opens the stored session while it is live. "Replace Controller" archives it and clears the id, for example after persona or skill changes; the owner then adopts a fresh session.

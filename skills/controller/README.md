@@ -14,7 +14,7 @@ If you uploaded the `fyrd-*` skills to claude.ai earlier, remove the uploaded fy
 
 ## Create the Controller
 
-In the Fyrd console open Sessions and choose **Create Controller**. Fyrd runs your signed-in `claude` CLI (`claude -p --cloud -n "Fyrd Controller"`) to start a new cloud session at https://claude.ai/code and sends the whole opening prompt (instructions, skills, settings and memory) as its first turn, so the session is your own and reads that turn as yours. It needs no repo.
+In the Fyrd console open Sessions and choose **Create Controller**. Fyrd runs your signed-in `claude` CLI (`claude -p --cloud -n "Fyrd Controller"`) to start a new cloud session at https://claude.ai/code and sends the whole opening prompt (instructions, skills, settings and memory) as its first turn, so the session is your own and reads that turn as yours. It needs no repo. It runs in your CLI's default cloud environment: the hub's `environment_id` setting is not passed to the CLI (`--environment` only takes self-hosted `ccpool_` environments).
 
 ## After edits
 
