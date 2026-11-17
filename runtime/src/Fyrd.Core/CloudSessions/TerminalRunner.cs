@@ -164,9 +164,14 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
     public async Task<TerminalRun> RunAsync(IReadOnlyList<string> command, string workingDirectory, Func<string, bool> stop,
         TimeSpan timeout, CancellationToken ct = default)
     {
-        if (!Native.CreatePipe(out var inRead, out var inWrite, IntPtr.Zero, 0) ||
-            !Native.CreatePipe(out var outRead, out var outWrite, IntPtr.Zero, 0))
+        if (!Native.CreatePipe(out var inRead, out var inWrite, IntPtr.Zero, 0))
             throw new OwnerMessageException($"Could not create a terminal for claude (error {Marshal.GetLastWin32Error()}).");
+        if (!Native.CreatePipe(out var outRead, out var outWrite, IntPtr.Zero, 0))
+        {
+            var error = Marshal.GetLastWin32Error();
+            inRead.Dispose(); inWrite.Dispose();
+            throw new OwnerMessageException($"Could not create a terminal for claude (error {error}).");
+        }
 
         var hr = Native.CreatePseudoConsole(new Native.COORD { X = 120, Y = 40 }, inRead, outWrite, 0, out var hpc);
         // The pseudo console holds its own copies of its ends of the pipes.
@@ -181,10 +186,26 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
         var pcClosed = 0;
         void ClosePc() { if (Interlocked.Exchange(ref pcClosed, 1) == 0) Native.ClosePseudoConsole(hpc); }
 
+        // The command and everything it starts (cmd.exe, then claude) run in a job that is killed as a whole, and when
+        // Fyrd closes the job, so stopping cmd.exe can't leave claude running.
+        var job = Native.CreateJobObjectW(IntPtr.Zero, null);
+        if (job.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            job.Dispose(); ClosePc(); inWrite.Dispose(); outRead.Dispose();
+            throw new OwnerMessageException($"Could not create a job for claude (error {error}).");
+        }
+
         Native.PROCESS_INFORMATION pi;
         var attrs = IntPtr.Zero;
         try
         {
+            var limits = new Native.JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+            limits.BasicLimitInformation.LimitFlags = Native.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            if (!Native.SetInformationJobObject(job, Native.JobObjectExtendedLimitInformation, ref limits,
+                    Marshal.SizeOf<Native.JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()))
+                throw new OwnerMessageException($"Could not set up a job for claude (error {Marshal.GetLastWin32Error()}).");
+
             var size = IntPtr.Zero;
             Native.InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
             attrs = Marshal.AllocHGlobal(size);
@@ -195,14 +216,26 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
 
             var si = new Native.STARTUPINFOEX { lpAttributeList = attrs };
             si.StartupInfo.cb = Marshal.SizeOf<Native.STARTUPINFOEX>();
+            // Null standard handles with STARTF_USESTDHANDLES: the child uses the pseudo console, not the handles Fyrd's
+            // own process was given (which point at its log file when it runs detached).
+            si.StartupInfo.dwFlags = Native.STARTF_USESTDHANDLES;
             var cmd = new StringBuilder(CommandLine(command));
             if (!Native.CreateProcessW(null, cmd, IntPtr.Zero, IntPtr.Zero, false,
-                    Native.EXTENDED_STARTUPINFO_PRESENT, IntPtr.Zero, workingDirectory, ref si, out pi))
+                    Native.EXTENDED_STARTUPINFO_PRESENT | Native.CREATE_SUSPENDED, IntPtr.Zero, workingDirectory, ref si, out pi))
                 throw new OwnerMessageException($"Could not start claude (error {Marshal.GetLastWin32Error()}).");
+            // Put it in the job before it runs, so nothing it starts escapes the job.
+            if (!Native.AssignProcessToJobObject(job, pi.hProcess))
+            {
+                var error = Marshal.GetLastWin32Error();
+                Native.TerminateProcess(pi.hProcess, 1);
+                Native.CloseHandle(pi.hThread); Native.CloseHandle(pi.hProcess);
+                throw new OwnerMessageException($"Could not put claude in its job (error {error}).");
+            }
+            Native.ResumeThread(pi.hThread);
         }
         catch
         {
-            ClosePc(); inWrite.Dispose(); outRead.Dispose();
+            ClosePc(); inWrite.Dispose(); outRead.Dispose(); job.Dispose();
             throw;
         }
         finally
@@ -210,7 +243,8 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
             if (attrs != IntPtr.Zero) { Native.DeleteProcThreadAttributeList(attrs); Marshal.FreeHGlobal(attrs); }
         }
 
-        using var process = new SafeProcessHandle(pi.hProcess, ownsHandle: true);
+        using var jobHandle = job; // closing the job kills whatever is still running in it
+        var process = new SafeProcessHandle(pi.hProcess, ownsHandle: true);
         Native.CloseHandle(pi.hThread);
         using var inputWriter = inWrite; // kept open (nothing is typed) so the console doesn't see end of input
 
@@ -245,15 +279,72 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
         {
             return await TerminalWait.RunAsync(exited,
                 () => Native.GetExitCodeProcess(process, out var code) ? (int)code : -1,
-                () => { Native.TerminateProcess(process, 1); ClosePc(); },
+                () => { Native.TerminateJobObject(job, 1); ClosePc(); },
                 output, pump, timeout, ct);
         }
-        finally { ClosePc(); }
+        finally
+        {
+            ClosePc();
+            // The process handle is only closed once nothing waits on it any more. The job is terminated first so the wait
+            // ends; if it still hasn't, the handle is left open rather than closed under a blocked wait.
+            if (!exited.IsCompleted) Native.TerminateJobObject(job, 1);
+            try { await exited.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None); } catch (TimeoutException) { }
+            if (exited.IsCompleted) process.Dispose();
+        }
     }
 
     private static class Native
     {
         public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+        public const uint CREATE_SUSPENDED = 0x00000004;
+        public const int STARTF_USESTDHANDLES = 0x00000100;
+        public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
+        public const int JobObjectExtendedLimitInformation = 9;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+        {
+            public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+            public uint LimitFlags;
+            public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+            public uint ActiveProcessLimit;
+            public UIntPtr Affinity;
+            public uint PriorityClass, SchedulingClass;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct IO_COUNTERS
+        {
+            public ulong ReadOperationCount, WriteOperationCount, OtherOperationCount, ReadTransferCount, WriteTransferCount,
+                OtherTransferCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+        {
+            public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+            public IO_COUNTERS IoInfo;
+            public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern SafeFileHandle CreateJobObjectW(IntPtr attributes, string? name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetInformationJobObject(SafeFileHandle job, int infoClass,
+            ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, int length);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool AssignProcessToJobObject(SafeFileHandle job, IntPtr process);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool TerminateJobObject(SafeFileHandle job, uint exitCode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern uint ResumeThread(IntPtr thread);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool TerminateProcess(IntPtr process, uint exitCode);
         public const int PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -301,9 +392,6 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool TerminateProcess(SafeProcessHandle process, uint exitCode);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool CloseHandle(IntPtr handle);
