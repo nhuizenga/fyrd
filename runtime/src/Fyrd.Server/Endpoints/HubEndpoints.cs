@@ -14,7 +14,7 @@ internal static partial class HubEndpoints
     private const int MaxText = 20_000;
     private const string ResumeText = "Continue where you left off.";
     private const int MaxTitle = 200;
-    private const string NoController = "No Controller yet. Create a session on claude.ai and adopt it.";
+    private const string NoController = "No Controller yet. Create one from the Sessions screen.";
     private const string NotPending = "This question is no longer waiting for an answer.";
     private const string SessionBlocked = "This session reached its daily spend limit.";
     private const string FyrdBlocked = "Fyrd reached its daily spend limit.";
@@ -24,7 +24,6 @@ internal static partial class HubEndpoints
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(10);
 
     private sealed record TextBody(string? Text, string[]? FileIds = null);
-    private sealed record AdoptBody(string? SessionId);
     private sealed record BudgetBody(JsonElement? AmountUsd);
     private sealed record RenameBody(string? Title);
     private sealed record PrBody(string? Url, bool? Force = null);
@@ -36,12 +35,12 @@ internal static partial class HubEndpoints
 
         group.MapGet("/state", (HubState state, ControllerManager controller, PendingMemory pending, SessionProgress progress, GitHubSignIn gitHub, StackMergeJobs stackMerges) => ApiErrors.Run(() =>
         {
-            // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one adopted
+            // A Controller the last poll listed as live (a stored id archived elsewhere is a dead link), or one created
             // after the last poll, which no poll has had the chance to list yet.
             var stored = controller.CurrentId;
             var id = stored is not null
                      && (state.Sessions.Any(s => s.Id == stored)
-                         || (controller.AdoptedAt is { } adoptedAt && (state.LastPollAt is not { } polled || polled < adoptedAt)))
+                         || (controller.CreatedAt is { } createdAt && (state.LastPollAt is not { } polled || polled < createdAt)))
                 ? stored : null;
             return Results.Ok(new
             {
@@ -64,16 +63,17 @@ internal static partial class HubEndpoints
             });
         }));
 
-        // Fyrd never creates the Controller: the owner makes it on claude.ai (so it has connectors) and adopts it here.
         group.MapPost("/controller", (ControllerManager controller, CancellationToken ct) =>
             Cloud(async () => await controller.FindAsync(ct) is { } info
                 ? Results.Ok(info)
                 : Results.Problem(NoController, statusCode: StatusCodes.Status404NotFound)));
 
-        group.MapPost("/controller/adopt", (AdoptBody? body, ControllerManager controller, HubState state, CancellationToken ct) =>
+        // Fyrd creates the Controller through the owner's claude CLI, so it is the owner's session and its opening prompt is
+        // the owner's turn. Not tied to the request: a closed tab must not kill the CLI half way through creating it.
+        group.MapPost("/controller/create", (ControllerManager controller, HubState state) =>
             Cloud(async () =>
             {
-                var info = await controller.AdoptAsync(body?.SessionId ?? "", ct);
+                var info = await controller.CreateAsync(CancellationToken.None);
                 state.RequestPoll();
                 return Results.Ok(info);
             }));

@@ -76,13 +76,14 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void Readme_NoUpload_RemovesOldSkills_PointsToReplaceAndAdopt()
+    public void Readme_NoUpload_RemovesOldSkills_PointsToReplaceAndCreate()
     {
         var text = File.ReadAllText(Path.Combine(SkillsDir(), "README.md"));
         Assert.DoesNotContain("Upload all four skills together", text, StringComparison.Ordinal);
         Assert.Contains("remove the uploaded fyrd-* skills", text, StringComparison.Ordinal);
         Assert.Contains("Replace Controller", text, StringComparison.Ordinal);
-        Assert.Contains("Adopt Controller", text, StringComparison.Ordinal);
+        Assert.Contains("Create Controller", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Adopt Controller", text, StringComparison.Ordinal);
         Assert.Contains("https://claude.ai/code", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Recreate Controller", text, StringComparison.Ordinal);
         Assert.DoesNotContain("API-created sessions such as the Controller", text, StringComparison.Ordinal);

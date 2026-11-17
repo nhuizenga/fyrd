@@ -47,10 +47,11 @@ public class HubApiTests
         Assert.Equal(JsonValueKind.Null, body.GetProperty("controller").ValueKind);
     }
 
-    private static async Task<HttpResponseMessage> Adopt(FyrdFactory f, HttpClient c, string id = "session_ctl1")
+    private static async Task<HttpResponseMessage> CreateController(FyrdFactory f, HttpClient c, string id = "session_ctl1")
     {
         f.Cloud.SetSession(Core.Tests.FakeCloudSessions.Session(id));
-        return await c.PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = id });
+        f.Owner.CreatedIds.Enqueue(id);
+        return await c.PostAsync("/api/hub/controller/create", null);
     }
 
     [Fact]
@@ -58,7 +59,7 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        await Adopt(f, c);
+        await CreateController(f, c);
         f.Services.GetRequiredService<HubState>().Publish([View("session_ctl1")], []);
         var ctl = (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("controller");
         Assert.Equal("session_ctl1", ctl.GetProperty("sessionId").GetString());
@@ -70,8 +71,8 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        await Adopt(f, c);
-        // A poll after the adoption did not list the stored Controller (archived elsewhere): no dead link.
+        await CreateController(f, c);
+        // A poll after the create did not list the stored Controller (archived elsewhere): no dead link.
         var state = f.Services.GetRequiredService<HubState>();
         state.Publish([View()], []);
         state.LastPollAt = DateTimeOffset.UtcNow.AddMinutes(1);
@@ -80,108 +81,85 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task State_JustAdopted_ShowsControllerBeforeAnyPoll()
+    public async Task State_JustCreated_ShowsControllerBeforeAnyPoll()
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        await Adopt(f, c);
+        await CreateController(f, c);
         var ctl = (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("controller");
         Assert.Equal("session_ctl1", ctl.GetProperty("sessionId").GetString());
     }
 
     [Fact]
-    public async Task State_AdoptedAfterLastPoll_ShowsController()
+    public async Task State_CreatedAfterLastPoll_ShowsController()
     {
         using var f = new FyrdFactory();
         var state = f.Services.GetRequiredService<HubState>();
         state.Publish([View()], []);
         state.LastPollAt = DateTimeOffset.UtcNow.AddMinutes(-1);
         var c = f.CreateClient();
-        await Adopt(f, c);
+        await CreateController(f, c);
         var ctl = (await ReadJson(await c.GetAsync("/api/hub/state"))).GetProperty("controller");
         Assert.Equal("session_ctl1", ctl.GetProperty("sessionId").GetString());
     }
 
     [Fact]
-    public async Task Adopt_RequestsAnImmediatePoll()
+    public async Task Create_RequestsAnImmediatePoll()
     {
         using var f = new FyrdFactory();
         var state = f.Services.GetRequiredService<HubState>();
         Assert.False(state.PollRequested.IsCompleted);
-        await Adopt(f, f.CreateClient());
+        await CreateController(f, f.CreateClient());
         Assert.True(state.PollRequested.IsCompleted);
     }
 
     [Fact]
-    public async Task Adopt_FyrdPeasant_400()
-    {
-        using var f = new FyrdFactory();
-        f.Cloud.SetSession(Core.Tests.FakeCloudSessions.Session("session_p1", tags: ["fyrd-hub", "fyrd-role-builder"]));
-        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = "session_p1" });
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Equal("That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.",
-            (await ReadJson(r)).GetProperty("detail").GetString());
-        Assert.Empty(f.Owner.Sent);
-    }
-
-    [Fact]
-    public async Task Adopt_Ok_SendsPromptAndReturnsInfo()
+    public async Task Create_Ok_CreatesSessionWithPromptAndReturnsInfo()
     {
         using var f = new FyrdFactory();
         SetEnvironment(f);
-        var r = await Adopt(f, f.CreateClient());
+        var r = await CreateController(f, f.CreateClient());
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         var body = await ReadJson(r);
         Assert.Equal("session_ctl1", body.GetProperty("sessionId").GetString());
         Assert.Equal("https://claude.ai/code/session_ctl1", body.GetProperty("url").GetString());
-        var sent = Assert.Single(f.Owner.Sent);
-        Assert.Equal("session_ctl1", sent.SessionId);
-        Assert.StartsWith("You are the Fyrd Controller.", sent.Text);
-        Assert.Contains("environment_id: env_test1", sent.Text);
+        var created = Assert.Single(f.Owner.Created);
+        Assert.Equal("session_ctl1", created.SessionId);
+        Assert.Equal("Fyrd Controller", created.Name);
+        Assert.StartsWith("You are the Fyrd Controller.", created.Text);
+        Assert.Contains("environment_id: env_test1", created.Text);
         Assert.Empty(f.Cloud.Created);
         Assert.Equal("session_ctl1", f.Services.GetRequiredService<ControllerManager>().CurrentId);
     }
 
-    [Theory]
-    [InlineData("not-a-session")]
-    [InlineData("")]
-    public async Task Adopt_BadId_400(string id)
+    [Fact]
+    public async Task Create_CliFails_502()
     {
         using var f = new FyrdFactory();
-        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = id });
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Contains("session_", (await ReadJson(r)).GetProperty("detail").GetString());
+        f.Owner.Fail = new Core.CloudSessions.OwnerMessageException("The claude CLI is not installed or not on PATH.");
+        var r = await f.CreateClient().PostAsync("/api/hub/controller/create", null);
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Equal("The claude CLI is not installed or not on PATH.", (await ReadJson(r)).GetProperty("detail").GetString());
+        Assert.Null(f.Services.GetRequiredService<ControllerManager>().CurrentId);
+    }
+
+    [Fact]
+    public async Task Adopt_EndpointRemoved_404()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = "session_ctl1" });
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Empty(f.Owner.Sent);
     }
 
     [Fact]
-    public async Task Adopt_NoBody_400()
-    {
-        using var f = new FyrdFactory();
-        var r = await f.CreateClient().PostAsync("/api/hub/controller/adopt",
-            new StringContent("", System.Text.Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-    }
-
-    [Fact]
-    public async Task Adopt_Unavailable_400()
-    {
-        using var f = new FyrdFactory();
-        f.Cloud.SetSession(Core.Tests.FakeCloudSessions.Session("session_gone", "archived"));
-        var r = await f.CreateClient().PostAsJsonAsync("/api/hub/controller/adopt", new { sessionId = "session_gone" });
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Equal("That session isn't available. Create a new one on claude.ai and paste its id.",
-            (await ReadJson(r)).GetProperty("detail").GetString());
-    }
-
-    [Fact]
-    public async Task Adopt_PersonaMissing_400()
+    public async Task Create_PersonaMissing_400()
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
         await c.GetAsync("/api/hub/personas"); // seeds
         File.WriteAllText(Path.Combine(f.Home.Paths.HubPersonasDir, "controller.json"), "{ not json");
-        var r = await Adopt(f, c);
+        var r = await CreateController(f, c);
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Equal("The Controller persona is missing.", (await ReadJson(r)).GetProperty("detail").GetString());
     }
@@ -191,7 +169,7 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        await Adopt(f, c);
+        await CreateController(f, c);
         var r = await c.PostAsync("/api/hub/controller", null);
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         Assert.Equal("session_ctl1", (await ReadJson(r)).GetProperty("sessionId").GetString());
@@ -204,7 +182,7 @@ public class HubApiTests
         using var f = new FyrdFactory();
         var r = await f.CreateClient().PostAsync("/api/hub/controller", null);
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
-        Assert.Equal("No Controller yet. Create a session on claude.ai and adopt it.",
+        Assert.Equal("No Controller yet. Create one from the Sessions screen.",
             (await ReadJson(r)).GetProperty("detail").GetString());
         Assert.Empty(f.Cloud.Created);
     }
@@ -214,7 +192,7 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        await Adopt(f, c);
+        await CreateController(f, c);
         f.Cloud.SetSession(Core.Tests.FakeCloudSessions.Session("session_ctl1", "archived"));
         var r = await c.PostAsync("/api/hub/controller", null);
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
@@ -226,7 +204,7 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        await Adopt(f, c);
+        await CreateController(f, c);
         var r = await c.PostAsync("/api/hub/controller/retire", null);
         Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
         Assert.Equal(["session_ctl1"], f.Cloud.Archived);
@@ -1448,7 +1426,7 @@ public class HubApiTests
     public async Task Budget_Controller_409()
     {
         using var f = new FyrdFactory();
-        await Adopt(f, f.CreateClient());
+        await CreateController(f, f.CreateClient());
         SeedCost(f, Cost(60, exempt: true), "session_ctl1");
         var r = await f.CreateClient().PostAsJsonAsync("/api/hub/sessions/session_ctl1/budget", new { amountUsd = 25 });
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);

@@ -370,7 +370,7 @@ public sealed partial class HubRunner(
         if (session is null || session.SessionStatus is "running" or RequiresAction) return;
         if (controller.SkillsMissing) return;
         var (prompt, instructionsHash, memoryHash) = controller.BuildPrompt();
-        // An adoption during this pass replaced the Controller: post nothing to the old one.
+        // A new Controller created during this pass replaced the old one: post nothing to the old one.
         if (controller.CurrentId != controllerId || instructionsHash == controller.PostedInstructionsHash) return;
         // Sent as the owner's own turn: a running session rejects a peer-wrapped message for this.
         await owner.SendAsync(controllerId, prompt, ct);
@@ -384,7 +384,7 @@ public sealed partial class HubRunner(
         var text = HubPrompt.MemoryUpdate(memory, personas.List());
         // Hashed over the exact text sent, so a concurrent memory edit cannot be marked as posted.
         var hash = ControllerManager.Hash(text);
-        // An adoption during this pass replaced the Controller (and set its own hash): post nothing to the old one.
+        // A new Controller created during this pass replaced the old one (and set its own hash): post nothing to the old one.
         if (controller.CurrentId != controllerId || hash == controller.PostedMemoryHash) return;
         // Same path as a typed message: a running session rejects a peer-wrapped memory update.
         await owner.SendAsync(controllerId, text, ct);
@@ -427,7 +427,7 @@ public sealed partial class HubRunner(
     private string Title(CloudSession s) =>
         !string.IsNullOrEmpty(s.Title) ? s.Title : IsController(s) ? ControllerRole : s.Id;
 
-    /// <summary>The Controller is identified by its stored id only (an adopted one has no role tag); others by their role tag, which can never be <c>controller</c>.</summary>
+    /// <summary>The Controller is identified by its stored id only (it is created through the CLI and has no role tag); others by their role tag, which can never be <c>controller</c>.</summary>
     private string? Role(CloudSession s) =>
         IsController(s) ? ControllerRole
         : s.Tags.FirstOrDefault(t => t.StartsWith(RoleTagPrefix, StringComparison.Ordinal))?[RoleTagPrefix.Length..] is { } tagged

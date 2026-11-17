@@ -13,15 +13,17 @@ public sealed record ControllerInfo(string SessionId, string Url);
 public sealed class HubConfigException(string message) : InvalidOperationException(message);
 
 /// <summary>
-/// Adopts, finds and retires the single Controller cloud session. The owner creates it on claude.ai; Fyrd never creates it.
-/// Its id is stored in <c>controller.json</c> under the hub dir.
+/// Creates, finds and retires the single Controller cloud session. Fyrd creates it through the owner's signed-in
+/// <c>claude</c> CLI (<see cref="IOwnerMessages.CreateAsync"/>), so it is the owner's own session and the whole opening
+/// prompt is its first, owner-authored turn. Its id is stored in <c>controller.json</c> under the hub dir.
 /// </summary>
 public sealed partial class ControllerManager
 {
     public const string PromptPreamble =
         "You are the Fyrd Controller. I started this session for that role, so please follow the instructions below.";
-    private const string Unavailable = "That session isn't available. Create a new one on claude.ai and paste its id.";
-    private const string Peasant = "That's a Fyrd peasant session. Create a fresh session on claude.ai and paste its id.";
+
+    /// <summary>The name the Controller session is created with.</summary>
+    public const string SessionName = "Fyrd Controller";
 
     private sealed record State(string? SessionId, string? PostedMemoryHash, string? PostedInstructionsHash = null);
 
@@ -36,7 +38,7 @@ public sealed partial class ControllerManager
     private readonly SemaphoreSlim _gate = new(1);
     private readonly object _stateLock = new();
     private State _state;
-    private DateTimeOffset? _adoptedAt;
+    private DateTimeOffset? _createdAt;
 
     public ControllerManager(
         ICloudSessions cloud, IOwnerMessages owner, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null, HubSkills? skills = null)
@@ -54,9 +56,9 @@ public sealed partial class ControllerManager
 
     public string? CurrentId { get { lock (_stateLock) return _state.SessionId; } }
 
-    /// <summary>When this process last adopted a Controller (in memory only). Until a poll that ran later has listed it,
+    /// <summary>When this process last created a Controller (in memory only). Until a poll that ran later has listed it,
     /// the console still reports the stored id.</summary>
-    public DateTimeOffset? AdoptedAt { get { lock (_stateLock) return _adoptedAt; } }
+    public DateTimeOffset? CreatedAt { get { lock (_stateLock) return _createdAt; } }
 
     public string? PostedMemoryHash
     {
@@ -81,7 +83,7 @@ public sealed partial class ControllerManager
     }
 
     /// <summary>
-    /// The full message that adopts a Controller or refreshes its instructions (preamble, instructions, memory), plus the
+    /// The full message that opens a new Controller or refreshes its instructions (preamble, instructions, memory), plus the
     /// hashes of its instructions part and of its memory part. All three come from one snapshot, so what is marked as
     /// posted is exactly what is sent.
     /// </summary>
@@ -107,26 +109,22 @@ public sealed partial class ControllerManager
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     /// <summary>
-    /// Adopts a session the owner created on claude.ai (Fyrd-created sessions get no claude.ai connectors, so they
-    /// cannot create sessions): checks it is live, archives a different live previous Controller, sends the Controller
-    /// prompt as a user message, and stores the id.
+    /// Creates a new Controller session as the owner with the whole Controller prompt as its first turn, then archives a
+    /// different live previous Controller and stores the new id. A create that fails leaves the current Controller alone.
     /// </summary>
-    public async Task<ControllerInfo> AdoptAsync(string sessionId, CancellationToken ct)
+    public async Task<ControllerInfo> CreateAsync(CancellationToken ct)
     {
-        var id = (sessionId ?? "").Trim();
-        if (!SessionIdRegex().IsMatch(id))
-            throw new HubConfigException("That isn't a session id. Paste the id that starts with session_ (the last part of the session's claude.ai URL).");
-
         await _gate.WaitAsync(ct);
         try
         {
-            var session = await LiveAsync(id, ct) ?? throw new HubConfigException(Unavailable);
-            // Peasants carry Fyrd tags and were created through the API, so they lack connectors; owner-made sessions have none.
-            if (session.Tags.Any(t => t == "fyrd-hub" || t.StartsWith("fyrd-role-", StringComparison.Ordinal)))
-                throw new HubConfigException(Peasant);
-
             // Built before any side effect, so a missing Controller persona leaves the current Controller alone.
             var (prompt, instructionsHash, hash) = BuildPrompt();
+
+            // The opening prompt is Fyrd's own text, but the session only honours it as the owner's turn: the CLI creates
+            // the session as the owner and sends the prompt as that turn, in full.
+            var id = await _owner.CreateAsync(SessionName, prompt, ct);
+            if (!SessionIdRegex().IsMatch(id))
+                throw new HubConfigException($"The claude CLI returned an unexpected session id ({id}).");
 
             if (CurrentId is { } previous && previous != id && await LiveAsync(previous, ct) is not null)
             {
@@ -134,12 +132,10 @@ public sealed partial class ControllerManager
                 catch (CloudSessionApiException e) when (e.Status == 404) { }
             }
 
-            // The adoption prompt is Fyrd's own text, but the session only honours it as the owner's turn (a peer-wrapped one is rejected).
-            await _owner.SendAsync(id, prompt, ct);
             lock (_stateLock)
             {
                 SaveState(new State(id, hash, instructionsHash));
-                _adoptedAt = _time.GetUtcNow();
+                _createdAt = _time.GetUtcNow();
             }
             return Info(id);
         }
@@ -161,7 +157,7 @@ public sealed partial class ControllerManager
         finally { _gate.Release(); }
     }
 
-    /// <summary>Archives the current Controller (404 ignored) and clears the stored id; the owner then adopts a new one.</summary>
+    /// <summary>Archives the current Controller (404 ignored) and clears the stored id; the owner then creates a new one.</summary>
     public async Task RetireAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
