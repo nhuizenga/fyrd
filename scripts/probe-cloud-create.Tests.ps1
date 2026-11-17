@@ -31,6 +31,10 @@ Describe 'Find-SessionIds' {
     It 'finds ids inside claude.ai/code URLs and through escape codes' {
         @(Find-SessionIds "`e[2mhttps://claude.ai/code/session_01QQQwww999`e[0m") | Should -Be @('session_01QQQwww999')
     }
+    It 'reads the owner''s real create output (View: URL with a query string)' {
+        $out = "Created cloud session: Controller`r`nView: https://claude.ai/code/session_01SQSYWZZdNyXRzob9SmbNhQ?from=cli&m=0`r`nResume with: claude --teleport session_01SQSYWZZdNyXRzob9SmbNhQ`r`n"
+        @(Find-SessionIds $out) | Should -Be @('session_01SQSYWZZdNyXRzob9SmbNhQ')
+    }
     It 'keeps order and drops duplicates' {
         @(Find-SessionIds 'session_01AAAAAAAA then cse_01AAAAAAAA then session_01BBBBBBBB') |
             Should -Be @('session_01AAAAAAAA', 'session_01BBBBBBBB')

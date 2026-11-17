@@ -14,7 +14,11 @@ If you uploaded the `fyrd-*` skills to claude.ai earlier, remove the uploaded fy
 
 ## Create the Controller
 
-In the Fyrd console open Sessions and choose **Create Controller**. Fyrd runs your signed-in `claude` CLI (`claude -p --cloud -n "Fyrd Controller"`) to start a new cloud session at https://claude.ai/code and sends the whole opening prompt (instructions, skills, settings and memory) as its first turn, so the session is your own and reads that turn as yours. It needs no repo. It runs in your CLI's default cloud environment: the hub's `environment_id` setting is not passed to the CLI (`--environment` only takes self-hosted `ccpool_` environments).
+In the Fyrd console open Sessions and choose **Create Controller**. Fyrd runs your signed-in `claude` CLI as `claude --cloud controller` to start a new cloud session at https://claude.ai/code, reads the new session's id from what the CLI prints, then sends the whole opening prompt (instructions, skills, settings and memory) to it with `claude -p --cloud <id>`, so the session is your own and reads the prompt as yours. The CLI only creates a session from an interactive terminal, so Fyrd runs it in a hidden pseudo terminal (ConPTY on Windows). It runs from `<FYRD_HOME>/hub/controller-launch`, which isn't a git repository, so the session needs no repo and starts empty. It runs in your CLI's default cloud environment: the hub's `environment_id` setting is not passed to the CLI (`--environment` only takes self-hosted `ccpool_` environments).
+
+- **The session's first message is just "controller":** that is the description the CLI starts it with. The opening prompt that follows says so.
+- **First-run prompts:** if the CLI asks whether to trust `controller-launch`, or asks first-run setup questions, Fyrd stops it and says so. Open a terminal in that folder, run `claude`, answer the prompt once, type `/exit`, and create the Controller again.
+- **If the prompt isn't delivered:** the session was still created and Fyrd keeps it. Choose **Create Controller** again: Fyrd resends the prompt to that same session instead of creating another one.
 
 ## After edits
 
