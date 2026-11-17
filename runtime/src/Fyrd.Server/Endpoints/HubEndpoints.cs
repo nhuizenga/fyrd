@@ -719,7 +719,8 @@ internal static partial class HubEndpoints
             ? action()
             : Task.FromResult(Results.Problem($"Session '{id}' is not a hub session.", statusCode: StatusCodes.Status404NotFound));
 
-    /// <summary>Runs a cloud call; auth and API failures become 502, a missing hub setting becomes 400.</summary>
+    /// <summary>Runs a cloud call; auth and API failures become 502, a missing hub setting becomes 400, a Controller create
+    /// already running becomes 409.</summary>
     private static Task<IResult> Cloud(Func<Task<IResult>> action) => ApiErrors.RunAsync(async () =>
     {
         try
@@ -741,6 +742,10 @@ internal static partial class HubEndpoints
         catch (HubConfigException e)
         {
             return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+        catch (ControllerBusyException e)
+        {
+            return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict);
         }
     });
 }

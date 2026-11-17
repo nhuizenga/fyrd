@@ -161,17 +161,84 @@ public sealed class ControllerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Create_Concurrent_OneController()
+    public async Task Create_WhileAnotherRuns_FailsFastWithoutCallingCli()
     {
-        _cloud.SetSession(FakeCloudSessions.Session("session_a"));
-        _cloud.SetSession(FakeCloudSessions.Session("session_b"));
-        _owner.CreatedIds.Enqueue("session_a");
-        _owner.CreatedIds.Enqueue("session_b");
+        var hold = new TaskCompletionSource();
+        _owner.OnCreate = _ => hold.Task;
         var m = Make();
-        await Task.WhenAll(m.CreateAsync(default), m.CreateAsync(default));
-        // Serialised: the second create archives the first.
-        var archived = Assert.Single(_cloud.Archived);
-        Assert.NotEqual(archived, m.CurrentId);
+        var first = m.CreateAsync(default);
+
+        await Assert.ThrowsAsync<ControllerBusyException>(() => m.CreateAsync(default));
+
+        hold.SetResult();
+        Assert.Equal("session_ctl", (await first).SessionId);
+        Assert.Single(_owner.Created);
+    }
+
+    [Fact]
+    public async Task Create_WhileCliRuns_FindAndRetireDoNotWait()
+    {
+        await Created();
+        var hold = new TaskCompletionSource();
+        _owner.OnCreate = _ => hold.Task;
+        _owner.CreatedIds.Enqueue("session_new");
+        var m = Make();
+        var create = m.CreateAsync(default);
+
+        var found = m.FindAsync(default);
+        Assert.True(found.IsCompleted, "Find waited for the CLI.");
+        Assert.Equal(Ctl, (await found)?.SessionId);
+
+        hold.SetResult();
+        await create;
+        Assert.Equal("session_new", m.CurrentId);
+    }
+
+    [Fact]
+    public async Task Create_PreviousCheckFails_StoresNewIdAndWarns()
+    {
+        await Created("session_old");
+        _cloud.ThrowOnGetFor("session_old", new CloudSessionApiException(500, "boom"));
+        _owner.CreatedIds.Enqueue(Ctl);
+
+        var info = await Make().CreateAsync(default);
+
+        Assert.Equal(Ctl, info.SessionId);
+        Assert.Contains("session_old", info.Warning);
+        Assert.Contains("could not be archived", info.Warning);
+        Assert.Equal(Ctl, Make().CurrentId);
+        Assert.NotNull(Make().PostedMemoryHash);
+        Assert.Empty(_cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Create_PreviousArchiveFails_StoresNewIdAndWarns()
+    {
+        await Created("session_old");
+        _owner.CreatedIds.Enqueue(Ctl);
+        _owner.OnCreate = _ =>
+        {
+            // The live check succeeds; the archive after it fails.
+            _cloud.SkipCalls(1);
+            _cloud.ThrowOnNextCall(new HttpRequestException("network down"));
+            return Task.CompletedTask;
+        };
+
+        var info = await Make().CreateAsync(default);
+
+        Assert.Equal(Ctl, info.SessionId);
+        Assert.Contains("network down", info.Warning);
+        Assert.Equal(Ctl, Make().CurrentId);
+    }
+
+    [Fact]
+    public async Task Create_PreviousArchived_NoWarning()
+    {
+        await Created("session_old");
+        await Created(Ctl);
+        _owner.CreatedIds.Enqueue("session_third");
+        var info = await Make().CreateAsync(default);
+        Assert.Null(info.Warning);
     }
 
     [Fact]

@@ -7,7 +7,12 @@ using Fyrd.Core.Config;
 
 namespace Fyrd.Core.Hub;
 
-public sealed record ControllerInfo(string SessionId, string Url);
+/// <summary>A Controller session. <paramref name="Warning"/> says what a create could not finish (archiving the previous
+/// Controller) without failing it.</summary>
+public sealed record ControllerInfo(string SessionId, string Url, string? Warning = null);
+
+/// <summary>A Controller create is already running; a second one is refused rather than queued behind it.</summary>
+public sealed class ControllerBusyException(string message) : InvalidOperationException(message);
 
 /// <summary>The hub cannot act until the owner fixes a setting; the message says which.</summary>
 public sealed class HubConfigException(string message) : InvalidOperationException(message);
@@ -36,6 +41,9 @@ public sealed partial class ControllerManager
     private readonly HubSkills? _skills;
     private readonly string _file;
     private readonly SemaphoreSlim _gate = new(1);
+    // Held for the whole CLI run, which can take minutes; _gate is only held for the short state and cloud steps around it,
+    // so Open and Retire don't wait for the CLI.
+    private readonly SemaphoreSlim _createGate = new(1);
     private readonly object _stateLock = new();
     private State _state;
     private DateTimeOffset? _createdAt;
@@ -109,12 +117,15 @@ public sealed partial class ControllerManager
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
     /// <summary>
-    /// Creates a new Controller session as the owner with the whole Controller prompt as its first turn, then archives a
-    /// different live previous Controller and stores the new id. A create that fails leaves the current Controller alone.
+    /// Creates a new Controller session as the owner with the whole Controller prompt as its first turn, stores the new id,
+    /// then archives a different live previous Controller on a best-effort basis. A create that fails leaves the current
+    /// Controller alone; once the CLI has created the session, its id is always stored, so it is never orphaned. A second
+    /// create while one runs throws <see cref="ControllerBusyException"/>.
     /// </summary>
     public async Task<ControllerInfo> CreateAsync(CancellationToken ct)
     {
-        await _gate.WaitAsync(ct);
+        if (!await _createGate.WaitAsync(0, ct))
+            throw new ControllerBusyException("A Controller is already being created.");
         try
         {
             // Built before any side effect, so a missing Controller persona leaves the current Controller alone.
@@ -126,20 +137,40 @@ public sealed partial class ControllerManager
             if (!SessionIdRegex().IsMatch(id))
                 throw new HubConfigException($"The claude CLI returned an unexpected session id ({id}).");
 
-            if (CurrentId is { } previous && previous != id && await LiveAsync(previous, ct) is not null)
+            // From here the new session exists: store it first, and don't let the request's cancellation stop that.
+            await _gate.WaitAsync(CancellationToken.None);
+            try
             {
-                try { await _cloud.ArchiveAsync(previous, ct); }
-                catch (CloudSessionApiException e) when (e.Status == 404) { }
+                string? previous;
+                lock (_stateLock)
+                {
+                    previous = _state.SessionId;
+                    SaveState(new State(id, hash, instructionsHash));
+                    _createdAt = _time.GetUtcNow();
+                }
+                var warning = previous is not null && previous != id ? await TryArchiveAsync(previous) : null;
+                return Info(id) with { Warning = warning };
             }
-
-            lock (_stateLock)
-            {
-                SaveState(new State(id, hash, instructionsHash));
-                _createdAt = _time.GetUtcNow();
-            }
-            return Info(id);
+            finally { _gate.Release(); }
         }
-        finally { _gate.Release(); }
+        finally { _createGate.Release(); }
+    }
+
+    /// <summary>Archives a previous Controller if it is still live; returns a warning instead of throwing when that fails.</summary>
+    private async Task<string?> TryArchiveAsync(string previous)
+    {
+        try
+        {
+            if (await LiveAsync(previous, CancellationToken.None) is not null) await _cloud.ArchiveAsync(previous, CancellationToken.None);
+            return null;
+        }
+        catch (CloudSessionApiException e) when (e.Status == 404) { return null; }
+        catch (Exception e) when (e is CloudSessionApiException or HttpRequestException or CloudSessionAuthException
+                                      or ClaudeAuthMissingException or TaskCanceledException)
+        {
+            return $"The new Controller was created, but the previous one ({previous}) could not be archived: {e.Message} " +
+                   "Archive it on claude.ai/code.";
+        }
     }
 
     /// <summary>The stored Controller when it is still live; otherwise clears the stored id and returns null.

@@ -144,6 +144,48 @@ public class HubApiTests
     }
 
     [Fact]
+    public async Task Create_WhileAnotherRuns_409()
+    {
+        using var f = new FyrdFactory();
+        var hold = new TaskCompletionSource();
+        f.Owner.OnCreate = _ => hold.Task;
+        var c = f.CreateClient();
+        var first = c.PostAsync("/api/hub/controller/create", null);
+        // Wait until the first create is inside the CLI call.
+        for (var i = 0; i < 200; i++)
+        {
+            var probe = await c.PostAsync("/api/hub/controller/create", null);
+            if (probe.StatusCode == HttpStatusCode.Conflict)
+            {
+                Assert.Equal("A Controller is already being created.", (await ReadJson(probe)).GetProperty("detail").GetString());
+                hold.SetResult();
+                Assert.Equal(HttpStatusCode.OK, (await first).StatusCode);
+                Assert.Single(f.Owner.Created);
+                return;
+            }
+            await Task.Delay(10);
+        }
+        Assert.Fail("The second create was not refused with 409.");
+    }
+
+    [Fact]
+    public async Task Create_PreviousArchiveFails_200WithWarning()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await CreateController(f, c, "session_old")).StatusCode);
+        f.Cloud.ThrowOnGetFor("session_old", new Core.CloudSessions.CloudSessionApiException(500, "boom"));
+
+        var r = await CreateController(f, c, "session_new");
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var body = await ReadJson(r);
+        Assert.Equal("session_new", body.GetProperty("sessionId").GetString());
+        Assert.Contains("session_old", body.GetProperty("warning").GetString());
+        Assert.Equal("session_new", f.Services.GetRequiredService<ControllerManager>().CurrentId);
+    }
+
+    [Fact]
     public async Task Adopt_EndpointRemoved_404()
     {
         using var f = new FyrdFactory();
