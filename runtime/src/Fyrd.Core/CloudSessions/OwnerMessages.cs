@@ -132,9 +132,30 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
     [GeneratedRegex(@"\b(session|cse)_([A-Za-z0-9]+)\b")]
     private static partial Regex AnySessionIdPattern();
 
-    // CSI (ESC [ … final), OSC (ESC ] … BEL or ESC \), other two-character escapes, and stray control characters.
-    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[@-Z\\-_]|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")]
+    // CSI (ESC [ … final), OSC (ESC ] … BEL or ESC \), DCS/SOS/PM/APC strings (ESC P|X|^|_ … ESC \ or BEL), other
+    // two-character escapes, and stray control characters. A CSI that moves the cursor to another line (CUP, VPA, CUU, CUD,
+    // CNL, CPL) becomes a line break, and one that moves along the line (CUF, CHA) a space: a pseudo terminal may lay out
+    // lines with cursor moves instead of line breaks, and stripping those would run the lines together.
+    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[PX^_][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[@-Z\\-_]|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")]
     private static partial Regex EscapePattern();
+
+    // The id in the session's claude.ai/code URL. The id must be followed by something that ends it (the URL's query
+    // string, a path, a quote or white space), so a line still being printed, or text run on after it, can't cut or
+    // lengthen it.
+    [GeneratedRegex(@"claude\.ai/code/(?:session|cse)_([A-Za-z0-9]+)(?=[?#/\s""'<>)\]])")]
+    private static partial Regex SessionUrlPattern();
+
+    // The id after --teleport, followed by white space.
+    [GeneratedRegex(@"--teleport\s+(?:session|cse)_([A-Za-z0-9]+)(?=\s)")]
+    private static partial Regex TeleportPattern();
+
+    private static string Unescape(Match m)
+    {
+        var v = m.Value;
+        if (v.Length > 2 && v[0] == '\x1B' && v[1] == '[')
+            return v[^1] switch { 'H' or 'f' or 'd' or 'A' or 'B' or 'E' or 'F' => "\n", 'C' or 'G' => " ", _ => "" };
+        return "";
+    }
 
     private readonly ITerminalRunner _terminal;
 
@@ -165,9 +186,11 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
 
     /// <summary>Terminal output as plain lines: escape sequences removed, carriage returns treated as line breaks.</summary>
     public static IReadOnlyList<string> PlainLines(string output) =>
-        EscapePattern().Replace(output ?? "", "")
-            .Replace("\r\n", "\n").Replace('\r', '\n')
-            .Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+        PlainText(output).Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+
+    /// <summary>Terminal output as plain text: escape sequences removed, line moves and carriage returns as line breaks.</summary>
+    public static string PlainText(string output) =>
+        EscapePattern().Replace(output ?? "", Unescape).Replace("\r\n", "\n").Replace('\r', '\n');
 
     /// <summary>
     /// The new session's id from what <c>claude --cloud</c> printed, once it has printed it. The CLI (2.1.326) prints
@@ -176,17 +199,15 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
     /// View: https://claude.ai/code/session_…?from=cli&amp;m=0
     /// Resume with: claude --teleport session_…
     /// </code>
-    /// and exits. The id is read from the <c>View:</c> or <c>Resume with:</c> line; null until one is printed.
+    /// and exits. The id is read from the claude.ai/code URL, else from <c>--teleport session_…</c>, wherever they are in
+    /// the output (lines a pseudo terminal ran together included); null until one is printed in full.
     /// </summary>
     public static string? FindCreatedId(string output)
     {
-        var lines = PlainLines(output);
-        var created = lines.ToList().FindIndex(l => l.StartsWith("Created cloud session", StringComparison.OrdinalIgnoreCase));
-        foreach (var line in created >= 0 ? lines.Skip(created) : lines)
-            if ((line.StartsWith("View:", StringComparison.OrdinalIgnoreCase) && line.Contains("claude.ai/code/")) ||
-                line.StartsWith("Resume with:", StringComparison.OrdinalIgnoreCase))
-                if (FindSessionId(line) is { } id) return id;
-        return null;
+        var text = PlainText(output);
+        var m = SessionUrlPattern().Match(text);
+        if (!m.Success) m = TeleportPattern().Match(text);
+        return m.Success ? "session_" + m.Groups[1].Value : null;
     }
 
     /// <summary>

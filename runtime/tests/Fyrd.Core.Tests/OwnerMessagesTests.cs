@@ -159,6 +159,44 @@ public class OwnerMessagesTests
         Assert.Equal("session_r1", ClaudeCliOwnerMessages.FindCreatedId("Resume with: claude --teleport session_r1\n"));
     }
 
+    [Fact]
+    public void FindCreatedId_LinesRunTogether_UrlEndsAtQueryString()
+    {
+        // What stripping leaves when a pseudo terminal lays lines out with cursor moves it doesn't map to line breaks.
+        var output = "Created cloud session: ControllerView: https://claude.ai/code/session_01CupAbc?from=cli&m=0" +
+                     "Resume with: claude --teleport session_01CupAbcThis folder is not a git repository";
+        Assert.Equal("session_01CupAbc", ClaudeCliOwnerMessages.FindCreatedId(output));
+    }
+
+    [Fact]
+    public void FindCreatedId_CursorPositionedLines()
+    {
+        var output = "\u001b[1;1HCreated cloud session: Controller\u001b[2;1HView: https://claude.ai/code/session_01Cup9" +
+                     "\u001b[3;1HResume with: claude --teleport session_01Cup9\u001b[4;1HThis folder is not a git repository";
+        Assert.Equal("session_01Cup9", ClaudeCliOwnerMessages.FindCreatedId(output));
+        Assert.Contains("Resume with: claude --teleport session_01Cup9", ClaudeCliOwnerMessages.PlainLines(output));
+    }
+
+    [Fact]
+    public void FindCreatedId_TeleportOnly_NeedsWhiteSpaceAfterTheId()
+    {
+        Assert.Equal("session_t1", ClaudeCliOwnerMessages.FindCreatedId("Resume with: claude --teleport session_t1\r\n"));
+        Assert.Null(ClaudeCliOwnerMessages.FindCreatedId("Resume with: claude --teleport session_t1"));
+    }
+
+    [Fact]
+    public void FindCreatedId_UrlStillBeingPrinted_Null()
+    {
+        Assert.Null(ClaudeCliOwnerMessages.FindCreatedId("Created cloud session: Controller\r\nView: https://claude.ai/code/session_01SQ"));
+    }
+
+    [Fact]
+    public void PlainLines_StripsDcsAndApcStrings()
+    {
+        var output = "\u001bP>|xterm(1)\u001b\\\u001b_apc payload\u001b\\\u001b^pm\u0007Created cloud session: Controller";
+        Assert.Equal(["Created cloud session: Controller"], ClaudeCliOwnerMessages.PlainLines(output));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("Created cloud session: Controller\r\n")]

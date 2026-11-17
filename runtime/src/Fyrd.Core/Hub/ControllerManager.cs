@@ -166,7 +166,7 @@ public sealed partial class ControllerManager
             catch (OwnerMessageException e)
             {
                 throw new OwnerMessageException(
-                    $"The Controller session was created ({id}), but its opening prompt wasn't delivered: {e.Message} " +
+                    $"The Controller session was created ({id}), but its opening prompt wasn't delivered: {e.Message.TrimEnd().TrimEnd('.')}. " +
                     "Create the Controller again to resend it to the same session.");
             }
 
