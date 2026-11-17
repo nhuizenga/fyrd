@@ -273,4 +273,24 @@ public class OwnerMessagesTests
             Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
         });
     }
+
+    [Fact]
+    public async Task CreateAsync_NoIdBeforeTimeout_KillsTheChildAndSaysItMayExist()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var old = ClaudeCliOwnerMessages.CreateTimeout;
+        ClaudeCliOwnerMessages.CreateTimeout = TimeSpan.FromMilliseconds(500);
+        try
+        {
+            await WithFakeClaude("cat >/dev/null\nsleep 30\n", async _ =>
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
+                    new ClaudeCliOwnerMessages().CreateAsync("Fyrd Controller", "hi"));
+                Assert.Contains("may still have been created", e.Message);
+                Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
+            });
+        }
+        finally { ClaudeCliOwnerMessages.CreateTimeout = old; }
+    }
 }
