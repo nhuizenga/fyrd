@@ -231,7 +231,13 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
                 Native.CloseHandle(pi.hThread); Native.CloseHandle(pi.hProcess);
                 throw new OwnerMessageException($"Could not put claude in its job (error {error}).");
             }
-            Native.ResumeThread(pi.hThread);
+            if (Native.ResumeThread(pi.hThread) == uint.MaxValue)
+            {
+                var error = Marshal.GetLastWin32Error();
+                Native.TerminateJobObject(job, 1);
+                Native.CloseHandle(pi.hThread); Native.CloseHandle(pi.hProcess);
+                throw new OwnerMessageException($"Could not start claude (resuming it failed, error {error}).");
+            }
         }
         catch
         {
@@ -249,7 +255,9 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
         using var inputWriter = inWrite; // kept open (nothing is typed) so the console doesn't see end of input
 
         var output = new TerminalOutput(stop);
-        var pump = Task.Run(() =>
+        // Both the read and the wait block a thread until claude is done (up to the timeout), so each gets its own
+        // thread rather than a thread-pool one.
+        var pump = Task.Factory.StartNew(() =>
         {
             using var stream = new FileStream(outRead, FileAccess.Read, 1);
             var decoder = Encoding.UTF8.GetDecoder();
@@ -265,13 +273,12 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
                 }
             }
             catch (IOException) { } // the pseudo console was closed
-        });
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        var exited = Task.Run(() =>
-        {
-            using var wait = new ManualResetEvent(false) { SafeWaitHandle = new SafeWaitHandle(process.DangerousGetHandle(), ownsHandle: false) };
-            wait.WaitOne();
-        });
+        // Passing the SafeProcessHandle keeps the handle referenced for as long as the wait runs, so disposing it below
+        // can't close it under a blocked wait: the real close happens once the wait returns.
+        var exited = Task.Factory.StartNew(() => { Native.WaitForSingleObject(process, Native.INFINITE); },
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         // Once the command has exited, closing the pseudo console ends its output, so the pump finishes.
         _ = exited.ContinueWith(_ => ClosePc(), TaskScheduler.Default);
 
@@ -285,11 +292,10 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
         finally
         {
             ClosePc();
-            // The process handle is only closed once nothing waits on it any more. The job is terminated first so the wait
-            // ends; if it still hasn't, the handle is left open rather than closed under a blocked wait.
+            // Terminating the job ends the wait; the handle itself is only released once the wait has returned.
             if (!exited.IsCompleted) Native.TerminateJobObject(job, 1);
             try { await exited.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None); } catch (TimeoutException) { }
-            if (exited.IsCompleted) process.Dispose();
+            process.Dispose();
         }
     }
 
@@ -342,6 +348,11 @@ public sealed class ConPtyTerminalRunner : ITerminalRunner
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern uint ResumeThread(IntPtr thread);
+
+        public const uint INFINITE = 0xFFFFFFFF;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
 
         [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool TerminateProcess(IntPtr process, uint exitCode);
