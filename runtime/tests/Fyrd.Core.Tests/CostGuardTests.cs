@@ -38,10 +38,11 @@ public sealed class CostGuardTests : IDisposable
         if (Directory.Exists(_seeds)) Directory.Delete(_seeds, true);
     }
 
-    private async Task AdoptController()
+    private async Task CreateController()
     {
         _cloud.SetSession(FakeCloudSessions.Session(Ctl));
-        await _controller.AdoptAsync(Ctl, default);
+        _owner.CreatedIds.Enqueue(Ctl);
+        await _controller.CreateAsync(default);
         _owner.Sent.Clear();
     }
 
@@ -67,7 +68,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task UnderLimit_NothingHappens()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 10);
         var pass = await Run(true, Peasant, Ctl);
         var v = pass.Views[Peasant];
@@ -81,7 +82,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task CrossingLimit_InterruptsOnce_AndMessagesControllerOnce()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 51);
         for (var i = 0; i < 3; i++)
         {
@@ -97,7 +98,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task FailedInterrupt_RetriesNextPass_WithoutMarker()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 60);
         _cloud.ThrowOnNextCall(new HttpRequestException("boom"));
         var first = await Run(true, Peasant, Ctl);
@@ -115,7 +116,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task FailedControllerMessage_RetriesBoth()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 60);
         _owner.ThrowOnNextCall(new HttpRequestException("send failed")); // the interrupt succeeds, the notice fails
         var first = await Run(true, Peasant, Ctl);
@@ -130,7 +131,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task ControllerExistsButNotLive_NotifiedLater_WithoutReInterrupt()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 60);
         await Run(false, Peasant); // the Controller could not be read this pass
         Assert.Equal([Peasant], _cloud.Interrupted);
@@ -180,7 +181,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task Raise_Unblocks_AndCrossingRaisedLimitInterruptsAgain()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 46);
         var pass = await Run(true, Peasant, Ctl);
         Assert.True(pass.Views[Peasant].CanExtend); // 92%
@@ -216,7 +217,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task Controller_OverSessionLimit_NeverInterruptedOrBlocked()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Ctl, 80);
         var pass = await Run(true, Ctl);
         var v = pass.Views[Ctl];
@@ -230,7 +231,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task FyrdOverLimit_BlocksEveryoneButController_NoInterrupts_MessagesOnce()
     {
-        await AdoptController();
+        await CreateController();
         Limits(fyrd: 100);
         Spend(Peasant, 40);
         Spend(Other, 30);
@@ -292,7 +293,7 @@ public sealed class CostGuardTests : IDisposable
     [Fact]
     public async Task Midnight_ResetsRaisesAndMarkers()
     {
-        await AdoptController();
+        await CreateController();
         Spend(Peasant, 60);
         _ledger.AddExtra(Peasant, 25);
         Spend(Peasant, 20); // 80 > 75

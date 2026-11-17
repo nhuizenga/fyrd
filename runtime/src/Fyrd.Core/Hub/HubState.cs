@@ -80,7 +80,7 @@ public sealed class HubState(TimeProvider? time = null)
     /// <summary>Completes once someone has asked for a poll since the poll loop last reset it.</summary>
     public Task PollRequested => Volatile.Read(ref _pollRequest).Task;
 
-    /// <summary>Wakes the poll loop now (for example right after adopting a Controller).</summary>
+    /// <summary>Wakes the poll loop now (for example right after creating a Controller).</summary>
     public void RequestPoll() => Volatile.Read(ref _pollRequest).TrySetResult();
 
     /// <summary>Called by the poll loop before a pass; a request made during the pass wakes the next wait.</summary>

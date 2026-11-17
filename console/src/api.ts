@@ -32,12 +32,11 @@ export const removeSecret = (name: SecretName) => call<SecretsView>("DELETE", `/
 export const getSessionOrder = () => call<{ sessions: string[]; groups: string[] }>("GET", "/api/session-order");
 export const saveSessionOrder = (o: { sessions: string[]; groups: string[] }) => call<{ sessions: string[]; groups: string[] }>("PUT", "/api/session-order", o);
 export const getHubState = () => call<HubState>("GET", "/api/hub/state");
-/** The live adopted Controller; rejects with status 404 when there is none. */
+/** The live Controller; rejects with status 404 when there is none. */
 export const openController = () => call<ControllerInfo>("POST", "/api/hub/controller");
-/** The owner creates the Controller on claude.ai; Fyrd adopts it by id (Fyrd-created sessions get no connectors). */
-export const adoptController = (sessionId: string) =>
-  call<ControllerInfo>("POST", "/api/hub/controller/adopt", { sessionId });
-/** Archives the current Controller; the owner then adopts a new one. */
+/** Creates a new Controller through the owner's claude CLI, with the whole opening prompt as its first turn. */
+export const createController = () => call<ControllerInfo>("POST", "/api/hub/controller/create");
+/** Archives the current Controller; the owner then creates a new one. */
 export const retireController = () => call<void>("POST", "/api/hub/controller/retire");
 /** `fileIds` are uploads from `uploadFile`; the text may be empty when files are attached. */
 export const sendMessage = (sessionId: string, text: string, fileIds?: string[]) =>

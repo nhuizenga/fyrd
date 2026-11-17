@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { addBudget, adoptController, openController, retireController, updateConfig } from "./api";
+import { addBudget, createController, openController, retireController, updateConfig } from "./api";
 import { config } from "./test/fixtures";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -20,19 +20,18 @@ it("updateConfig merges a partial over the loaded config and PUTs the full objec
   expect(saved.sessionCap).toBe(7);
 });
 
-it("adoptController posts the session id; retireController posts to retire", async () => {
+it("createController posts to create; retireController posts to retire", async () => {
   const fetchMock = vi.fn(async (path: string, _init?: RequestInit) =>
     path.endsWith("/retire")
       ? new Response(null, { status: 204 })
       : new Response(JSON.stringify({ sessionId: "session_a", url: "https://claude.ai/code/session_a" }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
 
-  expect((await adoptController("session_a")).sessionId).toBe("session_a");
+  expect((await createController()).sessionId).toBe("session_a");
   expect(await retireController()).toBeUndefined();
 
-  expect(fetchMock.mock.calls[0][0]).toBe("/api/hub/controller/adopt");
+  expect(fetchMock.mock.calls[0][0]).toBe("/api/hub/controller/create");
   expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
-  expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ sessionId: "session_a" });
   expect(fetchMock.mock.calls[1][0]).toBe("/api/hub/controller/retire");
   expect(fetchMock.mock.calls[1][1]?.method).toBe("POST");
 });

@@ -171,9 +171,13 @@ public sealed class FakeCloudSessions : ICloudSessions
         return Task.CompletedTask;
     }
 
+    /// <summary>Runs before each archive; throw from it to fail that archive.</summary>
+    public Action<string>? OnArchive { get; set; }
+
     public Task ArchiveAsync(string sessionId, CancellationToken ct = default)
     {
         MaybeThrow();
+        OnArchive?.Invoke(sessionId);
         Archived.Add(sessionId);
         return Task.CompletedTask;
     }

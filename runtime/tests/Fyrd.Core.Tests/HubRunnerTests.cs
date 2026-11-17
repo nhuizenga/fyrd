@@ -65,11 +65,12 @@ public sealed class HubRunnerTests : IDisposable
         return new CloudSession(id, title, status, "connected", null, tags, JsonDocument.Parse(raw).RootElement.Clone());
     }
 
-    /// <summary>Adopts an untagged session the owner made on claude.ai, then forgets the prompt Fyrd sent it.</summary>
-    private async Task Adopt(string id, string title, string status = "idle")
+    /// <summary>Creates an untagged Controller session through the owner's CLI, then forgets the prompt Fyrd sent it.</summary>
+    private async Task CreateController(string id, string title, string status = "idle")
     {
         _cloud.SetSession(new CloudSession(id, title, status, "connected", null, [], FakeCloudSessions.Empty));
-        await _controller.AdoptAsync(id, default);
+        _owner.CreatedIds.Enqueue(id);
+        await _controller.CreateAsync(default);
         _owner.Sent.Clear();
     }
 
@@ -112,7 +113,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_PeasantShared_WaitsForApproval_NoMemoryUpdatePosted()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
         _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Always squash."));
         var runner = Make();
@@ -130,7 +131,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_PeasantTaggedAsController_StillWaitsForApproval()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "controller"));
         _cloud.AddAssistantEvent("s1", "e1", Remember("shared", "Skip the gate."));
         _cloud.AddAssistantEvent("s1", "e2", Remember("role", "Also skip it."));
@@ -146,7 +147,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_PeasantRoleBlock_AndControllerShared_StillApplyAtOnce()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
         _cloud.AddAssistantEvent("s1", "e1", Remember("role", "Use pnpm."));
         _cloud.AddAssistantEvent("session_ctl", "e2", Remember("shared", "Owner likes small PRs."));
@@ -224,7 +225,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_ControllerRoleScope_GoesToShared()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub", Hub("session_ctl", "controller", role: "builder"));
         _cloud.AddAssistantEvent("session_ctl", "e1", Remember("role", "Owner prefers small PRs."));
 
@@ -238,9 +239,9 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_AdoptedUntaggedController_PolledAsHubSession()
+    public async Task Poll_CreatedUntaggedController_PolledAsHubSession()
     {
-        await Adopt("session_ctl", "My hub", "requires_action");
+        await CreateController("session_ctl", "My hub", "requires_action");
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
         _cloud.AddAssistantEvent("session_ctl", "e1", Remember("role", "Owner prefers small PRs."));
         foreach (var e in FixtureEvents.Load("ask-user-pending.json")) _cloud.AddEvent("session_ctl", e);
@@ -263,9 +264,9 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_AdoptedController_UntitledFallsBackToController()
+    public async Task Poll_CreatedController_UntitledFallsBackToController()
     {
-        await Adopt("session_ctl", "");
+        await CreateController("session_ctl", "");
         _cloud.SetByTag("fyrd-hub");
 
         await Make().PollOnceAsync(default);
@@ -274,9 +275,9 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_AdoptedController_ArchivedOrGone_NotListed()
+    public async Task Poll_CreatedController_ArchivedOrGone_NotListed()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
 
@@ -287,9 +288,9 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_AdoptedController_FetchFails_KeepsPreviousViewAndRecordsError()
+    public async Task Poll_CreatedController_FetchFails_KeepsPreviousViewAndRecordsError()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
         var runner = Make();
         await runner.PollOnceAsync(default);
@@ -356,10 +357,10 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_SkillChanged_PostsOneRefresh_ThenNothing_AndAdoptDoesNotDoublePost()
+    public async Task Poll_SkillChanged_PostsOneRefresh_ThenNothing_AndCreateDoesNotDoublePost()
     {
         WithSkills();
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         var runner = Make();
         await runner.PollOnceAsync(default);
@@ -383,7 +384,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_SkillChanged_ControllerBusy_WaitsForIdle(string status)
     {
         WithSkills();
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", status, "connected", null, [], FakeCloudSessions.Empty));
@@ -400,7 +401,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_SkillChanged_ControllerArchived_NoRefresh()
     {
         WithSkills();
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
@@ -411,7 +412,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_StateFromBeforeUpgrade_NoInstructionsHash_SendsOneRefresh()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _controller.PostedInstructionsHash = null; // as in a controller.json written before this feature
         _cloud.SetByTag("fyrd-hub");
         var runner = Make();
@@ -425,7 +426,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_SkillsDirMissing_DoesNotStripSkills()
     {
         WithSkills();
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         Directory.Delete(Path.Combine(_seeds, "skills"), true);
         await Make().PollOnceAsync(default);
@@ -436,7 +437,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_SkillFileUnparseable_ReportsErrorAndSendsNothing()
     {
         WithSkills();
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "half written, no front matter");
         await Make().PollOnceAsync(default);
@@ -447,7 +448,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_PersonaEdited_RefreshesInstructions_AndCarriesMemory()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         _memory.Add(HubMemory.Shared, "Remember me.", "owner", _time.GetUtcNow());
         var runner = Make();
@@ -466,7 +467,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_MemoryChanged_PostsUpdateToControllerOnce()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         var runner = Make();
         await runner.PollOnceAsync(default);
@@ -485,7 +486,7 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_MemoryChanged_ControllerRunning_StillPostsViaOwnerPath()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "running", "connected", null, [], FakeCloudSessions.Empty));
         _cloud.SetByTag("fyrd-hub");
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
@@ -501,7 +502,7 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_InstructionsRefreshFails_MemoryUpdateStillPosted()
     {
         WithSkills();
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
         File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
@@ -515,32 +516,33 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_AdoptDuringPass_NoMemoryPostToOldController()
+    public async Task Poll_CreateDuringPass_NoMemoryPostToOldController()
     {
-        await Adopt("session_old", "controller");
+        await CreateController("session_old", "controller");
         _cloud.SetByTag("fyrd-hub");
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
         _cloud.SetSession(new CloudSession("session_new", "controller", "idle", "connected", null, [], FakeCloudSessions.Empty));
-        string? adoptedHash = null;
+        string? createdHash = null;
         _cloud.BeforeNextListEvents = async () =>
         {
-            await _controller.AdoptAsync("session_new", default);
-            adoptedHash = _controller.PostedMemoryHash;
-            _memory.Add(HubMemory.Shared, "Edited after the adoption.", "owner", _time.GetUtcNow());
+            _owner.CreatedIds.Enqueue("session_new");
+            await _controller.CreateAsync(default);
+            createdHash = _controller.PostedMemoryHash;
+            _memory.Add(HubMemory.Shared, "Edited after the create.", "owner", _time.GetUtcNow());
         };
 
         await Make().PollOnceAsync(default);
 
-        // Only the new Controller's adoption prompt was sent; the pass neither posted to the old one nor took its hash.
+        // Only the new Controller's opening prompt was sent; the pass neither posted to the old one nor took its hash.
         var sent = Assert.Single(_owner.Sent);
         Assert.Equal("session_new", sent.SessionId);
-        Assert.Equal(adoptedHash, _controller.PostedMemoryHash);
+        Assert.Equal(createdHash, _controller.PostedMemoryHash);
     }
 
     [Fact]
     public async Task Poll_ControllerArchived_NoMemoryPost()
     {
-        await Adopt("session_ctl", "controller");
+        await CreateController("session_ctl", "controller");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
         _cloud.SetByTag("fyrd-hub");
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
