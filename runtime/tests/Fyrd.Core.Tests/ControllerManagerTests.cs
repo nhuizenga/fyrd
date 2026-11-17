@@ -292,7 +292,7 @@ public sealed class ControllerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Create_WhileCliRuns_FindAndRetireDoNotWait()
+    public async Task Create_WhileCliRuns_FindDoesNotWait()
     {
         await Created();
         var hold = new TaskCompletionSource();
@@ -308,6 +308,36 @@ public sealed class ControllerManagerTests : IDisposable
         hold.SetResult();
         await create;
         Assert.Equal("session_new", m.CurrentId);
+    }
+
+    [Fact]
+    public async Task Retire_WhileCreateRuns_LeavesThePendingSessionAlone()
+    {
+        // A pending session from an earlier create whose prompt wasn't delivered.
+        _cloud.SetSession(FakeCloudSessions.Session("session_pend"));
+        _owner.CreatedIds.Enqueue("session_pend");
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("x")); return Task.CompletedTask; };
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+        Assert.Equal("session_pend", Make().PendingId);
+
+        // It is gone now, so the next create starts a new session; hold that create while the CLI runs.
+        _cloud.ThrowOnGetFor("session_pend", new CloudSessionApiException(404, "gone"));
+        var hold = new TaskCompletionSource();
+        _owner.OnCreate = _ => hold.Task;
+        _owner.CreatedIds.Enqueue("session_new");
+        var m = Make();
+        var create = m.CreateAsync(default);
+        Assert.False(create.IsCompleted);
+
+        await m.RetireAsync(default);
+
+        Assert.Equal("session_pend", m.PendingId);
+        Assert.Empty(_cloud.Archived);
+
+        hold.SetResult();
+        await create;
+        Assert.Equal("session_new", m.CurrentId);
+        Assert.Empty(_cloud.Archived);
     }
 
     [Fact]

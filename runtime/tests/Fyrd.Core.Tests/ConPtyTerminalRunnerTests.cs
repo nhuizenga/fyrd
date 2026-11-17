@@ -13,17 +13,19 @@ public sealed class ConPtyTerminalRunnerTests
 {
     /// <summary>
     /// A fake <c>claude.cmd</c>: records whether its console is redirected (it must not be, or the real CLI refuses to
-    /// create a session), prints the CLI's create output, then keeps running and writes <c>done.txt</c> if nothing stops it.
+    /// create a session), starts a grandchild that writes <c>done.txt</c> about 8 seconds later unless it is killed (like
+    /// the node.exe behind npm's real <c>claude.cmd</c>, so killing only the direct child doesn't pass), prints the CLI's
+    /// create output, then keeps running.
     /// </summary>
     private const string FakeClaude = """
         @echo off
         powershell -NoProfile -NonInteractive -Command "Write-Output ('redirected=' + [Console]::IsInputRedirected + ',' + [Console]::IsOutputRedirected)"
+        start "" /b powershell -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 8; Set-Content -LiteralPath $env:FYRD_FAKE_DONE -Value done"
         echo Created cloud session: Controller
         echo View: https://claude.ai/code/session_01ConPty9?from=cli^&m=0
         echo Resume with: claude --teleport session_01ConPty9
         echo This folder is not a git repository, so the cloud session starts empty.
-        ping -n 9 127.0.0.1 >nul
-        echo done> "%~dp0done.txt"
+        ping -n 30 127.0.0.1 >nul
         """;
 
     private static async Task WithFakeClaudeCmd(Func<string, Task> body)
@@ -33,10 +35,12 @@ public sealed class ConPtyTerminalRunnerTests
         File.WriteAllText(Path.Combine(dir, "claude.cmd"), FakeClaude.Replace("\n", "\r\n"));
         var oldPath = Environment.GetEnvironmentVariable("PATH");
         Environment.SetEnvironmentVariable("PATH", dir + Path.PathSeparator + oldPath);
+        Environment.SetEnvironmentVariable("FYRD_FAKE_DONE", Path.Combine(dir, "done.txt"));
         try { await body(dir); }
         finally
         {
             Environment.SetEnvironmentVariable("PATH", oldPath);
+            Environment.SetEnvironmentVariable("FYRD_FAKE_DONE", null);
             try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
@@ -61,9 +65,9 @@ public sealed class ConPtyTerminalRunnerTests
             Assert.False(run.TimedOut);
             Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8), $"Stopping took {sw.Elapsed}.");
 
-            // Killing the job must stop the whole tree: the fake would write done.txt about 8 seconds after it started.
+            // Killing the job must stop the whole tree: the fake's grandchild would write done.txt about 8 seconds after it started.
             await Task.Delay(TimeSpan.FromSeconds(12) - sw.Elapsed);
-            Assert.False(File.Exists(Path.Combine(dir, "done.txt")), "The fake claude kept running after it was stopped.");
+            Assert.False(File.Exists(Path.Combine(dir, "done.txt")), "The fake claude's grandchild kept running after it was stopped.");
         });
     }
 
