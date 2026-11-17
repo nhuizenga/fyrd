@@ -88,6 +88,17 @@ it("Create Controller error shows in an alert", async () => {
   expect(screen.getByRole("button", { name: "Create Controller" })).toBeEnabled();
 });
 
+it("Create Controller shows a warning when the previous Controller couldn't be archived", async () => {
+  vi.mocked(api.createController).mockResolvedValue({
+    sessionId: "session_new", url: "https://claude.ai/code/session_new",
+    warning: "The new Controller was created, but the previous one (session_old) could not be archived.",
+  });
+  renderScreen(hubState());
+  await userEvent.click(screen.getByRole("button", { name: "Create Controller" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("the previous one (session_old) could not be archived");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
 it("Open Controller asks the server for a live Controller and opens that url", async () => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   vi.mocked(api.openController).mockResolvedValue({ sessionId: "c2", url: "https://claude.ai/code/c2" });

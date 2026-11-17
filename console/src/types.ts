@@ -105,6 +105,8 @@ export interface HubQuestion {
 export interface ControllerInfo {
   sessionId: string;
   url: string;
+  /** Set when a create succeeded but couldn't archive the previous Controller. */
+  warning?: string | null;
 }
 
 /** Whether the server can talk to GitHub, and as whom. Never carries the token. */

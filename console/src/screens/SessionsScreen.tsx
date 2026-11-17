@@ -107,6 +107,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const resizeList = (w: number) => { setListWidth(w); writeStored(LIST_KEY, String(w)); };
   const resizeAttrs = (w: number) => { setAttrsWidth(w); writeStored(ATTRS_KEY, String(w)); };
   const [error, setError] = useState<string | null>(null);
+  const [createWarning, setCreateWarning] = useState<string | null>(null);
   const [pausedIds, setPausedIds] = useState<string[]>([]);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [prStatuses, setPrStatuses] = useState<PullRequestStatus[]>([]);
@@ -324,8 +325,10 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const createController = () =>
     run(async () => {
       setCreating(true);
+      setCreateWarning(null);
       try {
-        await api.createController();
+        const info = await api.createController();
+        if (info.warning) setCreateWarning(info.warning);
       } finally {
         setCreating(false);
       }
@@ -577,6 +580,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
           {budget && <Text subdued>Fyrd today: {usd(budget.fyrdCostToday)} of {usd(budget.fyrdLimitUsd)}</Text>}
         </div>
         {error && <Alert status="danger" title={error} role="alert" />}
+        {createWarning && <Alert status="warning" title={createWarning} role="status" onClose={() => setCreateWarning(null)} />}
       </div>
       <div className="sessions-grid" style={{ "--list-w": `${listWidth}px`, "--attrs-w": `${attrsWidth}px` } as React.CSSProperties}>
         <aside className="pane pane-list" aria-label="Session list">
