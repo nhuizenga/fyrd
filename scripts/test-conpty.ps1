@@ -24,4 +24,4 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "ConPTY tests failed (dotnet test exited with $LASTEXITCODE). Paste the output above back to the Builder."
     exit $LASTEXITCODE
 }
-Write-Host 'ConPTY tests passed: 3 tests should be listed as passed above.'
+Write-Host 'ConPTY tests passed: 4 tests should be listed as passed above.'
