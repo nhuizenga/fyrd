@@ -83,18 +83,34 @@ public sealed class ConPtyTerminalRunnerTests
         });
     }
 
-    [Fact]
-    public async Task Run_ChildExitsByItself_ReportsItsExitCode()
+    /// <summary>
+    /// A child that exits by itself reports its exit code, both for a batch file (how npm's <c>claude.cmd</c> shim runs) and
+    /// for an executable (a native <c>claude.exe</c>). A cmd built-in such as <c>exit</c> can't be the command: the runner
+    /// quotes every argument, and a quoted built-in isn't run as one.
+    /// </summary>
+    [Theory]
+    [InlineData("batch")]
+    [InlineData("exe")]
+    public async Task Run_ChildExitsByItself_ReportsItsExitCode(string kind)
     {
         if (!OperatingSystem.IsWindows()) return;
         var dir = Path.Combine(Path.GetTempPath(), "fyrd-conpty-" + Guid.NewGuid());
         Directory.CreateDirectory(dir);
         try
         {
-            var run = await new ConPtyTerminalRunner().RunAsync(["cmd", "/c", "exit", "3"], dir, _ => false, TimeSpan.FromSeconds(30));
+            IReadOnlyList<string> command;
+            if (kind == "batch")
+            {
+                var script = Path.Combine(dir, "exit3.cmd");
+                File.WriteAllText(script, "@echo off\r\necho exiting\r\nexit /b 3\r\n");
+                command = [script];
+            }
+            else command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "exit 3"];
+
+            var run = await new ConPtyTerminalRunner().RunAsync(command, dir, _ => false, TimeSpan.FromSeconds(30));
             Assert.Equal(3, run.ExitCode);
             Assert.False(run.TimedOut);
         }
-        finally { Directory.Delete(dir, true); }
+        finally { try { Directory.Delete(dir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
     }
 }
