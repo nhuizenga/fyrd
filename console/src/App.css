@@ -87,7 +87,7 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-item:focus-within .session-item-actions { opacity: 1; visibility: visible; transition: none; }
 /* Touch has no hover: keep them always visible, inside the item's own box so they don't cover the item above. */
 @media (hover: none) { .session-item-actions { position: absolute; opacity: 1; visibility: visible; bottom: auto; top: 2px; right: 2px; } }
-.adopt { display: flex; flex-direction: column; gap: 6px; }
+.create-controller { display: flex; flex-direction: column; gap: 6px; }
 .details { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 0.875rem; }
 .details dt { color: var(--a2-foreground-color-subdued); }
 .details dd { margin: 0; overflow-wrap: anywhere; }

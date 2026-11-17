@@ -56,34 +56,36 @@ it("controller pinned first", () => {
   expect(rows[0]).toHaveTextContent("controller");
 });
 
-it("no controller shows the Adopt Controller panel", () => {
+it("no controller shows the Create Controller panel", () => {
   renderScreen(hubState());
-  expect(screen.getByText("Create a new session on claude.ai (no repo needed), then paste its session id here.")).toBeInTheDocument();
-  const link = screen.getByRole("link", { name: "Open claude.ai/code" });
-  expect(link).toHaveAttribute("href", "https://claude.ai/code");
-  expect(link).toHaveAttribute("target", "_blank");
+  expect(screen.getByRole("heading", { name: "Create Controller" })).toBeInTheDocument();
+  expect(screen.getByText("Fyrd starts a new claude.ai session with your claude CLI and sends it the Controller's instructions.")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Session id")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Adopt" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Open Controller" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Start Controller" })).not.toBeInTheDocument();
 });
 
-it("Adopt sends the trimmed session id and refreshes", async () => {
-  vi.mocked(api.adoptController).mockResolvedValue({ sessionId: "session_abc", url: "https://claude.ai/code/session_abc" });
+it("Create Controller creates through the server and refreshes", async () => {
+  let resolve!: (v: { sessionId: string; url: string }) => void;
+  vi.mocked(api.createController).mockReturnValue(new Promise((r) => { resolve = r; }));
   const onChanged = renderScreen(hubState());
-  expect(screen.getByRole("button", { name: "Adopt" })).toBeDisabled();
-  await userEvent.type(screen.getByLabelText("Session id"), "  session_abc ");
-  await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
-  expect(api.adoptController).toHaveBeenCalledWith("session_abc");
+  await userEvent.click(screen.getByRole("button", { name: "Create Controller" }));
+  expect(api.createController).toHaveBeenCalledTimes(1);
+  // Busy while the CLI runs: a second click cannot start a second Controller.
+  const busy = screen.getByRole("button", { name: "Creating…" });
+  expect(busy).toBeDisabled();
+  resolve({ sessionId: "session_abc", url: "https://claude.ai/code/session_abc" });
+  expect(await screen.findByRole("button", { name: "Create Controller" })).toBeEnabled();
   expect(onChanged).toHaveBeenCalled();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
-it("Adopt error shows in an alert", async () => {
-  vi.mocked(api.adoptController).mockRejectedValue(
-    new Error("That session isn't available. Create a new one on claude.ai and paste its id."));
+it("Create Controller error shows in an alert", async () => {
+  vi.mocked(api.createController).mockRejectedValue(new Error("The claude CLI is not installed or not on PATH."));
   renderScreen(hubState());
-  await userEvent.type(screen.getByLabelText("Session id"), "session_gone");
-  await userEvent.click(screen.getByRole("button", { name: "Adopt" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("That session isn't available.");
+  await userEvent.click(screen.getByRole("button", { name: "Create Controller" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The claude CLI is not installed or not on PATH.");
+  expect(screen.getByRole("button", { name: "Create Controller" })).toBeEnabled();
 });
 
 it("Open Controller asks the server for a live Controller and opens that url", async () => {
@@ -99,7 +101,7 @@ it("Open Controller asks the server for a live Controller and opens that url", a
 it("Open Controller on 404 refreshes state instead of opening", async () => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   vi.mocked(api.openController).mockRejectedValue(
-    Object.assign(new Error("No Controller yet. Create a session on claude.ai and adopt it."), { status: 404 }));
+    Object.assign(new Error("No Controller yet. Create one from the Sessions screen."), { status: 404 }));
   const onChanged = renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: "Open Controller" }));
   expect(onChanged).toHaveBeenCalled();
@@ -112,11 +114,11 @@ it("Replace Controller confirms, retires and refreshes", async () => {
   const onChanged = renderScreen(two());
   await userEvent.click(screen.getByRole("button", { name: "Replace Controller" }));
   expect(api.retireController).not.toHaveBeenCalled();
-  expect(screen.getByText("This archives the current Controller. You'll then adopt a new one.")).toBeInTheDocument();
+  expect(screen.getByText("This archives the current Controller. You'll then create a new one.")).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Archive and replace" }));
   expect(api.retireController).toHaveBeenCalled();
   expect(onChanged).toHaveBeenCalled();
-  expect(screen.queryByText("This archives the current Controller. You'll then adopt a new one.")).not.toBeInTheDocument();
+  expect(screen.queryByText("This archives the current Controller. You'll then create a new one.")).not.toBeInTheDocument();
 });
 
 it("Replace Controller can be cancelled", async () => {

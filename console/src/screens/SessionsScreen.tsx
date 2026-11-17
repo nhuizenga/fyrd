@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Alert, Button, Chip, Link, ProgressBar, SearchField, Text, TextField } from "@servicetitan/anvil2";
+import { Alert, Button, Chip, ProgressBar, SearchField, Text, TextField } from "@servicetitan/anvil2";
 import TrashIcon from "@servicetitan/anvil2/assets/icons/material/round/delete_outline.svg?react";
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
 import DownloadIcon from "@servicetitan/anvil2/assets/icons/material/round/download.svg?react";
@@ -122,7 +122,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const [raising, setRaising] = useState(false);
   // A raise's response, shown until the poll catches up (the server only requests a poll, so the next state can be stale).
   const [raised, setRaised] = useState<{ id: string; from: number; view: HubCostView } | null>(null);
-  const [adoptId, setAdoptId] = useState("");
+  const [creating, setCreating] = useState(false);
   const [order, setOrder] = useState<SessionOrder>(EMPTY_ORDER);
   const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
   const [dragging, setDragging] = useState<{ kind: "session" | "group"; id: string } | null>(null);
@@ -164,7 +164,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
   const autoTop = useRef(0);
 
   const controllerId = state?.controller?.sessionId ?? null;
-  // The Controller is adopted from claude.ai, so it carries no Fyrd tags: identify it by id.
+  // The Controller is created through the owner's CLI, so it carries no Fyrd tags: identify it by id.
   const isController = (s: HubSessionView) => s.id === controllerId;
   const all = state?.sessions ?? [];
   const controller = all.find(isController) ?? null;
@@ -314,16 +314,21 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
         const info = await api.openController();
         window.open(info.url, "_blank", "noopener");
       } catch (e) {
-        // Gone since the last poll: refreshing brings back the Adopt Controller panel.
+        // Gone since the last poll: refreshing brings back the Create Controller panel.
         if ((e as { status?: number }).status !== 404) throw e;
       }
       await onChanged();
     });
 
-  const adoptController = () =>
+  // Runs the owner's claude CLI on the server, which can take a while: the button stays busy until it returns.
+  const createController = () =>
     run(async () => {
-      await api.adoptController(adoptId.trim());
-      setAdoptId("");
+      setCreating(true);
+      try {
+        await api.createController();
+      } finally {
+        setCreating(false);
+      }
       await onChanged();
     });
 
@@ -588,7 +593,7 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
           )}
           {confirmReplace && (
             <Alert status="warning" title="Replace the Controller?">
-              <Text>This archives the current Controller. You'll then adopt a new one.</Text>
+              <Text>This archives the current Controller. You'll then create a new one.</Text>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button appearance="primary" size="small" onClick={replaceController}>Archive and replace</Button>
                 <Button appearance="ghost" size="small" onClick={() => setConfirmReplace(false)}>Cancel</Button>
@@ -596,15 +601,15 @@ export default function SessionsScreen({ state, onChanged, routeId }: ScreenProp
             </Alert>
           )}
           {state && !state.controller && (
-            <section className="adopt" aria-labelledby="adopt-h">
-              <Text variant="headline" el="h3" size="small" id="adopt-h">Adopt Controller</Text>
+            <section className="create-controller" aria-labelledby="create-controller-h">
+              <Text variant="headline" el="h3" size="small" id="create-controller-h">Create Controller</Text>
               <Text size="small">
-                Create a new session on claude.ai (no repo needed), then paste its session id here.{" "}
-                <Link href="https://claude.ai/code" target="_blank" rel="noopener noreferrer">Open claude.ai/code</Link>
+                Fyrd starts a new claude.ai session with your claude CLI and sends it the Controller's instructions.
               </Text>
-              <TextField label="Session id" placeholder="session_..." value={adoptId} onChange={(e) => setAdoptId(e.target.value)} />
               <div>
-                <Button appearance="primary" size="small" disabled={adoptId.trim() === ""} onClick={adoptController}>Adopt</Button>
+                <Button appearance="primary" size="small" disabled={creating} aria-busy={creating} onClick={createController}>
+                  {creating ? "Creating…" : "Create Controller"}
+                </Button>
               </div>
             </section>
           )}
