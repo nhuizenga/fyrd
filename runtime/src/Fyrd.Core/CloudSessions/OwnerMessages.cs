@@ -126,11 +126,8 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
 
     // ---- Creating a session ----------------------------------------------------------------------------------------
 
-    /// <summary>How long <c>claude --cloud</c> may take to create the session before Fyrd gives up and kills it.</summary>
-    public static TimeSpan CreateTimeout { get; set; } = TimeSpan.FromMinutes(3);
-
-    [GeneratedRegex(@"\b(session|cse)_([A-Za-z0-9]+)\b")]
-    private static partial Regex AnySessionIdPattern();
+    /// <summary>How long <c>claude --cloud</c> may take to create the session, by default, before Fyrd gives up and kills it.</summary>
+    public static readonly TimeSpan DefaultCreateTimeout = TimeSpan.FromMinutes(3);
 
     // CSI (ESC [ … final), OSC (ESC ] … BEL or ESC \), DCS/SOS/PM/APC strings (ESC P|X|^|_ … ESC \ or BEL), other
     // two-character escapes, and stray control characters. A CSI that moves the cursor to another line (CUP, VPA, CUU, CUD,
@@ -140,9 +137,10 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
     private static partial Regex EscapePattern();
 
     // The id in the session's claude.ai/code URL. The id must be followed by something that ends it (the URL's query
-    // string, a path, a quote or white space), so a line still being printed, or text run on after it, can't cut or
-    // lengthen it.
-    [GeneratedRegex(@"claude\.ai/code/(?:session|cse)_([A-Za-z0-9]+)(?=[?#/\s""'<>)\]])")]
+    // string, a path, a quote or white space), so a line still being printed, or text run on after it, can't lengthen
+    // it. Group 2 is that ending: a query string or path (printed after the id, so the id is whole) is a firm ending;
+    // white space may be a cursor move in the middle of the id, so the id may be cut off.
+    [GeneratedRegex(@"claude\.ai/code/(?:session|cse)_([A-Za-z0-9]+)(?=([?#/\s""'<>)\]]))")]
     private static partial Regex SessionUrlPattern();
 
     // The id after --teleport, followed by white space.
@@ -158,10 +156,16 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
     }
 
     private readonly ITerminalRunner _terminal;
+    private readonly TimeSpan _createTimeout;
 
     public ClaudeCliOwnerMessages() : this(TerminalRunners.ForThisPlatform()) { }
 
-    public ClaudeCliOwnerMessages(ITerminalRunner terminal) => _terminal = terminal;
+    /// <param name="createTimeout">How long a create may take (<see cref="DefaultCreateTimeout"/> when null).</param>
+    public ClaudeCliOwnerMessages(ITerminalRunner terminal, TimeSpan? createTimeout = null)
+    {
+        _terminal = terminal;
+        _createTimeout = createTimeout ?? DefaultCreateTimeout;
+    }
 
     /// <summary>
     /// The command that creates a session: <c>claude --cloud &lt;description&gt;</c>. The CLI only creates a session from
@@ -176,14 +180,6 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
         return ["claude", "--cloud", d];
     }
 
-    /// <summary>The <c>session_…</c> id in <paramref name="text"/> (a <c>cse_…</c> id is the same session), or null.</summary>
-    public static string? FindSessionId(string? text)
-    {
-        if (string.IsNullOrEmpty(text)) return null;
-        var m = AnySessionIdPattern().Match(text);
-        return m.Success ? "session_" + m.Groups[2].Value : null;
-    }
-
     /// <summary>Terminal output as plain lines: escape sequences removed, carriage returns treated as line breaks.</summary>
     public static IReadOnlyList<string> PlainLines(string output) =>
         PlainText(output).Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
@@ -192,23 +188,65 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
     public static string PlainText(string output) =>
         EscapePattern().Replace(output ?? "", Unescape).Replace("\r\n", "\n").Replace('\r', '\n');
 
+    /// <summary>The session ids <c>claude --cloud</c> has printed so far (each <c>session_…</c>; a <c>cse_…</c> id is the same session).</summary>
+    /// <param name="FirmUrl">The last id in a claude.ai/code URL followed by its query string or a path: printed whole.</param>
+    /// <param name="Url">The last id in a URL followed by white space only, which may be a cursor move inside the id.</param>
+    /// <param name="Teleport">The last id after <c>--teleport</c>, followed by white space.</param>
+    public sealed record CreatedIds(string? FirmUrl, string? Url, string? Teleport);
+
+    /// <summary>Reads the ids from what <c>claude --cloud</c> printed (escape sequences removed, lines run together included).</summary>
+    public static CreatedIds ReadCreatedIds(string output)
+    {
+        var text = PlainText(output);
+        string? firm = null, loose = null, teleport = null;
+        foreach (Match m in SessionUrlPattern().Matches(text))
+        {
+            var id = "session_" + m.Groups[1].Value;
+            if (m.Groups[2].Value is "?" or "#" or "/") firm = id; else loose = id;
+        }
+        foreach (Match m in TeleportPattern().Matches(text)) teleport = "session_" + m.Groups[1].Value;
+        return new CreatedIds(firm, loose, teleport);
+    }
+
     /// <summary>
-    /// The new session's id from what <c>claude --cloud</c> printed, once it has printed it. The CLI (2.1.326) prints
+    /// Whether the CLI has printed the new session's id in full, so Fyrd can stop it without waiting for it to exit: a URL
+    /// id followed by its query string, or a URL id that the <c>--teleport</c> line (printed after it) repeats. A URL id
+    /// that may be cut off by a cursor move doesn't count.
+    /// </summary>
+    public static bool CreateFinished(string output)
+    {
+        var ids = ReadCreatedIds(output);
+        return ids.FirmUrl is not null || ids.Teleport is not null && ids.Teleport == ids.Url;
+    }
+
+    /// <summary>
+    /// The new session's id from what <c>claude --cloud</c> printed. The CLI (2.1.326) prints
     /// <code>
     /// Created cloud session: Controller
     /// View: https://claude.ai/code/session_…?from=cli&amp;m=0
     /// Resume with: claude --teleport session_…
     /// </code>
-    /// and exits. The id is read from the claude.ai/code URL, else from <c>--teleport session_…</c>, wherever they are in
-    /// the output (lines a pseudo terminal ran together included); null until one is printed in full.
+    /// and exits. A URL id followed by its query string is used (a <c>--teleport</c> id that only runs on into later text
+    /// is ignored); otherwise the URL and <c>--teleport</c> ids must agree. A lone id is used only when
+    /// <paramref name="exited"/> (the CLI finished printing by itself). Null when there is no id yet; throws
+    /// <see cref="OwnerMessageException"/> when the CLI printed two different ids.
     /// </summary>
-    public static string? FindCreatedId(string output)
+    public static string? FindCreatedId(string output, bool exited = true)
     {
-        var text = PlainText(output);
-        var m = SessionUrlPattern().Match(text);
-        if (!m.Success) m = TeleportPattern().Match(text);
-        return m.Success ? "session_" + m.Groups[1].Value : null;
+        var ids = ReadCreatedIds(output);
+        if (ids.FirmUrl is { } firm)
+        {
+            if (ids.Teleport is { } t && t != firm && !t.StartsWith(firm, StringComparison.Ordinal)) throw Mismatch(firm, t);
+            return firm;
+        }
+        if (ids.Url is { } url && ids.Teleport is { } teleport)
+            return url == teleport ? url : throw Mismatch(url, teleport);
+        return exited ? ids.Url ?? ids.Teleport : null;
     }
+
+    private static OwnerMessageException Mismatch(string a, string b) =>
+        new($"claude printed two different session ids ({a} and {b}), so Fyrd can't tell which one it created. Find the " +
+            "new \"Controller\" session on claude.ai/code, archive it, and create the Controller again.");
 
     /// <summary>
     /// The reason the CLI is waiting for an answer nobody will give (it runs in a hidden terminal), or null. Fyrd types
@@ -237,20 +275,17 @@ public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
     {
         var command = CreateCommand(description);
         Directory.CreateDirectory(workingDirectory);
-        TerminalRun run;
-        try
-        {
-            run = await _terminal.RunAsync(command, workingDirectory,
-                output => FindCreatedId(output) is not null || FindBlockingPrompt(output, workingDirectory) is not null,
-                CreateTimeout, ct);
-        }
-        catch (System.ComponentModel.Win32Exception) { throw new OwnerMessageException("The claude CLI is not installed or not on PATH."); }
+        var run = await _terminal.RunAsync(command, workingDirectory,
+            output => CreateFinished(output) || FindBlockingPrompt(output, workingDirectory) is not null,
+            _createTimeout, ct);
 
-        if (FindCreatedId(run.Output) is { } id) return id;
+        // ExitCode is null when Fyrd stopped the CLI (or it timed out); then only an id printed in full is used.
+        if (FindCreatedId(run.Output, exited: run.ExitCode is not null) is { } id) return id;
         if (FindBlockingPrompt(run.Output, workingDirectory) is { } prompt) throw new OwnerMessageException(prompt);
-        if (run.TimedOut)
-            throw new OwnerMessageException("claude timed out creating the session; it may still have been created (check claude.ai/code).");
         var tail = string.Join(' ', PlainLines(run.Output).TakeLast(4));
+        if (run.TimedOut)
+            throw new OwnerMessageException("claude timed out creating the session; it may still have been created (check claude.ai/code)." +
+                                            (tail.Length > 0 ? $" It last printed: {tail}" : ""));
         throw new OwnerMessageException(tail.Length > 0
             ? $"claude didn't create a session: {tail}"
             : $"claude exited with {run.ExitCode?.ToString() ?? "no exit code"} without creating a session.");

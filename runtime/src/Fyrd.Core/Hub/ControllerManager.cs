@@ -221,16 +221,31 @@ public sealed partial class ControllerManager
         finally { _gate.Release(); }
     }
 
-    /// <summary>Archives the current Controller (404 ignored) and clears the stored id; the owner then creates a new one.</summary>
+    /// <summary>
+    /// Archives the current Controller (404 ignored) and clears the stored id; the owner then creates a new one. A pending
+    /// session (created, but its prompt not delivered) is archived and cleared too, on a best-effort basis, so the next
+    /// create starts a fresh conversation rather than reusing it; it is left alone while a create is running.
+    /// </summary>
     public async Task RetireAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
         {
-            if (CurrentId is not { } current) return;
-            try { await _cloud.ArchiveAsync(current, ct); }
-            catch (CloudSessionApiException e) when (e.Status == 404) { }
-            lock (_stateLock) SaveState(new State(null, null, PendingId: _state.PendingId));
+            var current = CurrentId;
+            var pending = _createGate.CurrentCount > 0 ? PendingId : null;
+            if (current is null && pending is null) return;
+            if (current is not null)
+            {
+                try { await _cloud.ArchiveAsync(current, ct); }
+                catch (CloudSessionApiException e) when (e.Status == 404) { }
+            }
+            if (pending is not null && pending != current)
+            {
+                try { await _cloud.ArchiveAsync(pending, ct); }
+                catch (Exception e) when (e is CloudSessionApiException or HttpRequestException or CloudSessionAuthException
+                                              or ClaudeAuthMissingException) { }
+            }
+            lock (_stateLock) SaveState(new State(null, null, PendingId: pending is null ? _state.PendingId : null));
         }
         finally { _gate.Release(); }
     }

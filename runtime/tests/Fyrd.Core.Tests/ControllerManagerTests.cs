@@ -146,7 +146,7 @@ public sealed class ControllerManagerTests : IDisposable
     }
 
     [Fact]
-    public async Task Find_And_Retire_KeepAPendingSession()
+    public async Task Find_KeepsAPendingSession_RetireArchivesAndClearsIt()
     {
         _cloud.SetSession(FakeCloudSessions.Session(Ctl));
         _owner.CreatedIds.Enqueue(Ctl);
@@ -154,9 +154,48 @@ public sealed class ControllerManagerTests : IDisposable
         await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
 
         Assert.Null(await Make().FindAsync(default));
+        Assert.Equal(Ctl, Make().PendingId);
+
         await Make().RetireAsync(default);
 
-        Assert.Equal(Ctl, Make().PendingId);
+        Assert.Null(Make().PendingId);
+        Assert.Equal([Ctl], _cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Retire_PendingArchiveFails_StillClearsAndArchivesTheCurrent()
+    {
+        await Created("session_cur");
+        _cloud.SetSession(FakeCloudSessions.Session("session_pend"));
+        _owner.CreatedIds.Enqueue("session_pend");
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("x")); return Task.CompletedTask; };
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+        Assert.Equal("session_pend", Make().PendingId);
+
+        _cloud.OnArchive = id => { if (id == "session_pend") throw new CloudSessionApiException(500, "boom"); };
+        await Make().RetireAsync(default);
+
+        Assert.Null(Make().CurrentId);
+        Assert.Null(Make().PendingId);
+        Assert.Equal(["session_cur"], _cloud.Archived);
+    }
+
+    [Fact]
+    public async Task Retire_ThenCreate_StartsAFreshSession()
+    {
+        _cloud.SetSession(FakeCloudSessions.Session(Ctl));
+        _owner.CreatedIds.Enqueue(Ctl);
+        _owner.OnCreate = _ => { _owner.ThrowOnNextCall(new OwnerMessageException("x")); return Task.CompletedTask; };
+        await Assert.ThrowsAsync<OwnerMessageException>(() => Make().CreateAsync(default));
+        await Make().RetireAsync(default);
+
+        _owner.OnCreate = null;
+        _cloud.SetSession(FakeCloudSessions.Session("session_fresh"));
+        _owner.CreatedIds.Enqueue("session_fresh");
+        var info = await Make().CreateAsync(default);
+
+        Assert.Equal("session_fresh", info.SessionId);
+        Assert.Equal(2, _owner.Created.Count);
     }
 
     [Fact]

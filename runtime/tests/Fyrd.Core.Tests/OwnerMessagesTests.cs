@@ -129,13 +129,58 @@ public class OwnerMessagesTests
         Assert.Throws<ArgumentException>(() => ClaudeCliOwnerMessages.CreateCommand(description));
     }
 
-    [Theory]
-    [InlineData("Cloud session: session_abc (https://claude.ai/code/session_abc)", "session_abc")]
-    [InlineData("https://claude.ai/code/cse_abc?from=cli", "session_abc")]
-    [InlineData("nothing here", null)]
-    public void FindSessionId_NormalisesToSessionPrefix(string text, string? expected)
+    [Fact]
+    public void FindCreatedId_CseIdIsTheSameSession()
     {
-        Assert.Equal(expected, ClaudeCliOwnerMessages.FindSessionId(text));
+        Assert.Equal("session_abc", ClaudeCliOwnerMessages.FindCreatedId("View: https://claude.ai/code/cse_abc?from=cli\n"));
+    }
+
+    [Fact]
+    public void CreateFinished_TheOwnersProbeOutput_True()
+    {
+        Assert.True(ClaudeCliOwnerMessages.CreateFinished(ProbeOutput));
+    }
+
+    [Fact]
+    public void CreateFinished_UrlIdCutOffByACursorMove_FalseAndNotReturned()
+    {
+        // A pseudo terminal repainting mid-id: the cursor move becomes a line break right after a partial id.
+        var output = "Created cloud session: Controller\r\nView: https://claude.ai/code/session_01SQS\u001b[2;1H";
+        Assert.False(ClaudeCliOwnerMessages.CreateFinished(output));
+        Assert.Null(ClaudeCliOwnerMessages.FindCreatedId(output, exited: false));
+    }
+
+    [Fact]
+    public void CreateFinished_LooseUrlIdRepeatedByTeleport_True()
+    {
+        var output = "View: https://claude.ai/code/session_01Whole\r\nResume with: claude --teleport session_01Whole\r\n";
+        Assert.True(ClaudeCliOwnerMessages.CreateFinished(output));
+        Assert.Equal("session_01Whole", ClaudeCliOwnerMessages.FindCreatedId(output, exited: false));
+    }
+
+    [Fact]
+    public void FindCreatedId_CutOffUrlAndDifferentTeleport_Throws()
+    {
+        var output = "View: https://claude.ai/code/session_01SQS\u001b[2;1HYWZ?from=cli\r\n" +
+                     "Resume with: claude --teleport session_01SQSYWZ\r\n";
+        Assert.False(ClaudeCliOwnerMessages.CreateFinished(output));
+        var e = Assert.Throws<OwnerMessageException>(() => ClaudeCliOwnerMessages.FindCreatedId(output));
+        Assert.Contains("session_01SQS and session_01SQSYWZ", e.Message);
+    }
+
+    [Fact]
+    public void FindCreatedId_FirmUrlAndDifferentTeleport_Throws()
+    {
+        var output = "View: https://claude.ai/code/session_aaa?from=cli\r\nResume with: claude --teleport session_bbb\r\n";
+        Assert.Throws<OwnerMessageException>(() => ClaudeCliOwnerMessages.FindCreatedId(output));
+    }
+
+    [Fact]
+    public void FindCreatedId_LoneLooseUrl_OnlyOnceTheCliExited()
+    {
+        var output = "View: https://claude.ai/code/session_lone\r\n";
+        Assert.Null(ClaudeCliOwnerMessages.FindCreatedId(output, exited: false));
+        Assert.Equal("session_lone", ClaudeCliOwnerMessages.FindCreatedId(output, exited: true));
     }
 
     [Fact]
@@ -341,19 +386,32 @@ public class OwnerMessagesTests
     public async Task CreateAsync_NoIdBeforeTimeout_KillsTheChildAndSaysItMayExist()
     {
         if (NoScript) return;
-        var old = ClaudeCliOwnerMessages.CreateTimeout;
-        ClaudeCliOwnerMessages.CreateTimeout = TimeSpan.FromMilliseconds(500);
-        try
+        await WithFakeClaude("printf 'Checking for updates...\\r\\n'\nsleep 30\n", async dir =>
         {
-            await WithFakeClaude("sleep 30\n", async dir =>
-            {
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
-                    new ClaudeCliOwnerMessages().CreateAsync("controller", Path.Combine(dir, "l")));
-                Assert.Contains("may still have been created", e.Message);
-                Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
-            });
-        }
-        finally { ClaudeCliOwnerMessages.CreateTimeout = old; }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
+                Short().CreateAsync("controller", Path.Combine(dir, "l")));
+            Assert.Contains("may still have been created", e.Message);
+            Assert.Contains("It last printed: Checking for updates...", e.Message);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
+        });
     }
+
+    [Fact]
+    public async Task CreateAsync_UrlIdCutOff_DoesNotStopEarlyOrReturnIt()
+    {
+        if (NoScript) return;
+        await WithFakeClaude("""
+            printf 'View: https://claude.ai/code/session_01SQS\033[2;1H'
+            sleep 30
+            """, async dir =>
+        {
+            var e = await Assert.ThrowsAsync<OwnerMessageException>(() =>
+                Short().CreateAsync("controller", Path.Combine(dir, "l")));
+            Assert.Contains("timed out", e.Message);
+        });
+    }
+
+    /// <summary>A CLI runner for this platform that gives up on a create after 1.5 seconds.</summary>
+    private static ClaudeCliOwnerMessages Short() => new(TerminalRunners.ForThisPlatform(), TimeSpan.FromMilliseconds(1500));
 }
