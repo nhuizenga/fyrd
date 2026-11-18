@@ -41,7 +41,7 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.Equal("# Stacks\n\nStack rules.", list[1].Body);
         Assert.All(list, s =>
         {
-            Assert.Equal(SessionSkills.Hash(s), s.SeedHash);
+            Assert.Equal(SessionSkills.ContentHash(s), s.SeedHash);
             Assert.False(s.UpdateAvailable);
         });
         Assert.True(File.Exists(Path.Combine(_home.Paths.HubSessionSkillsDir, "fyrd-stacks.json")));
@@ -54,7 +54,7 @@ public sealed class SessionSkillsTests : IDisposable
         Seed("fyrd-stacks", "Stacks: use for a stack.", "builder", "# Stacks\n\nBetter stack rules.");
         var after = Make().Get("fyrd-stacks")!;
         Assert.Equal("# Stacks\n\nBetter stack rules.", after.Body);
-        Assert.Equal(SessionSkills.Hash(after), after.SeedHash);
+        Assert.Equal(SessionSkills.ContentHash(after), after.SeedHash);
         Assert.False(after.UpdateAvailable);
     }
 
@@ -99,6 +99,131 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.Equal(["fyrd-events", "fyrd-stacks"], Make().MissingSeeds());
         store.Reset("fyrd-stacks");
         Assert.Equal(["fyrd-events"], store.MissingSeeds());
+    }
+
+    /// <summary>The hash of one skill as it was stored as its <c>SeedHash</c> while that hash held the script template's version.</summary>
+    private static string LegacySeedHash(SessionSkill s, int templateVersion)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(new object[]
+        {
+            $"fyrd-session-skills-{templateVersion}",
+            new object[] { s.Name, s.Description, s.Roles.Order(StringComparer.Ordinal).ToArray(), s.Body },
+        });
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+    }
+
+    private string StoreFile(string name) => Path.Combine(_home.Paths.HubSessionSkillsDir, name + ".json");
+
+    /// <summary>Rewrites a stored skill the way an earlier version left it: with another seed hash and, when given, another body.</summary>
+    private void Restore(string name, string seedHash, string? body = null)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(StoreFile(name)))!;
+        Assert.NotNull(node["seedHash"]);
+        node["seedHash"] = seedHash;
+        if (body is not null) node["body"] = body;
+        File.WriteAllText(StoreFile(name), node.ToJsonString());
+    }
+
+    private string StoredSeedHash(string name) =>
+        System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(StoreFile(name)))!["seedHash"]!.GetValue<string>();
+
+    /// <summary>
+    /// A store written while a skill's seed hash held the script template's version (1, then 2): an unedited skill
+    /// still follows a changed seed and goes with a removed one, an edited one is kept, and the seed hashes Fyrd can
+    /// tell are rewritten as content hashes.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void AStoreWithSeedHashesInAnEarlierForm_IsReadAsBefore(int templateVersion)
+    {
+        Seed("fyrd-gone", "Gone: use it.", "builder", "# Gone\n\nGone rules.");
+        Seed("fyrd-gone-edited", "Gone: use it.", "builder", "# Gone\n\nGone rules.");
+        Seed("fyrd-edited", "Edited: use it.", "builder", "# Edited\n\nSeed text.");
+        Seed("fyrd-edited-same-seed", "Edited: use it.", "builder", "# Edited\n\nSeed text.");
+        Seed("fyrd-same", "Same: use it.", "builder", "# Same\n\nSame rules.");
+        var seeded = Make().List();
+        Assert.Equal(7, seeded.Count);
+        foreach (var s in seeded)
+        {
+            var legacy = LegacySeedHash(s, templateVersion);
+            Assert.NotEqual(s.SeedHash, legacy);
+            Restore(s.Name, legacy, s.Name.Contains("edited", StringComparison.Ordinal) ? "Mine." : null);
+        }
+        var editedSameSeed = SessionSkills.ContentHash(seeded.Single(s => s.Name == "fyrd-edited-same-seed"));
+        var editedOldSeed = LegacySeedHash(seeded.Single(s => s.Name == "fyrd-edited"), templateVersion);
+
+        Seed("fyrd-stacks", "Stacks: use for a stack.", "builder", "# Stacks\n\nBetter stack rules.");
+        Seed("fyrd-edited", "Edited: use it.", "builder", "# Edited\n\nBetter seed text.");
+        Directory.Delete(Path.Combine(_seeds, "fyrd-gone"), true);
+        Directory.Delete(Path.Combine(_seeds, "fyrd-gone-edited"), true);
+
+        var store = Make();
+        var list = store.List();
+        Assert.Equal(["fyrd-edited", "fyrd-edited-same-seed", "fyrd-events", "fyrd-gone-edited", "fyrd-same", "fyrd-stacks"], list.Select(s => s.Name));
+        SessionSkill Of(string name) => list.Single(s => s.Name == name);
+
+        // Unedited: follows the changed seed, or only gets its seed hash in today's form.
+        Assert.Equal("# Stacks\n\nBetter stack rules.", Of("fyrd-stacks").Body);
+        foreach (var name in new[] { "fyrd-stacks", "fyrd-events", "fyrd-same" })
+        {
+            Assert.Equal(SessionSkills.ContentHash(Of(name)), Of(name).SeedHash);
+            Assert.Equal(Of(name).SeedHash, StoredSeedHash(name));
+            Assert.False(Of(name).UpdateAvailable);
+        }
+        Assert.Equal("# Same\n\nSame rules.", Of("fyrd-same").Body);
+
+        // Edited: the text stays. Flagged only when the seed moved on since.
+        Assert.Equal("Mine.", Of("fyrd-edited").Body);
+        Assert.True(Of("fyrd-edited").UpdateAvailable);
+        Assert.Equal(editedOldSeed, StoredSeedHash("fyrd-edited"));
+        Assert.Equal("Mine.", Of("fyrd-edited-same-seed").Body);
+        Assert.False(Of("fyrd-edited-same-seed").UpdateAvailable);
+        Assert.Equal(editedSameSeed, StoredSeedHash("fyrd-edited-same-seed"));
+
+        // The removed seeds: the unedited copy is gone, the edited one is the owner's now.
+        Assert.False(File.Exists(StoreFile("fyrd-gone")));
+        Assert.Equal("Mine.", Of("fyrd-gone-edited").Body);
+        Assert.False(Of("fyrd-gone-edited").UpdateAvailable);
+        Assert.Equal("fyrd-edited\nfyrd-edited-same-seed\nfyrd-events\nfyrd-gone-edited\nfyrd-same\nfyrd-stacks\n",
+            File.ReadAllText(Path.Combine(_home.Paths.HubSessionSkillsDir, ".seeded")));
+
+        // And it stays so on the next start.
+        Assert.Equal(list, Make().List(), SkillComparer);
+    }
+
+    private static readonly IEqualityComparer<SessionSkill> SkillComparer = EqualityComparer<SessionSkill>.Create((a, b) =>
+        a!.Name == b!.Name && a.Description == b.Description && a.Roles.SequenceEqual(b.Roles) && a.Body == b.Body
+        && a.SeedHash == b.SeedHash && a.UpdateAvailable == b.UpdateAvailable);
+
+    /// <summary>
+    /// A skill's seed hash is its text and nothing else, pinned here: were the script's template version (or anything
+    /// else that changes between releases) part of it, the next change would turn every unedited skill into an edited
+    /// one that no longer follows its seed. The hash of the script does hold the version.
+    /// </summary>
+    [Fact]
+    public void ASkillsSeedHash_IsItsTextOnly_NotTheScriptTemplateVersion()
+    {
+        var skill = Skill("fyrd-a", "A: use it.", "Body a.", "monitor", "builder");
+        const string pinned = "82aa0cd1115609a689981e0101e4bfcf582f9fd4c0ed4f7646d27ccd76430b9f";
+        Assert.Equal(pinned, SessionSkills.ContentHash(skill));
+        Assert.Equal(pinned, SessionSkills.ContentHash(skill with { Roles = ["builder", "monitor"], SeedHash = "x", UpdateAvailable = true }));
+        Assert.NotEqual(pinned, SessionSkills.ContentHash(skill with { Body = "Body a!" }));
+        Assert.NotEqual(pinned, SessionSkills.ContentHash(skill with { Description = "A: use it!" }));
+        Assert.NotEqual(pinned, SessionSkills.ContentHash(skill with { Roles = ["builder"] }));
+        Assert.NotEqual(pinned, SessionSkills.ContentHash(skill with { Name = "fyrd-b" }));
+
+        Assert.Equal(LegacySeedHash(skill, SessionSkillScript.TemplateVersion), SessionSkills.Hash([skill]));
+        Assert.NotEqual(pinned, SessionSkills.Hash([skill]));
+        for (var version = 0; version <= SessionSkillScript.TemplateVersion + 1; version++)
+            Assert.NotEqual(pinned, LegacySeedHash(skill, version));
+
+        // A store seeded today, read when the script's hash has moved on: its skills are unedited whatever that hash is.
+        Make().List();
+        Seed("fyrd-stacks", "Stacks: use for a stack.", "builder", "# Stacks\n\nBetter stack rules.");
+        var after = Make().Get("fyrd-stacks")!;
+        Assert.Equal("# Stacks\n\nBetter stack rules.", after.Body);
+        Assert.NotEqual(SessionSkills.Hash([after]), after.SeedHash);
     }
 
     /// <summary>

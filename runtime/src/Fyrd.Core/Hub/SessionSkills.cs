@@ -9,7 +9,7 @@ namespace Fyrd.Core.Hub;
 /// <summary>
 /// A skill a cloud session loads on demand with the Skill tool: part of a role's instructions that is needed only in
 /// some situations. <c>Description</c> is one line saying what the skill holds and when to load it, <c>Roles</c> are the
-/// persona ids it belongs to, and <c>Body</c> is the markdown. <c>SeedHash</c> is the hash of the seed this skill was
+/// persona ids it belongs to, and <c>Body</c> is the markdown. <c>SeedHash</c> is the <see cref="SessionSkills.ContentHash"/> of the seed this skill was
 /// last synced from (null for one the owner added); <c>UpdateAvailable</c> is computed on read and never stored.
 /// </summary>
 public sealed record SessionSkill(string Name, string Description, IReadOnlyList<string> Roles, string Body, string? SeedHash = null, bool UpdateAvailable = false);
@@ -103,7 +103,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
         {
             SeedIfNeeded();
             if (!_seeds.TryGetValue(name, out var seed)) throw new KeyNotFoundException($"Session skill '{name}' has no default to reset to.");
-            var reset = seed with { SeedHash = Hash(seed) };
+            var reset = seed with { SeedHash = ContentHash(seed) };
             Write(reset);
             return reset;
         }
@@ -164,8 +164,23 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
         return new SessionSkill(skill.Name, description, roles, body, skill.SeedHash);
     }
 
-    /// <summary>SHA-256 (lowercase hex) of one skill's name, description, roles and body.</summary>
-    public static string Hash(SessionSkill skill) => Hash([skill]);
+    /// <summary>
+    /// SHA-256 (lowercase hex) of one skill's name, description, roles and body, and of nothing else. It is what a
+    /// stored skill's <c>SeedHash</c> holds, and what tells an unedited skill from an edited one, so it must stay the
+    /// same for the same text for good: <see cref="SessionSkillScript.TemplateVersion"/> is no part of it.
+    /// </summary>
+    public static string ContentHash(SessionSkill skill) => Hash("fyrd-session-skill", [skill]);
+
+    /// <summary>
+    /// The template versions whose <see cref="Hash(IEnumerable{SessionSkill})"/> of one skill was once stored as its
+    /// <c>SeedHash</c>. Stores written then still hold those; they are read as the content hash and rewritten.
+    /// </summary>
+    private static readonly int[] LegacySeedHashVersions = [1, 2];
+
+    /// <summary>Whether <paramref name="seedHash"/> is the seed hash of this text, in today's form or an earlier one.</summary>
+    private static bool IsSeedHashOf(string? seedHash, SessionSkill text) =>
+        seedHash is not null
+        && (seedHash == ContentHash(text) || LegacySeedHashVersions.Any(v => seedHash == Hash($"fyrd-session-skills-{v}", [text])));
 
     /// <summary>
     /// SHA-256 (lowercase hex) of a set of skills: the same for the same skills in any order, and different when a name,
@@ -173,13 +188,15 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// although the script doesn't hold them: a role change moves which personas point at the skill. So is
     /// <see cref="SessionSkillScript.TemplateVersion"/>: a block with other shell text is another script.
     /// </summary>
-    public static string Hash(IEnumerable<SessionSkill> skills)
+    public static string Hash(IEnumerable<SessionSkill> skills) => Hash($"fyrd-session-skills-{SessionSkillScript.TemplateVersion}", skills);
+
+    private static string Hash(string prefix, IEnumerable<SessionSkill> skills)
     {
         using var stream = new MemoryStream();
         using (var json = new Utf8JsonWriter(stream))
         {
             json.WriteStartArray();
-            json.WriteStringValue($"fyrd-session-skills-{SessionSkillScript.TemplateVersion}");
+            json.WriteStringValue(prefix);
             foreach (var s in skills.OrderBy(s => s.Name, StringComparer.Ordinal))
             {
                 json.WriteStartArray();
@@ -245,8 +262,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     private SessionSkill Flag(SessionSkill s)
     {
         if (!_seeds.TryGetValue(s.Name, out var seed)) return s with { UpdateAvailable = false };
-        var seedHash = Hash(seed);
-        return s with { UpdateAvailable = Hash(s) != seedHash && s.SeedHash != seedHash };
+        return s with { UpdateAvailable = ContentHash(s) != ContentHash(seed) && !IsSeedHashOf(s.SeedHash, seed) };
     }
 
     private string FileFor(string name) => Path.Combine(paths.HubSessionSkillsDir, name + ".json");
@@ -283,8 +299,9 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
 
     /// <summary>
     /// Seeds skills that were never seeded, and brings unedited ones up to the current seed once per process. A skill
-    /// counts as unedited when its own hash equals the hash of the seed it came from. Every stored skill has had a
-    /// <c>SeedHash</c> since the store began, so there is no history file as the personas have.
+    /// counts as unedited when its <c>SeedHash</c> is the seed hash of its own text (<see cref="IsSeedHashOf"/>, which
+    /// also knows the earlier forms; a seed hash in one of those is rewritten as the content hash). Every stored skill
+    /// has had a <c>SeedHash</c> since the store began, so there is no history file as the personas have.
     /// </summary>
     private void SeedIfNeeded()
     {
@@ -305,7 +322,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             var seed = ParseSeed(name, File.ReadAllText(file, Encoding.UTF8));
             if (seed is null) continue;
             _seeds[name] = seed;
-            var seedHash = Hash(seed);
+            var seedHash = ContentHash(seed);
             var stored = Read(FileFor(name));
             if (!seededNames.Contains(name))
             {
@@ -318,9 +335,12 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
                 }
             }
             if (stored is null) continue; // deleted by the owner: stays deleted
-            // Edited, or one the owner made under a name a seed took later: leave the text alone.
-            if (stored.SeedHash is null || Hash(stored) != stored.SeedHash || stored.SeedHash == seedHash) continue;
-            Write(seed with { SeedHash = seedHash });
+            if (stored.SeedHash == seedHash) continue; // synced with this seed, edited since or not
+            // Unedited: it follows the seed.
+            if (IsSeedHashOf(stored.SeedHash, stored)) Write(seed with { SeedHash = seedHash });
+            // Edited after a sync with this very seed, recorded in an earlier form: only the record changes.
+            else if (IsSeedHashOf(stored.SeedHash, seed)) Write(stored with { SeedHash = seedHash });
+            // Otherwise edited, or one the owner made under a name a seed took later: leave it alone.
         }
         // A seed that is gone: a skill that was seeded from it and never edited goes with it, as an unedited skill
         // follows its seed; an edited one is the owner's text and stays, as a skill of their own.
@@ -329,7 +349,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             // Only a seed whose file is gone; one that is there but can't be read as a skill removes nothing.
             if (!IsValidName(name) || File.Exists(Path.Combine(seedDir, name, "SKILL.md"))) continue;
             var stored = Read(FileFor(name));
-            if (stored is not null && (stored.SeedHash is null || Hash(stored) != stored.SeedHash)) continue;
+            if (stored is not null && !IsSeedHashOf(stored.SeedHash, stored)) continue;
             if (stored is not null) File.Delete(FileFor(name));
             seededNames.Remove(name);
             markerChanged = true;
