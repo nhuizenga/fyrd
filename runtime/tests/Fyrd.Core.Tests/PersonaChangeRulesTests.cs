@@ -82,6 +82,24 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "the repo rules applied, each guard changed");
     }
 
+    /// <summary>
+    /// Planning the pull requests has its own ask: an input that doesn't settle the split (a Builder that itself judges
+    /// one PR too large, or an input that splits the work only partly) goes to the owner. Step 1's ask about an unclear
+    /// goal doesn't cover it.
+    /// </summary>
+    [Fact]
+    public void BuilderAsksTheOwnerWhenTheInputDoesNotSettleTheSplit()
+    {
+        var d = Def("builder");
+        var job = d.IndexOf("# Your job", StringComparison.Ordinal);
+        var next = d.IndexOf("# Build rules", StringComparison.Ordinal);
+        Assert.InRange(job, 0, next);
+        ContainsAll(d[job..next],
+            "**Plan the pull requests.**",
+            "if the input doesn't settle the split, ask the owner",
+            "how to split the work into pull requests is unclear, ask the owner before you start a worker");
+    }
+
     [Fact]
     public void BuilderBuildRulesCoverTrustBoundaries()
     {
