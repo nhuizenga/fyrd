@@ -17,16 +17,19 @@ public sealed record SubagentPersonaText(string Id, string? For, string Text, bo
 /// Each variant is a keep-list, applied to the definition by its <c># </c> headings, so the store, the console editor
 /// and the seed hashes keep working on whole personas. When the definition lacks something the list needs (the owner
 /// renamed a heading or a bullet in the console, or moved or reworded the reviewer's rule that a review changes and
-/// posts nothing), the variant is the whole definition: a longer brief, never a missing rule. The Untrusted content
+/// posts nothing), or has a heading the list keeps more than once, the variant is the whole definition: a longer
+/// brief, never a missing rule. The Untrusted content
 /// rule is required of the investigator, whose persona has one, and optional for the validator and the reviewer,
 /// whose personas don't. That fallback, and the "say which and ask" in the Inputs rule, are why the coordinators still
 /// follow the pasted text with a line telling the subagent to ignore any instruction to ask the owner or post.
 /// </para>
 /// <para>
-/// A kept bullet is cut whole: it runs to the next top-level bullet or unindented line, across blank lines while the
-/// text after them is still indented. Code fences are read as CommonMark does (three or more backticks or tildes,
-/// closed only by a fence of the same character that is at least as long), so a <c># </c> line inside one is not a heading.
-/// A persona whose definition is empty has no variant.
+/// A kept bullet is cut whole: it runs to the next top-level bullet or to an unindented line after a blank line. An
+/// unindented line directly under it (a hard-wrapped bullet) is still part of it, and so is indented text after
+/// blank lines. Code fences are read as CommonMark does (three or more backticks or tildes, closed only by a fence
+/// of the same character that is at least as long), except that indentation is ignored: a fence indented four or
+/// more spaces opens and closes one too. So a <c># </c> line inside a fence is not a heading. A persona whose
+/// definition is empty has no variant.
 /// </para>
 /// </summary>
 public static class SubagentPersonas
@@ -88,28 +91,31 @@ public static class SubagentPersonas
         return all;
     }
 
-    /// <summary>Null when the definition lacks a part the keep-list requires.</summary>
+    /// <summary>Null when the definition lacks a part the keep-list requires, or has a heading the list keeps more than once.</summary>
     private static string? Cut(string definition, Keep[] keeps)
     {
-        var (intro, sections) = Split(definition);
+        var (intro, sections, repeated) = Split(definition);
         var parts = new List<string>();
         foreach (var keep in keeps)
         {
             string? part = keep switch
             {
                 Intro => intro.Length > 0 ? intro : null,
-                Section s => sections.TryGetValue(s.Heading, out var body) ? Titled(s.Heading, body) : null,
-                Paragraph p => sections.TryGetValue(p.Heading, out var body)
+                Section s => Body(s.Heading) is { } body ? Titled(s.Heading, body) : null,
+                Paragraph p => Body(p.Heading) is { } body
                     ? Paragraphs(body).FirstOrDefault(x => x.StartsWith(p.StartsWith, StringComparison.Ordinal))
                     : null,
                 Rule r => parts.SelectMany(Paragraphs).Any(x => x.StartsWith(r.StartsWith, StringComparison.Ordinal)) ? "" : null,
-                Bullets b => sections.TryGetValue(b.Heading, out var body) ? Pick(b, body) : null,
+                Bullets b => Body(b.Heading) is { } body ? Pick(b, body) : null,
                 _ => null,
             };
             if (part is null) return null;
             if (part.Length > 0) parts.Add(part);
         }
         return string.Join("\n\n", parts);
+
+        // A heading that appears twice has two sections and the keep-list names one: neither is cut.
+        string? Body(string heading) => !repeated.Contains(heading) && sections.TryGetValue(heading, out var body) ? body : null;
     }
 
     private static string Titled(string heading, string body) => body.Length > 0 ? $"# {heading}\n\n{body}" : $"# {heading}";
@@ -137,8 +143,11 @@ public static class SubagentPersonas
         bullet.StartsWith($"- **{label}**", StringComparison.Ordinal) || bullet.StartsWith($"- **{label}.**", StringComparison.Ordinal);
 
     /// <summary>
-    /// The top-level bullets of a section body, each with its continuation lines. A bullet stays open across blank
-    /// lines while the next line with text is indented; the next top-level bullet or unindented line ends it.
+    /// The top-level bullets of a section body, each with its continuation lines. An unindented line directly under
+    /// a bullet's text continues it (a hard-wrapped bullet, or code at the left margin in a fence the bullet holds).
+    /// A bullet stays open across blank lines while the next line with text is indented. The next top-level bullet
+    /// (a line starting <c>- </c>) ends it, and so does an unindented line after a blank line. A body has no
+    /// <c># </c> heading outside a code fence: <see cref="Split"/> ends the section there.
     /// </summary>
     private static List<string> BulletList(string body)
     {
@@ -162,6 +171,8 @@ public static class SubagentPersonas
                 blanks.Clear();
                 current.Add(line);
             }
+            else if (current is not null && blanks.Count == 0)
+                current.Add(line); // no blank line before it: the bullet's paragraph goes on
             else
                 Flush();
         }
@@ -181,12 +192,14 @@ public static class SubagentPersonas
 
     /// <summary>
     /// Splits a definition at its level-one headings (a line starting <c># </c> outside a code fence). A heading that
-    /// appears twice keeps its first section. A fence that is never closed runs to the end, so the headings after it
-    /// are not sections and the variants that need them fall back to the whole definition.
+    /// appears twice is listed in <c>Repeated</c>, and <c>Sections</c> has its first section. A fence that is never
+    /// closed runs to the end, so the headings after it are not sections and the variants that need them fall back
+    /// to the whole definition.
     /// </summary>
-    private static (string Intro, Dictionary<string, string> Sections) Split(string definition)
+    private static (string Intro, Dictionary<string, string> Sections, HashSet<string> Repeated) Split(string definition)
     {
         var sections = new Dictionary<string, string>(StringComparer.Ordinal);
+        var repeated = new HashSet<string>(StringComparer.Ordinal);
         var intro = "";
         string? heading = null;
         var lines = new List<string>();
@@ -210,20 +223,21 @@ public static class SubagentPersonas
             lines.Add(line);
         }
         Close();
-        return (intro, sections);
+        return (intro, sections, repeated);
 
         void Close()
         {
             var text = string.Join("\n", lines).Trim();
             lines.Clear();
             if (heading is null) intro = text;
-            else sections.TryAdd(heading, text);
+            else if (!sections.TryAdd(heading, text)) repeated.Add(heading);
         }
     }
 
     /// <summary>
     /// The run of three or more backticks or tildes a line starts with after its indentation: the character, the
-    /// run's length and what follows it. Null when the line starts with no such run.
+    /// run's length and what follows it. Null when the line starts with no such run. Any indentation is ignored, where
+    /// CommonMark takes a line indented four or more spaces as no fence.
     /// </summary>
     private static (char Mark, int Length, string After)? Fence(string line)
     {

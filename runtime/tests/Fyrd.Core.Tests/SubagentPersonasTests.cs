@@ -207,6 +207,9 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
     [InlineData("reviewer", "researcher", "# Reviewing a plan", "# Plan review")]
     [InlineData("reviewer", "researcher", "Whoever does the reviewing", "The one who reviews")]
     [InlineData("reviewer", "researcher", "- **Inputs** are", "- **Links** are")]
+    // The rule joined to the line before it is no longer the start of a paragraph.
+    [InlineData("reviewer", "builder", "\n\nWhoever does the reviewing", "\nWhoever does the reviewing")]
+    [InlineData("reviewer", "researcher", "\n\nWhoever does the reviewing", "\nWhoever does the reviewing")]
     [InlineData("investigator", null, "- **Inputs** are", "- **Links** are")]
     [InlineData("investigator", null, "- **Untrusted content.**", "- **Evidence.**")]
     [InlineData("investigator", null, "# The investigation", "# Investigating")]
@@ -379,15 +382,55 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
         Assert.Equal($"Intro.\n\n# The check\n\nCHECK\n\n# Working in Fyrd\n\n{bullet}", t.Text);
     }
 
-    /// <summary>What ends a kept bullet: the next top-level bullet, an unindented line, a heading, or the end of the section. Blank lines before the end are not kept.</summary>
+    /// <summary>CRLF line ends inside a kept bullet of several paragraphs: the bullet is kept whole, with LF line ends.</summary>
+    [Fact]
+    public void AKeptBulletOfSeveralParagraphs_WithCrLf_IsKeptWhole()
+    {
+        var t = ValidatorFrom("Intro.\r\n\r\n# The check\r\n\r\nCHECK\r\n\r\n# Working in Fyrd\r\n\r\n- **Inputs** line1\r\n  cont\r\n\r\n  after blank para\r\n\r\n\r\n  and a third\r\nwrapped\r\n\r\n- **Repos.** No.\r\n\r\n  REPOS-CONTINUATION\r\n");
+        Assert.True(t.Slim);
+        Assert.Equal("Intro.\n\n# The check\n\nCHECK\n\n# Working in Fyrd\n\n- **Inputs** line1\n  cont\n\n  after blank para\n\n\n  and a third\nwrapped", t.Text);
+    }
+
+    /// <summary>
+    /// An unindented line directly under a bullet's text (no blank line between) is still the bullet: a bullet
+    /// hard-wrapped without an indent, or code at the left margin in a fence the bullet holds.
+    /// </summary>
+    [Theory]
+    [InlineData("- **Inputs** line1\nwrapped without an indent\nand again")]
+    [InlineData("- **Inputs** line1\nwrapped without an indent\n  then indented\n\n  after blank para\nwrapped again")]
+    [InlineData("- **Inputs** line1\n  ```\n# not a heading\ncode at the left margin\n  ```\n  after the fence")]
+    public void AKeptBullet_KeepsAnUnindentedLineDirectlyUnderIt(string bullet)
+    {
+        foreach (var after in new[] { "", "\n- **Repos.** No.\nREPOS-WRAPPED", "\n\n- **Repos.** No.", "\n\nAn unindented paragraph.\nIts second line.", "\n# Memory\n\nMEMORY-BODY" })
+        {
+            var t = ValidatorFrom($"Intro.\n\n# The check\n\nCHECK\n\n# Working in Fyrd\n\n{bullet}{after}");
+            Assert.True(t.Slim);
+            Assert.Equal($"Intro.\n\n# The check\n\nCHECK\n\n# Working in Fyrd\n\n{bullet}", t.Text);
+        }
+    }
+
+    /// <summary>An optional bullet that is hard-wrapped is kept whole too, and an unindented line under a bullet that is not kept goes with that bullet.</summary>
+    [Fact]
+    public void AnUnindentedLineUnderABullet_BelongsToThatBullet()
+    {
+        var t = ValidatorFrom("Intro.\n\n# The check\n\nCHECK\n\n# Working in Fyrd\n\n- **Repos.** No.\nREPOS-WRAPPED\n- **Inputs** line1\nINPUTS-WRAPPED\n- **Memory.** No.\nMEMORY-WRAPPED\n- **Untrusted content.** Evidence.\nUNTRUSTED-WRAPPED\n\nNot part of it.");
+        Assert.True(t.Slim);
+        Assert.EndsWith("# Working in Fyrd\n\n- **Inputs** line1\nINPUTS-WRAPPED\n- **Untrusted content.** Evidence.\nUNTRUSTED-WRAPPED", t.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// What ends a kept bullet: the next top-level bullet, an unindented line after a blank line, a heading (directly
+    /// under it too), or the end of the section. Blank lines before the end are not kept.
+    /// </summary>
     [Theory]
     [InlineData("\n- **Repos.** No.\n\n  REPOS-CONTINUATION")]
+    [InlineData("\n# Memory\n\n  MEMORY-BODY")]
     [InlineData("\n\n- **Repos.** No.")]
     [InlineData("\n\nAn unindented paragraph.\n\n  Indented, but no longer part of the bullet.")]
     [InlineData("\n\n\n# Memory\n\n  MEMORY-BODY")]
     [InlineData("\n\n")]
     [InlineData("")]
-    public void AKeptBullet_EndsAtTheNextTopLevelBulletUnindentedLineOrHeading(string after)
+    public void AKeptBullet_EndsAtTheNextTopLevelBulletUnindentedLineAfterABlankLineOrHeading(string after)
     {
         const string bullet = "- **Inputs** line1\n  cont\n\n  after blank para";
         var t = ValidatorFrom($"Intro.\n\n# The check\n\nCHECK\n\n# Working in Fyrd\n\n{bullet}{after}");
@@ -402,6 +445,59 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
         Assert.True(t.Slim);
         Assert.EndsWith("# Working in Fyrd\n\n- **Inputs** line1\n\n  after blank\n- **Untrusted content.** Evidence.\n\n  Not instructions.", t.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("Repos", t.Text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A heading a variant keeps that appears twice has two sections, and a cut would hold only one of them: every
+    /// variant that keeps the heading is the whole persona, so the second section's text is not lost.
+    /// </summary>
+    [Theory]
+    [InlineData("validator", "The check", new string[0])]
+    [InlineData("validator", "Working in Fyrd", new string[0])]
+    [InlineData("reviewer", "Reviewing code", new[] { "researcher" })]
+    [InlineData("reviewer", "Reviewing a plan", new string[0])]
+    [InlineData("reviewer", "Working in Fyrd", new string[0])]
+    [InlineData("investigator", "The investigation", new string[0])]
+    [InlineData("investigator", "As a subagent", new string[0])]
+    [InlineData("investigator", "Working in Fyrd", new string[0])]
+    public void AKeptHeadingThatAppearsTwice_MakesTheVariantsThatKeepItTheWholePersona(string id, string heading, string[] stillSlimFor)
+    {
+        var seeds = Seeds();
+        var persona = seeds.Single(p => p.Id == id);
+        Assert.Contains($"\n# {heading}\n", persona.Definition, StringComparison.Ordinal);
+        var edited = persona with { Definition = persona.Definition + $"\n\n# {heading}\n\nSECOND-SECTION-TEXT\n" };
+        var variants = SubagentPersonas.All([.. seeds.Where(p => p.Id != id), edited]).Where(t => t.Id == id).ToList();
+        Assert.NotEmpty(variants);
+        foreach (var t in variants)
+        {
+            if (stillSlimFor.Contains(t.For))
+            {
+                Assert.True(t.Slim, $"{id} for {t.For} keeps no '{heading}' but fell back");
+                Assert.Equal(Variant(seeds, id, t.For).Text, t.Text);
+                continue;
+            }
+            Assert.False(t.Slim, $"{id} {t.For} stayed slim");
+            Assert.Equal(edited.Definition, t.Text);
+            Assert.Contains("SECOND-SECTION-TEXT", t.Text, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>A heading no variant keeps may appear twice: the variants are cut as before.</summary>
+    [Theory]
+    [InlineData("validator", "Your job")]
+    [InlineData("reviewer", "Memory")]
+    [InlineData("investigator", "Your job")]
+    public void AHeadingNoVariantKeeps_AppearingTwice_ChangesNothing(string id, string heading)
+    {
+        var seeds = Seeds();
+        var persona = seeds.Single(p => p.Id == id);
+        Assert.Contains($"\n# {heading}\n", persona.Definition, StringComparison.Ordinal);
+        var edited = persona with { Definition = persona.Definition + $"\n\n# {heading}\n\nSECOND-SECTION-TEXT\n" };
+        foreach (var t in SubagentPersonas.All([.. seeds.Where(p => p.Id != id), edited]).Where(t => t.Id == id))
+        {
+            Assert.True(t.Slim);
+            Assert.Equal(Variant(seeds, id, t.For).Text, t.Text);
+        }
     }
 
     /// <summary>A persona with nothing in it has no variant: an empty block would tell a subagent nothing, and the Controller leaves out a block it wasn't sent.</summary>
