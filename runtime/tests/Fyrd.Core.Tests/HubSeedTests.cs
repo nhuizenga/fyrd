@@ -337,6 +337,34 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A word budget per whole persona, a little above its size, so growth is noticed: every word here is sent to each
+    /// session of that role (and the Controller's message carries all of them). A persona that outgrows its budget is
+    /// tightened, or the budget is raised on purpose.
+    /// </summary>
+    [Theory]
+    [InlineData("builder", 4310)]
+    [InlineData("controller", 2630)]
+    [InlineData("investigator", 2300)]
+    [InlineData("monitor", 2070)]
+    [InlineData("researcher", 2430)]
+    [InlineData("reviewer", 2680)]
+    [InlineData("validator", 2350)]
+    public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
+    {
+        var words = Get(id).Definition.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        Assert.True(words <= budget, $"{id}: {words} words, over the budget of {budget}");
+    }
+
+    [Fact]
+    public void EveryPersonaHasAWordBudget()
+    {
+        var budgeted = typeof(HubSeedTests).GetMethod(nameof(EveryPersona_StaysUnderItsWordBudget))!
+            .GetCustomAttributesData().Where(a => a.AttributeType == typeof(InlineDataAttribute))
+            .Select(a => (string)((IEnumerable<System.Reflection.CustomAttributeTypedArgument>)a.ConstructorArguments[0].Value!).First().Value!);
+        Assert.Equal(Ids, budgeted.Order(StringComparer.Ordinal));
+    }
+
     [Fact]
     public void NoPlaceholdersLeft()
     {

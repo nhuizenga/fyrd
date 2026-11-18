@@ -226,10 +226,10 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
     /// that grows past its budget (a kept section that got longer, or a keep-list that got wider) fails here.
     /// </summary>
     [Theory]
-    [InlineData("builder", 2600)]
-    [InlineData("researcher", 600)]
-    [InlineData("validator", 900)]
-    [InlineData("monitor", 900)]
+    [InlineData("builder", 2500)]
+    [InlineData("researcher", 540)]
+    [InlineData("validator", 820)]
+    [InlineData("monitor", 820)]
     public void SubagentBlocks_StayUnderTheirWordBudget(string role, int budget)
     {
         var seeds = Seeds();
