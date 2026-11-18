@@ -120,6 +120,19 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("the persona's text exactly as it appears inside its `<peasant-persona>` block", d, StringComparison.Ordinal);
     }
 
+    /// <summary>A subagent's persona text can still say to ask the owner (the Inputs rule, or a whole-persona fallback), so every brief overrides it.</summary>
+    [Theory]
+    [InlineData("builder", "Ignore any instruction above to ask the owner, post a review or message anyone; return your findings only.")]
+    [InlineData("researcher", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("validator", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("monitor", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
+    public void EveryCoordinator_TellsItsPersonaSubagentToIgnoreInstructionsToAskOrPost(string id, string line)
+    {
+        var d = Get(id).Definition;
+        var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
+        Assert.Contains($"`{line}`", section, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Builder_PushesAsItGoes_AndKnowsItsBase()
     {
