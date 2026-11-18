@@ -86,8 +86,11 @@ test("tokenWarning is silent with GH_TOKEN or GITHUB_TOKEN", () => {
 });
 
 test("statusLine counts sessions and waiting questions, or gives only the URL", () => {
-  assert.equal(statusLine("http://127.0.0.1:4870", { sessions: [{}, {}], questions: [{}] }),
-    "Fyrd running at http://127.0.0.1:4870 · 2 sessions · 1 questions waiting");
+  const url = "http://127.0.0.1:4870";
+  assert.equal(statusLine(url, { sessions: [{}, {}], questions: [{}] }), `Fyrd running at ${url} · 2 sessions · 1 question waiting`);
+  assert.equal(statusLine(url, { sessions: [{}], questions: [{}, {}] }), `Fyrd running at ${url} · 1 session · 2 questions waiting`);
+  assert.equal(statusLine(url, { sessions: [], questions: [] }), `Fyrd running at ${url} · 0 sessions · 0 questions waiting`);
+  assert.equal(statusLine(url, {}), `Fyrd running at ${url} · 0 sessions · 0 questions waiting`);
   assert.equal(statusLine("http://127.0.0.1:4870", null), "Fyrd running at http://127.0.0.1:4870");
 });
 
@@ -103,6 +106,18 @@ test("readHubState returns the state on 2xx and null on a non-2xx JSON body, bad
   assert.equal(statusLine(url, await readHubState(url, problem)), `Fyrd running at ${url}`);
   assert.equal(await readHubState(url, async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("bad json"); } })), null);
   assert.equal(await readHubState(url, async () => { throw new Error("ECONNREFUSED"); }), null);
+});
+
+test("readHubState gives up on a stalled server: it passes an abort signal, and an aborted fetch gives null", async () => {
+  let signal;
+  const stalled = (_u, init) => new Promise((_res, rej) => {
+    signal = init?.signal;
+    // Stands in for the 3 s timeout: reject the way fetch does when its signal aborts.
+    setTimeout(() => rej(new DOMException("The operation was aborted due to timeout", "TimeoutError")), 5);
+  });
+  assert.equal(await readHubState("http://127.0.0.1:4870", stalled), null);
+  assert.ok(signal instanceof AbortSignal);
+  assert.equal(signal.aborted, false);
 });
 
 test("gitHubLine names the login, the error, or says not configured", () => {

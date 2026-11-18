@@ -84,10 +84,10 @@ export function tokenWarning(env = process.env) {
   return "GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.";
 }
 
-/** The hub state from /api/hub/state, or null when it can't be read (unreachable, non-2xx, or not JSON). */
+/** The hub state from /api/hub/state, or null when it can't be read (unreachable, no answer in 3 s, non-2xx, or not JSON). */
 export async function readHubState(url, fetchImpl = fetch) {
   try {
-    const res = await fetchImpl(`${url}/api/hub/state`);
+    const res = await fetchImpl(`${url}/api/hub/state`, { signal: AbortSignal.timeout(3000) });
     return res.ok ? await res.json() : null;
   } catch {
     return null;
@@ -97,7 +97,8 @@ export async function readHubState(url, fetchImpl = fetch) {
 /** The first `status` line: the URL, then the session and waiting-question counts of /api/hub/state when it could be read. */
 export function statusLine(url, state) {
   if (!state) return `Fyrd running at ${url}`;
-  return `Fyrd running at ${url} · ${state.sessions?.length ?? 0} sessions · ${state.questions?.length ?? 0} questions waiting`;
+  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  return `Fyrd running at ${url} · ${count(state.sessions?.length ?? 0, "session")} · ${count(state.questions?.length ?? 0, "question")} waiting`;
 }
 
 /** The `status` line for the `gitHub` part of /api/hub/state. */
