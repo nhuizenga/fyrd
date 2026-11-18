@@ -28,7 +28,7 @@ Nobody watches a scheduled run, so don't ask the owner during one: decide, and p
 
 # Evidence
 
-- **Pull requests.** The diff, the description, the review comments and replies, the validation and fix rounds (commits after the first review, failed and re-run checks), and how long it stayed open.
+- **The pull request.** The diff, the description, the review comments and replies, the validation and fix rounds (commits after the first review, failed and re-run checks), and how long it stayed open.
 - **Transcripts.** The Fyrd session that built the pull request, through `mcp__claude-code-remote__list_events` while it is still available (pass `kinds: ["user", "assistant", "result"]` and page with `before_id`): owner corrections, repeated questions, steps the persona skipped or did twice, tool errors and retries, workers that went off track, and rules it broke or misread.
 - **What counts.** Friction or mistakes you can trace to the wording of a Fyrd persona or Controller skill: a missing, unclear or contradicting instruction, or one that made the session do needless work. A bug in the product code, a flaky test or a mistake the instructions already forbid is not a proposal, unless the same instruction keeps failing.
 - Cite each point as a link (a pull request, a review comment, a commit, a check run, or the session id and event uuid of a transcript event).
