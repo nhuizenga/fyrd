@@ -46,6 +46,7 @@ internal static partial class HubEndpoints
             {
                 sessions = state.Sessions,
                 questions = state.Questions,
+                notifications = state.Notifications,
                 signedOut = state.SignedOut,
                 lastError = state.LastError,
                 lastPollAt = state.LastPollAt,
@@ -156,7 +157,17 @@ internal static partial class HubEndpoints
         });
 
         // The owner typed this, so it goes through the owner's CLI and reads as theirs, not as a peer message.
-        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, IOwnerMessages owner, UploadStore uploads, CancellationToken ct) =>
+        // The owner read it: gone now, and the next poll does not bring it back.
+        group.MapPost("/notifications/{id}/dismiss", (string id, HubState state, NotificationDismissals dismissals) => ApiErrors.Run(() =>
+        {
+            if (!state.Notifications.Any(n => n.Id == id))
+                return Results.Problem("That notification is not showing.", statusCode: StatusCodes.Status404NotFound);
+            dismissals.Dismiss(id);
+            state.DropNotification(id);
+            return Results.NoContent();
+        }));
+
+        group.MapPost("/sessions/{id}/message", (string id, TextBody? body, HubState state, IOwnerMessages owner, UploadStore uploads, NotificationDismissals dismissals, CancellationToken ct) =>
             InHub(id, state, () =>
             {
                 if (BlockedError(id, state) is { } blocked) return Task.FromResult(blocked);
@@ -180,6 +191,8 @@ internal static partial class HubEndpoints
                         claim.Restore();
                         throw;
                     }
+                    // A message answers whatever the session was waiting on.
+                    foreach (var dropped in state.DropNotificationsFor(id)) dismissals.Dismiss(dropped);
                     return Results.NoContent();
                 });
             }));

@@ -1,8 +1,12 @@
-import type { FyrdConfig, HubCostView, HubQuestion, HubSessionView, HubState } from "../types";
+import type { FyrdConfig, HubCostView, HubNotification, HubQuestion, HubSessionView, HubState } from "../types";
 
 export const question = (o: Partial<HubQuestion> = {}): HubQuestion => ({
   id: "s1:r1:0", sessionId: "s1", sessionTitle: "builder-ab12", question: "Which DB?", options: ["Postgres", "SQLite"],
   multiSelect: false, askedAt: "2026-10-31T00:00:00Z", toolUseId: "t1", requestId: "r1", input: {}, ...o,
+});
+export const notification = (o: Partial<HubNotification> = {}): HubNotification => ({
+  id: "s1:r1", sessionId: "s1", sessionTitle: "builder-ab12", headline: "Who owns the titan-lens namespace?",
+  text: "Still open: who owns the `titan-lens` namespace in `CODEOWNERS`.", at: "2026-10-31T00:00:00Z", ...o,
 });
 export const session = (o: Partial<HubSessionView> = {}): HubSessionView => ({
   id: "s1", title: "builder-ab12", role: "builder", status: "running", repo: null, branch: null,

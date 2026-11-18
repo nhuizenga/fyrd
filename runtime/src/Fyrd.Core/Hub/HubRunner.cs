@@ -13,7 +13,7 @@ namespace Fyrd.Core.Hub;
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
     HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard, PendingMemory pending,
-    IOwnerMessages owner, OwnedPullRequests? ownedPrs = null)
+    IOwnerMessages owner, OwnedPullRequests? ownedPrs = null, NotificationDismissals? dismissals = null)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -43,6 +43,7 @@ public sealed partial class HubRunner(
     private readonly SummaryLog _summaries = new(paths, time);
     private Dictionary<string, string>? _cursors;
     private string? _controllerId;
+    private readonly NotificationDismissals _dismissals = dismissals ?? new(paths);
 
     [GeneratedRegex("^[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex ScopeRegex();
@@ -68,9 +69,11 @@ public sealed partial class HubRunner(
             .ToList();
         var previousViews = state.Sessions.ToDictionary(v => v.Id, StringComparer.Ordinal);
         var previousQuestions = state.Questions.ToLookup(q => q.SessionId, StringComparer.Ordinal);
+        var previousNotifications = state.Notifications.ToLookup(n => n.SessionId, StringComparer.Ordinal);
 
         var views = new List<HubSessionView>();
         var questions = new List<HubQuestion>();
+        var notifications = new List<HubNotification>();
         var failed = new HashSet<string>(StringComparer.Ordinal);
 
         // The owner creates the Controller on claude.ai, so it carries no fyrd-hub tag: fetch it by its stored id.
@@ -91,6 +94,7 @@ public sealed partial class HubRunner(
                 failed.Add(cid);
                 if (previousViews.TryGetValue(cid, out var old)) views.Add(old);
                 questions.AddRange(previousQuestions[cid]);
+                notifications.AddRange(previousNotifications[cid]);
             }
         }
 
@@ -127,6 +131,8 @@ public sealed partial class HubRunner(
                     // waiting on the owner has a live question.
                     if (s.SessionStatus == RequiresAction)
                         questions.AddRange(PendingQuestions.Find(s.Id, Title(s), w.Recent));
+                    else if (HubNotifications.Find(s, Title(s), w.Recent) is { } n && !_dismissals.Contains(n.Id))
+                        notifications.Add(n);
                 }
                 catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
                                           && (e is not OperationCanceledException || !ct.IsCancellationRequested))
@@ -135,6 +141,7 @@ public sealed partial class HubRunner(
                     failed.Add(s.Id);
                     views.Add(previousViews.TryGetValue(s.Id, out var old) ? old : View(s, null));
                     questions.AddRange(previousQuestions[s.Id]);
+                    notifications.AddRange(previousNotifications[s.Id]);
                 }
 
                 // First pass only: let rows fill in as they are read instead of all at the end.
@@ -169,6 +176,7 @@ public sealed partial class HubRunner(
         }
 
         state.Publish(views, questions.OrderBy(q => q.AskedAt).ToList(), failed, costPass?.Budget ?? state.Budget, PullRequestStatuses(views));
+        state.PublishNotifications(notifications);
 
         // Separate tries: a failed or slow instructions refresh must not skip the memory update for the pass.
         var liveIds = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);

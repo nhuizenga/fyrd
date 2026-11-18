@@ -102,6 +102,19 @@ export interface HubQuestion {
   input: unknown;
 }
 
+/**
+ * A session that ended its turn waiting on the owner through a plain-text question (no AskUserQuestion). `headline` is the
+ * cloud's one-line summary of what it needs; `text` is the turn's last reply. One per turn: `id` is `{sessionId}:{turn}`.
+ */
+export interface HubNotification {
+  id: string;
+  sessionId: string;
+  sessionTitle: string;
+  headline: string;
+  text: string | null;
+  at: string;
+}
+
 export interface ControllerInfo {
   sessionId: string;
   url: string;
@@ -132,6 +145,8 @@ export interface StackMergeView {
 export interface HubState {
   sessions: HubSessionView[];
   questions: HubQuestion[];
+  /** Absent from older servers. */
+  notifications?: HubNotification[];
   signedOut: boolean;
   lastError: string | null;
   lastPollAt: string | null;

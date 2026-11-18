@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
 import { FakeEventSource, item } from "../test/fakeEventSource";
-import { hubState, question, session } from "../test/fixtures";
+import { hubState, notification, question, session } from "../test/fixtures";
 import InboxScreen from "./InboxScreen";
 
 vi.mock("../api");
@@ -118,4 +118,47 @@ it("202 marks the question answered and shows how many remain", async () => {
   expect(await screen.findByText("Answer the remaining 1 question(s) to send.")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Yes" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Red" })).toBeInTheDocument();
+});
+
+describe("notifications", () => {
+  const renderNotice = () => {
+    const onChanged = vi.fn();
+    render(<InboxScreen state={hubState({ sessions: [session({ repo: "acme/web" })], notifications: [notification()] })} onChanged={onChanged} />);
+    return onChanged;
+  };
+
+  it("shows the headline, session and conversation, not the caught-up card", () => {
+    renderNotice();
+    const card = screen.getByRole("region", { name: "Notification from builder-ab12" });
+    expect(card).toHaveTextContent("Who owns the titan-lens namespace?");
+    expect(card).toHaveTextContent(/acme\/web/);
+    expect(screen.queryByText("You're all caught up")).not.toBeInTheDocument();
+    expect(FakeEventSource.latest().url).toBe("/api/hub/sessions/s1/stream");
+    expect(screen.getByRole("link", { name: "Open session" })).toHaveAttribute("href", "#/sessions/s1");
+  });
+
+  it("reply sends an ordinary message to the session", async () => {
+    vi.mocked(api.sendMessage).mockResolvedValue(undefined);
+    const onChanged = renderNotice();
+    await userEvent.type(screen.getByLabelText("Message this session"), "@servicetitan/lens{Enter}");
+    expect(api.sendMessage).toHaveBeenCalledWith("s1", "@servicetitan/lens");
+    expect(api.answerQuestion).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("dismiss clears it without a message", async () => {
+    vi.mocked(api.dismissNotification).mockResolvedValue(undefined);
+    const onChanged = renderNotice();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(api.dismissNotification).toHaveBeenCalledWith("s1:r1");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("a failed dismiss shows the error", async () => {
+    vi.mocked(api.dismissNotification).mockRejectedValue(new Error("That notification is not showing."));
+    renderNotice();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That notification is not showing.");
+  });
 });

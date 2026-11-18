@@ -344,6 +344,63 @@ public sealed class HubRunnerTests : IDisposable
         Assert.False(_state.TryClaim(q.RequestId));
     }
 
+    private static CloudSession Waiting(string id, string title, string status = "idle") =>
+        new(id, title, status, "connected", new PostTurnSummary("need_input", "Which handle owns titan-lens?", null, null),
+            ["fyrd-hub", "fyrd-role-builder"], FakeCloudSessions.Empty);
+
+    [Fact]
+    public async Task Poll_PlainTextQuestion_RaisesNotification_DismissedStaysGone()
+    {
+        _cloud.SetByTag("fyrd-hub", Waiting("n1", "builder-x"));
+        _cloud.AddAssistantEvent("n1", "a1", "Still open: who owns the titan-lens namespace in CODEOWNERS?");
+        _cloud.AddEvent("n1", new SessionEvent("r1", "result", DateTimeOffset.UnixEpoch, null, FakeCloudSessions.Empty));
+        var dismissals = new NotificationDismissals(_home.Paths);
+        var runner = new HubRunner(_cloud, _memory, _personas, _controller, _state, _home.Paths, _time, _ledger, _guard,
+            _pending, _owner, null, dismissals);
+
+        await runner.PollOnceAsync(default);
+
+        var n = Assert.Single(_state.Notifications);
+        Assert.Equal("n1:r1", n.Id);
+        Assert.Equal("builder-x", n.SessionTitle);
+        Assert.Equal("Which handle owns titan-lens?", n.Headline);
+        Assert.Equal("Still open: who owns the titan-lens namespace in CODEOWNERS?", n.Text);
+        Assert.Empty(_state.Questions);
+
+        dismissals.Dismiss(n.Id);
+        await runner.PollOnceAsync(default);
+        Assert.Empty(_state.Notifications);
+    }
+
+    [Fact]
+    public async Task Poll_PlainTextQuestion_SessionReadFails_KeepsNotification()
+    {
+        _cloud.SetByTag("fyrd-hub", Waiting("n1", "builder-x"));
+        _cloud.AddEvent("n1", new SessionEvent("r1", "result", DateTimeOffset.UnixEpoch, null, FakeCloudSessions.Empty));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+        Assert.Single(_state.Notifications);
+
+        _cloud.ThrowOnListEventsFor("n1", new HttpRequestException("boom"));
+        await runner.PollOnceAsync(default);
+
+        Assert.Single(_state.Notifications);
+    }
+
+    [Fact]
+    public async Task Poll_PlainTextQuestion_SessionRunsAgain_NotificationGoes()
+    {
+        _cloud.SetByTag("fyrd-hub", Waiting("n1", "builder-x"));
+        _cloud.AddEvent("n1", new SessionEvent("r1", "result", DateTimeOffset.UnixEpoch, null, FakeCloudSessions.Empty));
+        var runner = Make();
+        await runner.PollOnceAsync(default);
+
+        _cloud.SetByTag("fyrd-hub", Waiting("n1", "builder-x", status: "running"));
+        await runner.PollOnceAsync(default);
+
+        Assert.Empty(_state.Notifications);
+    }
+
     [Fact]
     public async Task Poll_PendingQuestion_FoundAfterRestart()
     {

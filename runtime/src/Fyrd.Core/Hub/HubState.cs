@@ -94,6 +94,47 @@ public sealed class HubState(TimeProvider? time = null)
     public IReadOnlyList<HubSessionView> Sessions => _sessions;
     public IReadOnlyList<HubQuestion> Questions => _questions;
 
+    private volatile IReadOnlyList<HubNotification> _notifications = [];
+    private readonly HashSet<string> _droppedNotifications = new(StringComparer.Ordinal);
+
+    /// <summary>Sessions waiting on the owner through a plain-text question (see <see cref="HubNotifications"/>), oldest first.</summary>
+    public IReadOnlyList<HubNotification> Notifications => _notifications;
+
+    /// <summary>Replaces the notifications the last pass found, leaving out any dropped since (dismissed, or answered by a message).</summary>
+    public void PublishNotifications(IReadOnlyList<HubNotification> notifications)
+    {
+        lock (_gate)
+        {
+            var found = notifications.Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
+            _droppedNotifications.IntersectWith(found);
+            _notifications = notifications.Where(n => !_droppedNotifications.Contains(n.Id)).OrderBy(n => n.At).ToArray();
+        }
+    }
+
+    /// <summary>Removes one notification now, before the next poll; false when it is not showing.</summary>
+    public bool DropNotification(string id)
+    {
+        lock (_gate)
+        {
+            if (_notifications.All(n => n.Id != id)) return false;
+            _droppedNotifications.Add(id);
+            _notifications = _notifications.Where(n => n.Id != id).ToArray();
+            return true;
+        }
+    }
+
+    /// <summary>Drops the session's notifications (the owner just messaged it); the ids dropped.</summary>
+    public IReadOnlyList<string> DropNotificationsFor(string sessionId)
+    {
+        lock (_gate)
+        {
+            var ids = _notifications.Where(n => n.SessionId == sessionId).Select(n => n.Id).ToList();
+            foreach (var id in ids) _droppedNotifications.Add(id);
+            if (ids.Count > 0) _notifications = _notifications.Where(n => n.SessionId != sessionId).ToArray();
+            return ids;
+        }
+    }
+
     public HubBudgetView? Budget => _budget;
 
     /// <summary>Each owned PR's last listed status, held once however many sessions own it.</summary>

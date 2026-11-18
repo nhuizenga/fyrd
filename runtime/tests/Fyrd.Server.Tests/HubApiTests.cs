@@ -285,6 +285,76 @@ public class HubApiTests
         Assert.Equal((SessionId, "hello"), Assert.Single(f.Owner.Sent));
     }
 
+    private static HubNotification Notification(string sessionId = SessionId) =>
+        new($"{sessionId}:r1", sessionId, "builder-abc", "Which handle owns titan-lens?", "Still open: who owns it?",
+            DateTimeOffset.UnixEpoch);
+
+    [Fact]
+    public async Task State_ListsNotifications()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        f.Services.GetRequiredService<HubState>().PublishNotifications([Notification()]);
+
+        var n = (await ReadJson(await f.CreateClient().GetAsync("/api/hub/state"))).GetProperty("notifications")[0];
+
+        Assert.Equal($"{SessionId}:r1", n.GetProperty("id").GetString());
+        Assert.Equal("Which handle owns titan-lens?", n.GetProperty("headline").GetString());
+        Assert.Equal("Still open: who owns it?", n.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task DismissNotification_RemovesAndRemembers()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var state = f.Services.GetRequiredService<HubState>();
+        state.PublishNotifications([Notification()]);
+
+        var r = await f.CreateClient().PostAsync($"/api/hub/notifications/{Uri.EscapeDataString($"{SessionId}:r1")}/dismiss", null);
+
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Empty(state.Notifications);
+        Assert.True(f.Services.GetRequiredService<NotificationDismissals>().Contains($"{SessionId}:r1"));
+    }
+
+    [Fact]
+    public async Task DismissNotification_NotShowing_404()
+    {
+        using var f = new FyrdFactory();
+        var r = await f.CreateClient().PostAsync("/api/hub/notifications/nope/dismiss", null);
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Message_ClearsThatSessionsNotification()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var state = f.Services.GetRequiredService<HubState>();
+        state.PublishNotifications([Notification(), Notification("session_other")]);
+
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "@servicetitan/lens" });
+
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal(["session_other:r1"], state.Notifications.Select(n => n.Id));
+        Assert.True(f.Services.GetRequiredService<NotificationDismissals>().Contains($"{SessionId}:r1"));
+    }
+
+    [Fact]
+    public async Task Message_SendFails_KeepsNotification()
+    {
+        using var f = new FyrdFactory();
+        Seed(f);
+        var state = f.Services.GetRequiredService<HubState>();
+        state.PublishNotifications([Notification()]);
+        f.Owner.Fail = new OwnerMessageException("nope");
+
+        await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/message", new { text = "hi" });
+
+        Assert.Single(state.Notifications);
+    }
+
     [Fact]
     public async Task Message_CliFails_502WithItsError()
     {
