@@ -4,7 +4,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine, sessionSkillsWarning } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine, sessionSkillsWarning, staleSessionSkillsWarning } from "./lib.mjs";
+import http from "node:http";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -152,4 +155,47 @@ test("readSessionSkills reads the setup-script state, and gives null when it can
   assert.equal(await readSessionSkills("http://x", async () => ({ ok: false, json: async () => ({}) })), null);
   assert.equal(await readSessionSkills("http://x", async () => { throw new Error("timeout"); }), null);
   assert.equal(await readSessionSkills("http://x", async () => ({ ok: true, json: async () => { throw new SyntaxError("not json"); } })), null);
+});
+
+test("staleSessionSkillsWarning reads the state and speaks only when it is out of date", async () => {
+  const fetchOf = (mode) => async () => ({ ok: true, json: async () => ({ mode }) });
+  assert.match(await staleSessionSkillsWarning("http://x", fetchOf("out-of-date")), /^Session skills: out of date/);
+  assert.equal(await staleSessionSkillsWarning("http://x", fetchOf("installed")), null);
+  assert.equal(await staleSessionSkillsWarning("http://x", async () => { throw new Error("down"); }), null);
+});
+
+// `up` with a server already running: the out-of-date line is printed on that path too, not only after a start.
+test("up says that the pasted script is out of date when Fyrd is already running", async () => {
+  let mode = "out-of-date";
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(req.url === "/api/health" ? { status: "ok" } : { mode }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-up-"));
+  try {
+    writeServerFile(path.join(home, ".fyrd", "run"), { pid: process.pid, port: server.address().port, startedAt: new Date().toISOString() });
+    const up = () => new Promise((resolve, reject) => {
+      // Only what the script needs: no token of the caller's reaches it, and no browser opens.
+      const child = spawn(process.execPath, [fileURLToPath(new URL("./fyrd.mjs", import.meta.url)), "up"], {
+        env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, FYRD_NO_BROWSER: "1" },
+      });
+      let out = "";
+      child.stdout.on("data", (d) => { out += d; });
+      child.stderr.on("data", (d) => { out += d; });
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code, out }));
+    });
+    const stale = await up();
+    assert.equal(stale.code, 0, stale.out);
+    assert.deepEqual(stale.out.trimEnd().split("\n"), [
+      `Fyrd already running at http://127.0.0.1:${server.address().port}`,
+      "Session skills: out of date, so sessions get the inline text. Paste the new setup script (Settings, Session skills) and confirm.",
+    ]);
+    mode = "installed";
+    assert.deepEqual((await up()).out.trimEnd().split("\n"), [`Fyrd already running at http://127.0.0.1:${server.address().port}`]);
+  } finally {
+    server.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

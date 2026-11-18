@@ -132,3 +132,8 @@ export function sessionSkillsLine(setup) {
 export function sessionSkillsWarning(setup) {
   return setup?.mode === "out-of-date" ? sessionSkillsLine(setup) : null;
 }
+
+/** What `up` prints about session skills for the server at `url`: the out-of-date line, or null (also when it can't be read). */
+export async function staleSessionSkillsWarning(url, fetchImpl = fetch) {
+  return sessionSkillsWarning(await readSessionSkills(url, fetchImpl));
+}
