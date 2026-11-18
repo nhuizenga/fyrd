@@ -2,7 +2,7 @@ using Fyrd.Core.Hub;
 
 namespace Fyrd.Core.Tests;
 
-/// <summary>Peasants delegate each unit of work to a forked background worker; the Controller doesn't, and treats a tagged peasant as busy.</summary>
+/// <summary>Peasants delegate each unit of work to a fresh (not forked) background worker; the Controller doesn't, and treats a tagged peasant as busy.</summary>
 public sealed class PersonaWorkerTests : IDisposable
 {
     private static readonly string[] Peasants = ["builder", "researcher", "reviewer", "validator", "monitor", "investigator"];
@@ -29,7 +29,11 @@ public sealed class PersonaWorkerTests : IDisposable
         {
             var d = Def(id);
             Assert.Contains("# Workers", d, StringComparison.Ordinal);
-            Assert.Contains("subagent_type: \"fork\"", d, StringComparison.Ordinal);
+            Assert.Contains("subagent_type: \"general-purpose\"` (never `\"fork\"`)", d, StringComparison.Ordinal);
+            Assert.DoesNotContain("subagent_type: \"fork\"`,", d, StringComparison.Ordinal);
+            Assert.DoesNotContain("inherits everything", d, StringComparison.Ordinal);
+            Assert.Contains("is all a worker knows", d, StringComparison.Ordinal);
+            Assert.Contains("the Workers never list below verbatim", d, StringComparison.Ordinal);
             Assert.Contains("run_in_background: true", d, StringComparison.Ordinal);
             Assert.Contains("fyrd-workers-running", d, StringComparison.Ordinal);
             Assert.Contains("You are a worker for", d, StringComparison.Ordinal);
