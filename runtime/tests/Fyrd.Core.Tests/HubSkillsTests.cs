@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the Controller account skills under <c>skills/controller</c>.</summary>
 public sealed class HubSkillsTests
 {
-    private static readonly string[] Names = ["fyrd-build", "fyrd-investigate", "fyrd-peasant", "fyrd-research", "fyrd-watch"];
+    private static readonly string[] Names = ["fyrd-build", "fyrd-investigate", "fyrd-peasant", "fyrd-research", "fyrd-tune", "fyrd-watch"];
 
     private static string SkillsDir()
     {
@@ -134,6 +134,22 @@ public sealed class HubSkillsTests
     [InlineData("fyrd-watch")]
     public void BuilderValidatorAndMonitorStarts_CarryTheInvestigatorPersona(string name) =>
         Assert.Contains("<subagent-persona id=\"investigator\">", Read(name), StringComparison.Ordinal);
+
+    [Fact]
+    public void Tune_StartsOneTunerOnTheFyrdRepo_SendsManualRuns_AndDeletesItsTrigger()
+    {
+        var text = Read("fyrd-tune");
+        Assert.Contains("fyrd-role-tuner", text, StringComparison.Ordinal);
+        Assert.Contains("<peasant-persona id=\"tuner\" …>", text, StringComparison.Ordinal);
+        Assert.Contains("`source_url: \"https://github.com/nhuizenga/fyrd\"`", text, StringComparison.Ordinal);
+        Assert.Contains("never start a second one", text, StringComparison.Ordinal);
+        Assert.Contains("`Manual run: <link>`", text, StringComparison.Ordinal);
+        Assert.Contains("Set up your daily schedule.", text, StringComparison.Ordinal);
+        var delete = text.IndexOf("delete_trigger", StringComparison.Ordinal);
+        var archive = text.LastIndexOf("archive_session", StringComparison.Ordinal);
+        Assert.True(delete > 0 && archive > delete, "the trigger must be deleted before the Tuner is archived");
+        Assert.Contains("Monitor or the Tuner", Read("fyrd-peasant"), StringComparison.Ordinal);
+    }
 
     [Fact]
     public void Research_GivesTheResearcherTheReviewerPersona()

@@ -26,7 +26,7 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `Start fewer now`: start only as many as fit, and say which were left out.
    - `Tear down idle sessions`: ask again with a `multiSelect: true` `AskUserQuestion` whose options are the idle peasants by title, each Monitor labeled as watching (for example `monitor-support (watching #support)`). Tear down only the ones the owner picks (Tear down below), then start what now fits. Never tear down a session the owner didn't pick.
    - `Cancel`: start none, and archive nothing.
-6. **Recycle.** Only now, and only for sessions actually being started, tear down each session marked in step 3 (Tear down below; for a Monitor, delete its trigger first).
+6. **Recycle.** Only now, and only for sessions actually being started, tear down each session marked in step 3 (Tear down below; for a Monitor or the Tuner, delete its trigger first).
 7. **Create.** Call `mcp__claude-code-remote__create_session` with:
    - `title`: from step 1.
    - `tags`: exactly `["fyrd-hub", "fyrd-role-<role>"]`.
@@ -73,6 +73,6 @@ Request: "Tear down {name}".
 
 1. Find the session by title as in Start step 2. Only tear down titles of the form `<role>-…` for a role in your peasant personas; never archive yourself. If unsure it is a Fyrd session, confirm with `AskUserQuestion`.
 2. Call `mcp__claude-code-remote__get_session`. If it is busy (`status_bucket` `working` or `blocked`, or its tags include `fyrd-workers-running`), ask with `AskUserQuestion` (`Tear down anyway`, `Cancel`) before going on.
-3. For a Monitor, first find its trigger with `mcp__claude-code-remote__list_triggers` (name equals the Monitor's title, or use the trigger id it reported) and call `mcp__claude-code-remote__delete_trigger` with `trigger_id`. A PR Monitor may have none.
-4. Call `mcp__claude-code-remote__archive_session` with `session_id`. Never rely on a Monitor to stop itself.
+3. For a Monitor or the Tuner, first find its trigger with `mcp__claude-code-remote__list_triggers` (name equals the session's title, or use the trigger id it reported) and call `mcp__claude-code-remote__delete_trigger` with `trigger_id`. A PR Monitor may have none.
+4. Call `mcp__claude-code-remote__archive_session` with `session_id`. Never rely on a Monitor or the Tuner to stop itself.
 5. Say what was torn down.

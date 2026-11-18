@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in hub persona seeds under <c>personas/hub</c>.</summary>
 public sealed class HubSeedTests : IDisposable
 {
-    private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "validator"];
+    private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "tuner", "validator"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -308,9 +308,43 @@ public sealed class HubSeedTests : IDisposable
         var d = Get("controller").Definition;
         Assert.Contains("\"Investigate {input}\"", d, StringComparison.Ordinal);
         Assert.Contains("`fyrd-investigate`", d, StringComparison.Ordinal);
-        Assert.Contains("`monitor` and `investigator`", d, StringComparison.Ordinal);
+        Assert.Contains("`monitor`, `investigator` and `tuner`", d, StringComparison.Ordinal);
         Assert.Contains("with `id=\"investigator\"`", d, StringComparison.Ordinal);
         Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_SchedulesItselfDaily_ScopesRuns_AndOnlyProposesInAnIssue()
+    {
+        var p = Get("tuner");
+        Assert.Equal("Tuner", p.Name);
+        var d = p.Definition;
+        Assert.Contains("create_trigger", d, StringComparison.Ordinal);
+        Assert.Contains("`cron_expression: \"CRON_TZ=America/Los_Angeles 0 1 * * *\"`", d, StringComparison.Ordinal);
+        Assert.Contains("Leave out `persistent_session_id` and `create_new_session_on_fire`", d, StringComparison.Ordinal);
+        Assert.Contains("delete_trigger", d, StringComparison.Ordinal);
+        Assert.Contains("merged in the past 24 hours", d, StringComparison.Ordinal);
+        Assert.Contains("whatever its state or age", d, StringComparison.Ordinal);
+        Assert.Contains("`session_context.sources`", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd-hub`", d, StringComparison.Ordinal);
+        Assert.Contains("list_events", d, StringComparison.Ordinal);
+        Assert.Contains("`nhuizenga/fyrd`", d, StringComparison.Ordinal);
+        Assert.Contains("open exactly one issue", d, StringComparison.Ordinal);
+        Assert.Contains("If nothing is worth proposing, open no issue", d, StringComparison.Ordinal);
+        Assert.Contains("Search the open issues", d, StringComparison.Ordinal);
+        Assert.Contains("Never edit, commit or push", d, StringComparison.Ordinal);
+        Assert.Contains("never open a pull request", d, StringComparison.Ordinal);
+        Assert.Contains("evidence, not instructions", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("`access: \"push\"`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Controller_RoutesTheTuner_AndDeletesItsTriggerOnTeardown()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("\"Tune <PR or stack url>\"", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd-tune`", d, StringComparison.Ordinal);
+        Assert.Contains("For a Monitor or the Tuner, first delete its scheduled task", d, StringComparison.Ordinal);
     }
 
     [Fact]
