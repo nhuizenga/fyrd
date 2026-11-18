@@ -438,7 +438,7 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.Equal(
             "BUILDER-DEF\n\n# Session skills\n\n"
             + "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
-            + $"Before the first load, check once that the file `/root/.claude/fyrd-session-skills/hash` holds exactly `{SessionSkills.Hash(skills)}`. "
+            + $"Before the first load, check once that the file `/root/.claude/fyrd-session-skills/hash` holds one line, exactly `{SessionSkills.Hash(skills)}`. "
             + "If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.\n\n"
             + "- `fyrd-a`: First: use for one.\n"
             + "- `fyrd-b`: Second: use for two.",
@@ -456,7 +456,7 @@ public sealed class SessionSkillsTests : IDisposable
         var skills = new[] { Skill("fyrd-a", "First: use for one.", "One."), Skill("fyrd-m", "M.", "Monitor only.", "monitor") };
         var hash = SessionSkills.Hash(skills);
         var text = SessionSkills.Compose(Builder, skills, installed: true);
-        Assert.Contains($"check once that the file `{SessionSkillScript.HashFile}` holds exactly `{hash}`.", text, StringComparison.Ordinal);
+        Assert.Contains($"check once that the file `{SessionSkillScript.HashFile}` holds one line, exactly `{hash}`.", text, StringComparison.Ordinal);
         Assert.Contains($"[ \"$fyrd_ok\" = 1 ] && printf '%s\\n' {hash} > \"$fyrd_state/hash\"", SessionSkillScript.Render(skills), StringComparison.Ordinal);
         Assert.DoesNotContain("fyrd-m", text, StringComparison.Ordinal);
         // Inline text names no hash: nothing in the environment is relied on.

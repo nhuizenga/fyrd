@@ -172,7 +172,7 @@ public class SessionSkillApiTests
         var installed = prompt.GetProperty("text").GetString()!;
         Assert.Contains($"\n- `{Stacks}`: Stacked pull requests: ", installed, StringComparison.Ordinal);
         // The session is told which skills its environment must hold: the hash the owner confirmed.
-        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds exactly `{hash}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
+        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds one line, exactly `{hash}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
         Assert.DoesNotContain("POST /repos/{owner}/{repo}/stacks", installed, StringComparison.Ordinal);
         Assert.True(prompt.GetProperty("words").GetInt32() < SessionSkills.WordCount(inline));
         // A persona without session skills is the stored text in either mode.
@@ -261,7 +261,7 @@ public class SessionSkillApiTests
         var installed = BuilderBlock();
         Assert.EndsWith(">" + await BuilderPrompt(c), installed, StringComparison.Ordinal);
         Assert.Contains($"\n- `{Stacks}`: Stacked pull requests: ", installed, StringComparison.Ordinal);
-        Assert.Contains($"holds exactly `{hash}`", installed, StringComparison.Ordinal);
+        Assert.Contains($"holds one line, exactly `{hash}`", installed, StringComparison.Ordinal);
         Assert.DoesNotContain("POST /repos/{owner}/{repo}/stacks", installed, StringComparison.Ordinal);
         Assert.NotEqual(inlineHash, controller.BuildPrompt().InstructionsHash);
 

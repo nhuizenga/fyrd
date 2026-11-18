@@ -249,7 +249,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// </summary>
     public static string PointerIntro(string hash) =>
         "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
-        + $"Before the first load, check once that the file `{SessionSkillScript.HashFile}` holds exactly `{hash}`. "
+        + $"Before the first load, check once that the file `{SessionSkillScript.HashFile}` holds one line, exactly `{hash}`. "
         + "If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.";
 
     /// <summary>The line that stands for an installed skill in a persona: its name and its description (what it holds and when to load it).</summary>

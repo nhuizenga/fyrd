@@ -105,7 +105,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         {
             "Several PRs that build on each other are one native GitHub stack, not just branches based on each other. Make and keep it with GitHub's APIs only (the GitHub tools you have, or the REST and GraphQL endpoints below with the `X-GitHub-Api-Version: 2026-03-10` header); never shell out to the `gh` CLI.",
             "- **Branches.** Each branch starts from the one below it; the bottom one starts from your base branch. Workers push them with plain `git push`.",
-            "For a stack, start one worker per branch, bottom first, each after the one below it returns; never run two workers on the same branch.",
+            "For a stack, start one worker per branch, bottom first, each after the one below it returns.",
             "For a worker building an upper branch of a stack, add the body the worker below returned, as a start for finding the rules; its own body lists only the rules and guards its own diff touches.",
             "- **Open.** When every branch is pushed, open one draft PR per branch, bottom first: the bottom PR's base is your base branch, and each PR above is based on the branch below it. Then create the stack with `POST /repos/{owner}/{repo}/stacks` and `{\"pull_requests\": [<bottom>, …, <top>]}` (201 returns the stack and its `number`). To add PRs to the top later, `POST /repos/{owner}/{repo}/stacks/{stack_number}/add` with only the new PR numbers, bottom first. Subscribe to each PR as in step 4.",
             "- **Fixes lower in the stack.** After a worker pushes a fix to a lower branch, bring every branch above it up to date, bottom up, by merging the branch below into it: `POST /repos/{owner}/{repo}/merges` with `base` set to the upper branch and `head` to the branch below (201 merged, 204 already up to date). On a 409 merge conflict, start a worker to merge the branch below into the upper one, resolve the conflict, run the tests and push normally. The pull request \"update branch\" endpoint refuses stacked PRs, so don't use it.",
@@ -160,7 +160,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         Assert.True(Words(installed) <= InstalledBudget, $"The Builder's prompt with installed session skills is {Words(installed)} words, over the budget of {InstalledBudget}.");
         Assert.True(Words(installed) < Words(inline));
         Assert.Contains("load its skill with the Skill tool. ", installed, StringComparison.Ordinal);
-        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds exactly `{SessionSkills.Hash(skills)}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
+        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds one line, exactly `{SessionSkills.Hash(skills)}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
         foreach (var s in skills)
         {
             Assert.Contains($"\n- `{s.Name}`: {s.Description}", installed, StringComparison.Ordinal);

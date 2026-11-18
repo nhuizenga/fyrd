@@ -21,7 +21,7 @@ Deleting a skill takes its rules away from the roles it belongs to: nothing else
 
 Fyrd uses installed mode only when you have told it that the setup script below is in place, and only while that script matches the skills as they are now. In every other case it uses inline mode.
 
-Fyrd can't look into the environment, so it knows only what you confirmed. That is why a session in installed mode checks for itself: its instructions hold the hash you confirmed, and tell it to check once, before it loads its first skill, that `/root/.claude/fyrd-session-skills/hash` holds exactly that hash. If the file is missing or holds another hash (the block was never pasted, an older block is still there, the block failed part-way, or the session started from an older snapshot), or a skill is not in its skill list, it stops and asks you. This check is an instruction the session follows, not something Fyrd enforces.
+Fyrd can't look into the environment, so it knows only what you confirmed. That is why a session in installed mode checks for itself: its instructions hold the hash you confirmed, and tell it to check once, before it loads its first skill, that `/root/.claude/fyrd-session-skills/hash` holds one line, exactly that hash. If the file is missing or holds another hash (the block was never pasted, an older block is still there, the block failed part-way, or the session started from an older snapshot), or a skill is not in its skill list, it stops and asks you. This check is an instruction the session follows, not something Fyrd enforces.
 
 ## Why a setup script
 
