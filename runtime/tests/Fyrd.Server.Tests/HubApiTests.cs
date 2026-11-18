@@ -1538,10 +1538,10 @@ public class HubApiTests
         using var f = new FyrdFactory();
         var store = f.Services.GetRequiredService<ConfigStore>();
         store.Save(store.Load() with { SessionDailyLimitUsd = 12, FyrdDailyLimitUsd = 340, TimeZone = "UTC" });
-        var r = await f.CreateClient().PutAsJsonAsync("/api/config", new { squadCap = 3 });
+        var r = await f.CreateClient().PutAsJsonAsync("/api/config", new { sessionCap = 3 });
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         var saved = store.Load();
-        Assert.Equal(3, saved.SquadCap);
+        Assert.Equal(3, saved.SessionCap);
         Assert.Equal(12m, saved.SessionDailyLimitUsd);
         Assert.Equal(340m, saved.FyrdDailyLimitUsd);
         Assert.Equal("UTC", saved.TimeZone);
@@ -1552,7 +1552,7 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var r = await f.CreateClient().PutAsJsonAsync("/api/config",
-            new { squadCap = 4, sessionDailyLimitUsd = 20, fyrdDailyLimitUsd = 200, timeZone = "America/Los_Angeles" });
+            new { sessionDailyLimitUsd = 20, fyrdDailyLimitUsd = 200, timeZone = "America/Los_Angeles" });
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         var saved = f.Services.GetRequiredService<ConfigStore>().Load();
         Assert.Equal(20m, saved.SessionDailyLimitUsd);

@@ -28,7 +28,6 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
     {
         builder.UseSetting("Fyrd:Home", Home.Paths.Root);
         builder.UseSetting("Fyrd:DisableRunner", "true");
-        builder.UseSetting("Fyrd:PersonasDir", Path.Combine(RepoRoot(), "personas"));
         builder.UseSetting("Fyrd:HubPersonasSeedDir", Path.Combine(RepoRoot(), "personas", "hub"));
         builder.ConfigureTestServices(s =>
         {
@@ -48,8 +47,8 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
     private static string RepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "personas", "lead.md"))) dir = dir.Parent;
-        return dir?.FullName ?? throw new DirectoryNotFoundException("personas/lead.md not found above test output");
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "personas", "hub"))) dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("personas/hub not found above test output");
     }
 
     protected override void Dispose(bool disposing)

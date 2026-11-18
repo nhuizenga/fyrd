@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine } from "./lib.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -83,6 +83,12 @@ test("tokenWarning says GH_TOKEN is not set when neither variable is", () => {
 test("tokenWarning is silent with GH_TOKEN or GITHUB_TOKEN", () => {
   assert.equal(tokenWarning({ GH_TOKEN: "x" }), null);
   assert.equal(tokenWarning({ GITHUB_TOKEN: "x" }), null);
+});
+
+test("statusLine counts sessions and waiting questions, or gives only the URL", () => {
+  assert.equal(statusLine("http://127.0.0.1:4870", { sessions: [{}, {}], questions: [{}] }),
+    "Fyrd running at http://127.0.0.1:4870 · 2 sessions · 1 questions waiting");
+  assert.equal(statusLine("http://127.0.0.1:4870", null), "Fyrd running at http://127.0.0.1:4870");
 });
 
 test("gitHubLine names the login, the error, or says not configured", () => {

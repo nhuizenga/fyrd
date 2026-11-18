@@ -35,7 +35,7 @@ public sealed class OwnerMessageException(string message) : Exception(message);
 public sealed partial class ClaudeCliOwnerMessages : IOwnerMessages
 {
     // Delivery is at-least-once: on a timeout the CLI may already have queued the turn, yet callers (HubRunner hashes,
-    // CostGuard notice markers, LeadRelay failed cards) only record success after SendAsync returns, so they retry and can
+    // CostGuard notice markers) only record success after SendAsync returns, so they retry and can
     // post the same message twice. Accepted: a duplicate prompt or notice is harmless next to a lost one.
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 

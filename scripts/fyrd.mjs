@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   runDir, readServerFile, writeServerFile, removeServerFile,
-  isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine,
+  isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine,
 } from "./lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -67,7 +67,7 @@ async function up() {
   const log = fs.openSync(logPath, "w");
   const dll = path.join(repoRoot, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll");
   // The content root must be the project dir so wwwroot (the built console) is found regardless of caller cwd.
-  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`, "--Fyrd:PersonasDir", path.join(repoRoot, "personas")], {
+  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`], {
     cwd: path.join(repoRoot, "runtime/src/Fyrd.Server"),
     detached: true, stdio: ["ignore", log, log], windowsHide: true,
   });
@@ -109,14 +109,12 @@ async function status() {
     console.log("Fyrd is not running. Start it with /fyrd:up.");
     return;
   }
-  const get = async (p) => (await fetch(`${urlOf(info)}${p}`)).json();
-  const [specs, inbox] = await Promise.all([get("/api/specs"), get("/api/inbox")]);
-  console.log(`Fyrd running at ${urlOf(info)} · ${specs.length} specs · ${inbox.length} decisions waiting`);
+  let state = null;
   try {
-    console.log(gitHubLine((await get("/api/hub/state")).gitHub));
-  } catch {
-    console.log("GitHub: unknown (could not read hub state)");
-  }
+    state = await (await fetch(`${urlOf(info)}/api/hub/state`)).json();
+  } catch {}
+  console.log(statusLine(urlOf(info), state));
+  console.log(state ? gitHubLine(state.gitHub) : "GitHub: unknown (could not read hub state)");
 }
 
 const cmds = { up, down, status };

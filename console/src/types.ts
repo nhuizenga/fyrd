@@ -1,11 +1,8 @@
 export type MemoryScope = string;
 
 export interface FyrdConfig {
-  squadCap: number;
   sessionCap: number;
   environmentId: string | null;
-  leadModel: string;
-  peerModel: string;
   /** Daily spend limit per session, in USD (1–10,000). */
   sessionDailyLimitUsd: number;
   /** Daily spend limit for the whole fyrd, in USD (1–10,000). */
@@ -13,9 +10,6 @@ export interface FyrdConfig {
   /** IANA time zone that defines "today" for spend; null until the console reports one. */
   timeZone: string | null;
 }
-
-/** Mutating responses may carry a relay failure alongside the saved value. */
-export type WithRelay<T> = T & { relayError?: string };
 
 export interface HubSessionView {
   id: string;

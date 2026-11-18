@@ -3,10 +3,7 @@ using System.Text.Json;
 namespace Fyrd.Core.Config;
 
 public sealed partial record FyrdConfig(
-    int SquadCap = 4,
     string? EnvironmentId = null,
-    string LeadModel = FyrdConfig.DefaultLeadModel,
-    string PeerModel = FyrdConfig.DefaultPeerModel,
     int SessionCap = 20,
     decimal SessionDailyLimitUsd = FyrdConfig.DefaultSessionDailyLimitUsd,
     decimal FyrdDailyLimitUsd = FyrdConfig.DefaultFyrdDailyLimitUsd,
@@ -15,9 +12,7 @@ public sealed partial record FyrdConfig(
     public const decimal MinDailyLimitUsd = 1, MaxDailyLimitUsd = 10_000;
     public const decimal DefaultSessionDailyLimitUsd = 50, DefaultFyrdDailyLimitUsd = 500;
 
-    public const int MinSquadCap = 1, MaxSquadCap = 8;
     public const int MinSessionCap = 1, MaxSessionCap = 100;
-    public const string DefaultLeadModel = "claude-opus-5-5", DefaultPeerModel = "claude-sonnet-5-5";
 
     /// <summary>Resolves an IANA (or platform) time-zone id; null, empty or unknown ids give null.</summary>
     public static TimeZoneInfo? FindTimeZone(string? id)
@@ -44,10 +39,7 @@ public sealed class ConfigStore(FyrdPaths paths)
                 ?? new FyrdConfig();
             return config with
             {
-                SquadCap = Math.Clamp(config.SquadCap, FyrdConfig.MinSquadCap, FyrdConfig.MaxSquadCap),
                 EnvironmentId = FyrdConfig.IsValidEnvironmentId(config.EnvironmentId) ? config.EnvironmentId : null,
-                LeadModel = string.IsNullOrWhiteSpace(config.LeadModel) ? FyrdConfig.DefaultLeadModel : config.LeadModel,
-                PeerModel = string.IsNullOrWhiteSpace(config.PeerModel) ? FyrdConfig.DefaultPeerModel : config.PeerModel,
                 SessionCap = Math.Clamp(config.SessionCap, FyrdConfig.MinSessionCap, FyrdConfig.MaxSessionCap),
                 SessionDailyLimitUsd = Math.Clamp(config.SessionDailyLimitUsd, FyrdConfig.MinDailyLimitUsd, FyrdConfig.MaxDailyLimitUsd),
                 FyrdDailyLimitUsd = Math.Clamp(config.FyrdDailyLimitUsd, FyrdConfig.MinDailyLimitUsd, FyrdConfig.MaxDailyLimitUsd),
@@ -62,9 +54,6 @@ public sealed class ConfigStore(FyrdPaths paths)
 
     public void Save(FyrdConfig config)
     {
-        if (config.SquadCap is < FyrdConfig.MinSquadCap or > FyrdConfig.MaxSquadCap)
-            throw new ArgumentOutOfRangeException(nameof(config), config.SquadCap,
-                $"SquadCap must be between {FyrdConfig.MinSquadCap} and {FyrdConfig.MaxSquadCap}.");
         if (config.SessionCap is < FyrdConfig.MinSessionCap or > FyrdConfig.MaxSessionCap)
             throw new ArgumentOutOfRangeException(nameof(config), config.SessionCap,
                 $"SessionCap must be between {FyrdConfig.MinSessionCap} and {FyrdConfig.MaxSessionCap}.");

@@ -84,6 +84,12 @@ export function tokenWarning(env = process.env) {
   return "GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.";
 }
 
+/** The first `status` line: the URL, then the session and waiting-question counts of /api/hub/state when it could be read. */
+export function statusLine(url, state) {
+  if (!state) return `Fyrd running at ${url}`;
+  return `Fyrd running at ${url} · ${state.sessions?.length ?? 0} sessions · ${state.questions?.length ?? 0} questions waiting`;
+}
+
 /** The `status` line for the `gitHub` part of /api/hub/state. */
 export function gitHubLine(gitHub) {
   if (gitHub?.configured && gitHub.login) return `GitHub: signed in as ${gitHub.login}`;

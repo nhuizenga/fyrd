@@ -2,7 +2,6 @@ using System.Text.Json;
 using Fyrd.Core.Config;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
-using Fyrd.Core.Orchestration;
 
 namespace Fyrd.Server.Endpoints;
 
@@ -14,7 +13,7 @@ internal static class ConfigEndpoints
 
         group.MapGet("/", (ConfigStore config) => Results.Ok(config.Load()));
 
-        group.MapPut("/", (HttpRequest request, IOptions<JsonOptions> json, ConfigStore config, LeadRelay relay, CancellationToken ct) => ApiErrors.RunAsync(async () =>
+        group.MapPut("/", (HttpRequest request, IOptions<JsonOptions> json, ConfigStore config, CancellationToken ct) => ApiErrors.RunAsync(async () =>
         {
             JsonElement raw;
             try { raw = await request.ReadFromJsonAsync<JsonElement>(json.Value.SerializerOptions, ct); }
@@ -30,21 +29,8 @@ internal static class ConfigEndpoints
                 FyrdDailyLimitUsd = Has(nameof(FyrdConfig.FyrdDailyLimitUsd)) ? body.FyrdDailyLimitUsd : stored.FyrdDailyLimitUsd,
                 TimeZone = Has(nameof(FyrdConfig.TimeZone)) ? body.TimeZone : stored.TimeZone,
             };
-            var previousCap = stored.SquadCap;
             config.Save(body);
-            var saved = config.Load();
-            if (saved.SquadCap != previousCap)
-            {
-                try
-                {
-                    await relay.RelayConfigAsync(saved.SquadCap, ct);
-                }
-                catch (Exception e) when (e is not OperationCanceledException)
-                {
-                    return ApiErrors.OkWithRelayError(saved, e.Message);
-                }
-            }
-            return Results.Ok(saved);
+            return Results.Ok(config.Load());
         }));
 
         return app;

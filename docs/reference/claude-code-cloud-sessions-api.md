@@ -82,8 +82,8 @@ The web UI creates sessions with `POST /v1/code/sessions`, putting a `config` ob
 
 ```json
 {
-  "title": "Fyrd lead · <spec title>",
-  "tags": ["fyrd", "fyrd-spec-<specId>", "fyrd-role-lead"],
+  "title": "<title>",
+  "tags": ["fyrd", "fyrd-role-<persona id>"],
   "environment_id": "env_… | ccpool_…",
   "events": [
     {"type":"event","data":{"type":"control_request","request_id":"set-mode-<uuid>",
@@ -102,7 +102,7 @@ The web UI creates sessions with `POST /v1/code/sessions`, putting a `config` ob
 ```
 
 - **Permission modes:** `default`, `plan`, `acceptEdits`, `dontAsk`, `bypassPermissions`, `auto`.
-  - Without a mode event, a lead stops at its first tool-permission prompt. The spike's q2 hit this.
+  - Without a mode event, a session stops at its first tool-permission prompt. The spike's q2 hit this.
   - Fyrd always sends `auto`.
 - **Fields the CLI also sends** (seen in its create body; not used by Fyrd): `seed_bundle_file_id` (for uploads with no GitHub remote), `custom_system_prompt`, `max_turns`, `output_schema`, `correlation_id`.
 
@@ -153,7 +153,7 @@ Each frame has `event:`, optionally `id:` (the sequence number), and `data:` (JS
 | `system` | `task_summary`, `status`, `hook_started`, `hook_response` | Progress and hook activity |
 
 ### 5.5 What this means for Fyrd (not yet built)
-- **One stream per active session** can replace the 10-second polling in `SpecRunner`. Resume from the last `sequence_num` after any drop.
+- **One stream per active session** can replace the 10-second polling. Resume from the last `sequence_num` after any drop.
 - **Use `result` to detect the end of a turn,** and `post_turn_summary` for the status, instead of inferring both from `session_status` and `needs_action`.
 - **Permission prompts:** watch `control_request` for an approval subtype. Until one is observed, keep the current attention-card fallback.
 
@@ -201,7 +201,7 @@ Available inside cloud sessions, including sessions created through the API (ver
 
 | Tool | What Fyrd uses it for |
 |---|---|
-| `get_session` | With `session_id` omitted, it describes **the calling session**. This is how a lead learns its own ID. Verified in the Plan 2 smoke run. |
+| `get_session` | With `session_id` omitted, it describes **the calling session**. This is how a session learns its own ID. Verified in the Plan 2 smoke run. |
 | `create_session` | `prompt`, `source_url`, `source_revision`, `environment_id`, `model`, `title`, `tags`, `permission_mode` (no more permissive than the caller's), `extra_allowed_tools`, `append_system_prompt`, `outcome_branch`, `clone_depth`, `blob_limit_kb`, `sparse_checkout_paths` |
 | `send_message` | Arrives at the target as a new turn, marked as sent by a session; **it wakes an idle session**. Verified in the Plan 2 smoke run. |
 | `list_events`, `get_event` | Read a peer's transcript |
@@ -213,7 +213,6 @@ The tool docs also list scheduled-task tools (`create_trigger`, `send_later`, `w
 ## 9. Git branches (verified)
 
 - **No nested branch names.** A branch `X` and a branch `X/y` can't coexist in git. A session whose `outcome_branch` would nest under an existing branch fails at "setting up the repository" (Plan 2 smoke, run 1).
-- **Fyrd's naming:** `fyrd/<specId>/integration` and `fyrd/<specId>/unit/<unitId>`.
 - Sessions push through Anthropic's GitHub proxy, which uses the owner's GitHub connection.
 
 ## 10. Strings in `claude.exe` (v2.1.312)

@@ -7,7 +7,7 @@ Build software with an army of specialized agents, managed from a one-click cons
 Requires Node, the .NET 10 SDK, and npm.
 
 - `/fyrd:up` builds (first run only) and starts the console on `127.0.0.1` (port 4870, or the next free one), then opens it in your browser. Running it again reuses the running server.
-- `/fyrd:status` shows the URL, spec count, and decisions waiting.
+- `/fyrd:status` shows the URL, the session count and the questions waiting.
 - `/fyrd:down` stops the server.
 - In the console's Sessions list, the download icon on a session's row exports all of its saved events as raw JSONL (a header line, one event per line, an `fyrd_export_end` trailer; a file without the trailer is incomplete). The same file is at `GET /api/hub/sessions/{id}/export`. The export holds everything the session saw, including tool output and any secrets it printed, and Fyrd does no redaction.
 

@@ -1,7 +1,7 @@
 import type {
   SecretName,
   SecretsView,
-  AnswerBody, ControllerInfo, FyrdConfig, HubCostView, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, PendingMemoryEntry, PullRequestStatus, WithRelay,
+  AnswerBody, ControllerInfo, FyrdConfig, HubCostView, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, PendingMemoryEntry, PullRequestStatus,
 } from "./types";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -111,7 +111,7 @@ export const getConfig = async () => {
 };
 /** PUT /api/config replaces the whole config, so always send a complete object. */
 export const putConfig = async (config: FyrdConfig) => {
-  const saved = await call<WithRelay<FyrdConfig>>("PUT", "/api/config", config);
+  const saved = await call<FyrdConfig>("PUT", "/api/config", config);
   lastConfig = saved;
   return saved;
 };
