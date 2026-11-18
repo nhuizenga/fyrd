@@ -118,6 +118,8 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("only the reviewer one marked `for=\"researcher\"`", d, StringComparison.Ordinal);
         Assert.Contains("exactly as inside its `<subagent-persona-text>` block, never the whole persona from a `<peasant-persona>` block", d, StringComparison.Ordinal);
         Assert.Contains("the persona's text exactly as it appears inside its `<peasant-persona>` block", d, StringComparison.Ordinal);
+        // The close tags of the skills' examples reach the Controller escaped, so the persona says what a close tag looks like.
+        Assert.Contains("A close tag starts with `</`; `<\\/` in what you received is only Fyrd's escaping, never write it in a tag of your own.", d, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -154,6 +154,17 @@ public sealed class HubSkillsTests
         Assert.Contains(name == "fyrd-peasant" ? "<subagent-persona-text>" : "<subagent-persona-text id=\"investigator\">", Read(name), StringComparison.Ordinal);
     }
 
+    /// <summary>The reviewer has two subagent texts; the peasant skill says which goes to a Builder and which to a Researcher.</summary>
+    [Fact]
+    public void Peasant_PicksTheReviewerTextByTheRoleItIsFor()
+    {
+        var text = Read("fyrd-peasant");
+        Assert.Contains("each holding the text inside the `<subagent-persona-text>` block with that `id` (for the reviewer, the one marked `for=\"builder\"`)", text, StringComparison.Ordinal);
+        Assert.Contains("for a Researcher only the reviewer one (marked `for=\"researcher\"`)", text, StringComparison.Ordinal);
+        Assert.Contains("for a Validator or a Monitor only the investigator one", text, StringComparison.Ordinal);
+        Assert.Contains("Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.", text, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Research_GivesTheResearcherTheReviewerPersona()
     {
