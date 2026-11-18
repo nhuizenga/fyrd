@@ -91,13 +91,14 @@ public sealed class PersonaChangeRulesTests : IDisposable
     public void BuilderAsksTheOwnerWhenTheInputDoesNotSettleTheSplit()
     {
         var d = Def("builder");
-        var job = d.IndexOf("# Your job", StringComparison.Ordinal);
-        var next = d.IndexOf("# Build rules", StringComparison.Ordinal);
-        Assert.InRange(job, 0, next);
-        ContainsAll(d[job..next],
-            "**Plan the pull requests.**",
-            "if the input doesn't settle the split, ask the owner",
-            "how to split the work into pull requests is unclear, ask the owner before you start a worker");
+        var understand = d.IndexOf("1. **Understand the task.**", StringComparison.Ordinal);
+        var plan = d.IndexOf("2. **Plan the pull requests.**", StringComparison.Ordinal);
+        var build = d.IndexOf("3. **Build.**", StringComparison.Ordinal);
+        Assert.InRange(understand, 0, plan);
+        Assert.InRange(plan, 0, build);
+        Assert.InRange(build, 0, d.IndexOf("# Build rules", StringComparison.Ordinal));
+        Assert.Contains("how to split the work into pull requests is unclear, ask the owner before you start a worker", d[understand..plan], StringComparison.Ordinal);
+        Assert.Contains("if the input doesn't settle the split, ask the owner", d[plan..build], StringComparison.Ordinal);
     }
 
     [Fact]
