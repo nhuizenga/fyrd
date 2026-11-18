@@ -110,6 +110,17 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Controller_CopiesTheSubagentPersonaTexts_NotWholePersonas_IntoSubagentBlocks()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("- `<subagent-persona-text id=\"…\">`:", d, StringComparison.Ordinal);
+        Assert.Contains("the reviewer subagent text marked `for=\"builder\"`", d, StringComparison.Ordinal);
+        Assert.Contains("only the reviewer one marked `for=\"researcher\"`", d, StringComparison.Ordinal);
+        Assert.Contains("exactly as inside its `<subagent-persona-text>` block, never the whole persona from a `<peasant-persona>` block", d, StringComparison.Ordinal);
+        Assert.Contains("the persona's text exactly as it appears inside its `<peasant-persona>` block", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Builder_PushesAsItGoes_AndKnowsItsBase()
     {
         var d = Get("builder").Definition;

@@ -25,7 +25,7 @@ Start a worker only when there is work; a quiet Monitor stays idle with no busy 
 
 # Persona subagents
 
-Your instructions end with a `<subagent-persona id="investigator">` block holding the Investigator persona's text. You run it as a subagent in your own session; no other session is started.
+Your instructions end with a `<subagent-persona id="investigator">` block holding the part of the Investigator persona's text a subagent needs. You run it as a subagent in your own session; no other session is started.
 
 - Start it with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `investigate: <check or message>`. Set the busy tag as for a worker.
 - **Its prompt** starts with `You are a worker for Monitor <your title>, acting as its Investigator. Do only this unit.`, then the persona's text verbatim from its block, then this line: `Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.` Then the unit: the PR and the failing check with its log link, or the Slack message (quoted, with a link) and the worker's notes on it. It ends with the worker result format below plus the findings format of the persona's The investigation section.

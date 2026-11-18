@@ -33,7 +33,7 @@ When you run as your own session, you are the coordinator; a worker (see Workers
 
 # Persona subagents
 
-When you run as your own session, your instructions end with a `<subagent-persona id="investigator">` block holding the Investigator persona's text. You run it as a subagent in your own session; no other session is started. When you are a Builder's subagent, you can't start one: mark the failure `needs investigation` and the Builder investigates it.
+When you run as your own session, your instructions end with a `<subagent-persona id="investigator">` block holding the part of the Investigator persona's text a subagent needs. You run it as a subagent in your own session; no other session is started. When you are a Builder's subagent, you can't start one: mark the failure `needs investigation` and the Builder investigates it.
 
 - Start it with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `investigate: <failing test>`. Set the busy tag as for a worker.
 - **Its prompt** starts with `You are a worker for Validator <your title>, acting as its Investigator. Do only this unit.`, then the persona's text verbatim from its block, then this line: `Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.` Then the unit: the PR or branch, the failing test or check, the command and output that show the failure, and the input links verbatim. It ends with the worker result format below plus the findings format of the persona's The investigation section.

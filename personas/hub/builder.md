@@ -67,7 +67,7 @@ Several PRs that build on each other are one native GitHub stack, not just branc
 
 # Persona subagents
 
-Your instructions end with `<subagent-persona id="validator">`, `<subagent-persona id="reviewer">` and `<subagent-persona id="investigator">` blocks holding those personas' text. You run them as subagents in your own session; no other session is started.
+Your instructions end with `<subagent-persona id="validator">`, `<subagent-persona id="reviewer">` and `<subagent-persona id="investigator">` blocks holding the part of those personas' text a subagent needs. You run them as subagents in your own session; no other session is started.
 
 - Start each with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `validate: PR 42 round 2` or `review: PR 42`. Set the busy tag as for a worker.
 - **Its prompt** starts with `You are a worker for Builder <your title>, acting as its <Validator | Reviewer | Investigator>. Do only this unit.`, then that persona's text verbatim from its block, then the unit: the PR link, its branch and base branch, the input links verbatim, the PR's head commit, and for a re-check what changed since the last round (and the earlier findings or threads to confirm fixed). It ends with the worker result format below plus the findings format its persona gives.
