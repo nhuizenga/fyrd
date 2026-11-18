@@ -81,4 +81,17 @@ public class ConfigStoreTests
     [Fact] public void Load_UnknownTimeZone_Ignored()
     { using var home = new TempHome(); File.WriteAllText(home.Paths.ConfigFile, "{\"timeZone\":\"Mars/Olympus\"}");
       Assert.Null(new ConfigStore(home.Paths).Load().TimeZone); }
+
+    [Fact] public void SessionSkillsHash_RoundTrips_AndDefaultsToNull()
+    { using var home = new TempHome(); var s = new ConfigStore(home.Paths);
+      Assert.Null(s.Load().SessionSkillsHash);
+      var hash = new string('a', 64);
+      s.Save(new FyrdConfig(SessionSkillsHash: hash)); Assert.Equal(hash, s.Load().SessionSkillsHash); }
+
+    [Theory, InlineData("abc"), InlineData("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"), InlineData("")]
+    public void SessionSkillsHash_ThatIsNotALowercaseSha256_IsRejectedOnSave_AndDroppedOnLoad(string hash)
+    { using var home = new TempHome(); var s = new ConfigStore(home.Paths);
+      Assert.Throws<ArgumentException>(() => s.Save(new FyrdConfig(SessionSkillsHash: hash)));
+      File.WriteAllText(home.Paths.ConfigFile, $"{{\"sessionSkillsHash\": \"{hash}\"}}");
+      Assert.Null(s.Load().SessionSkillsHash); }
 }

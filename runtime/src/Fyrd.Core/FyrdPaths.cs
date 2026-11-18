@@ -10,7 +10,8 @@ public sealed class FyrdPaths
         SecretsDir = Path.Combine(Root, "secrets");
         HubPersonasDir = Path.Combine(HubDir, "personas");
         HubMemoryDir = Path.Combine(HubDir, "memory");
-        foreach (var dir in new[] { Root, HubDir, HubPersonasDir, HubMemoryDir, SecretsDir })
+        HubSessionSkillsDir = Path.Combine(HubDir, "session-skills");
+        foreach (var dir in new[] { Root, HubDir, HubPersonasDir, HubMemoryDir, HubSessionSkillsDir, SecretsDir })
             Directory.CreateDirectory(dir);
     }
 
@@ -20,6 +21,7 @@ public sealed class FyrdPaths
     public string SecretsDir { get; }
     public string HubPersonasDir { get; }
     public string HubMemoryDir { get; }
+    public string HubSessionSkillsDir { get; }
 
     public static FyrdPaths Resolve(string? configured)
     {

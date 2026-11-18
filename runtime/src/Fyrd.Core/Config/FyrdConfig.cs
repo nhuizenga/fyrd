@@ -7,7 +7,8 @@ public sealed partial record FyrdConfig(
     int SessionCap = 20,
     decimal SessionDailyLimitUsd = FyrdConfig.DefaultSessionDailyLimitUsd,
     decimal FyrdDailyLimitUsd = FyrdConfig.DefaultFyrdDailyLimitUsd,
-    string? TimeZone = null)
+    string? TimeZone = null,
+    string? SessionSkillsHash = null)
 {
     public const decimal MinDailyLimitUsd = 1, MaxDailyLimitUsd = 10_000;
     public const decimal DefaultSessionDailyLimitUsd = 50, DefaultFyrdDailyLimitUsd = 500;
@@ -23,6 +24,15 @@ public sealed partial record FyrdConfig(
     }
 
     public static bool IsValidEnvironmentId(string? id) => id is not null && EnvironmentIdPattern().IsMatch(id);
+
+    /// <summary>
+    /// <see cref="SessionSkillsHash"/> is the hash of the session skills whose setup script the owner confirmed pasting
+    /// into the environment (null when none is confirmed): lowercase hex SHA-256.
+    /// </summary>
+    public static bool IsValidSessionSkillsHash(string? hash) => hash is not null && SessionSkillsHashPattern().IsMatch(hash);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[0-9a-f]{64}\z")]
+    private static partial System.Text.RegularExpressions.Regex SessionSkillsHashPattern();
 
     [System.Text.RegularExpressions.GeneratedRegex(@"^(env|ccpool)_[A-Za-z0-9]+\z")]
     private static partial System.Text.RegularExpressions.Regex EnvironmentIdPattern();
@@ -44,6 +54,7 @@ public sealed class ConfigStore(FyrdPaths paths)
                 SessionDailyLimitUsd = Math.Clamp(config.SessionDailyLimitUsd, FyrdConfig.MinDailyLimitUsd, FyrdConfig.MaxDailyLimitUsd),
                 FyrdDailyLimitUsd = Math.Clamp(config.FyrdDailyLimitUsd, FyrdConfig.MinDailyLimitUsd, FyrdConfig.MaxDailyLimitUsd),
                 TimeZone = FyrdConfig.FindTimeZone(config.TimeZone) is null ? null : config.TimeZone,
+                SessionSkillsHash = FyrdConfig.IsValidSessionSkillsHash(config.SessionSkillsHash) ? config.SessionSkillsHash : null,
             };
         }
         catch (Exception e) when (e is JsonException or IOException)
@@ -67,6 +78,8 @@ public sealed class ConfigStore(FyrdPaths paths)
             throw new ArgumentException("TimeZone must be a known IANA time-zone id.", nameof(config));
         if (config.EnvironmentId is not null && !FyrdConfig.IsValidEnvironmentId(config.EnvironmentId))
             throw new ArgumentException("EnvironmentId must match ^(env|ccpool)_[A-Za-z0-9]+$.", nameof(config));
+        if (config.SessionSkillsHash is not null && !FyrdConfig.IsValidSessionSkillsHash(config.SessionSkillsHash))
+            throw new ArgumentException("SessionSkillsHash must be a lowercase hex SHA-256.", nameof(config));
         AtomicFile.Write(paths.ConfigFile, JsonSerializer.Serialize(config, Json.Options));
     }
 }
