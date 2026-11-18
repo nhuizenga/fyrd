@@ -24,6 +24,9 @@ public sealed class PersonaChangeRulesTests : IDisposable
 
     private string Def(string id) => new HubPersonas(_home.Paths, SeedDir()).List().Single(p => p.Id == id).Definition;
 
+    /// <summary>The persona with its session skills: the stack rules and the pull request event rules are skills.</summary>
+    private string Whole(string id) => RepoSeeds.Whole(_home.Paths, id);
+
     private static void ContainsAll(string definition, params string[] phrases)
     {
         foreach (var phrase in phrases) Assert.Contains(phrase, definition, StringComparison.Ordinal);
@@ -74,7 +77,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
         foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**" })
             Assert.InRange(d.IndexOf(rule, StringComparison.Ordinal), d.IndexOf("# Build rules", StringComparison.Ordinal), hygiene);
         // The lists survive fix rounds and a stack, and reach the report.
-        ContainsAll(d,
+        ContainsAll(Whole("builder"),
             "add its PR's current body to the brief",
             "add the body the worker below returned",
             "lists only the rules and guards its own diff touches",
@@ -117,7 +120,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
     [Fact]
     public void BuilderKeepsPullRequestsHonest()
     {
-        var d = Def("builder");
+        var d = Whole("builder");
         ContainsAll(d,
             "# Pull request hygiene",
             "**Body matches the diff.**",
