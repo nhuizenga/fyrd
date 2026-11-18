@@ -99,6 +99,7 @@ app.MapConfig();
 app.MapSecrets();
 app.MapSessionOrder();
 app.MapHub();
+app.MapSessionSkills();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 

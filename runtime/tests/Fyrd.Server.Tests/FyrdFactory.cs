@@ -29,6 +29,7 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
         builder.UseSetting("Fyrd:Home", Home.Paths.Root);
         builder.UseSetting("Fyrd:DisableRunner", "true");
         builder.UseSetting("Fyrd:HubPersonasSeedDir", Path.Combine(RepoRoot(), "personas", "hub"));
+        builder.UseSetting("Fyrd:SessionSkillsSeedDir", Path.Combine(RepoRoot(), "skills", "session"));
         builder.ConfigureTestServices(s =>
         {
             s.RemoveAll<ICloudSessions>();
