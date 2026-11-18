@@ -17,9 +17,12 @@ public static partial class HubPrompt
         string.Join("\n\n", new[] { Instructions(personas, config, skills) }.Concat(MemoryBlocks(memory, personas)));
 
     /// <summary>
-    /// Everything but memory: the Controller definition, settings, peasant personas, subagent persona texts and skills.
-    /// A <c>subagent-persona-text</c> block holds what <see cref="SubagentPersonas"/> cuts from a persona; the Controller
-    /// copies it, not the whole persona, into the <c>subagent-persona</c> blocks of the sessions that run that persona as a subagent.
+    /// Everything but memory: the Controller definition, settings, peasant personas, their mode variants, subagent
+    /// persona texts and skills. A <c>peasant-persona-variant</c> block names the one section of its persona that a
+    /// session of that mode leaves out (<see cref="PersonaModes"/>): the Controller copies the whole persona without it,
+    /// putting the block's text in its place. A <c>subagent-persona-text</c> block holds what <see cref="SubagentPersonas"/>
+    /// cuts from a persona; the Controller copies it, not the whole persona, into the <c>subagent-persona</c> blocks of
+    /// the sessions that run that persona as a subagent.
     /// </summary>
     public static string Instructions(IReadOnlyList<HubPersona> personas, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null)
     {
@@ -32,6 +35,8 @@ public static partial class HubPrompt
         };
         foreach (var p in personas.Where(p => p.Id != ControllerId))
             sections.Add($"<peasant-persona id=\"{AttrEscape(p.Id)}\" name=\"{AttrEscape(p.Name)}\" model=\"{AttrEscape(p.Model)}\">{Safe(p.Definition)}</peasant-persona>");
+        foreach (var v in PersonaModes.All(personas))
+            sections.Add($"<peasant-persona-variant id=\"{AttrEscape(v.Id)}\" mode=\"{AttrEscape(v.Mode)}\" omit=\"{AttrEscape(v.Omit)}\" until=\"{AttrEscape(v.Until)}\">{Safe(v.Instead)}</peasant-persona-variant>");
         foreach (var t in SubagentPersonas.All(personas))
         {
             var target = t.For is null ? "" : $" for=\"{AttrEscape(t.For)}\"";

@@ -145,36 +145,19 @@ public static class SubagentPersonas
         body.Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).Where(p => p.Length > 0);
 
     /// <summary>
-    /// Splits a definition at its level-one headings (a line starting <c># </c> outside a code fence). A heading that
-    /// appears twice keeps its first section.
+    /// Splits a definition at its level-one headings (see <see cref="PersonaHeadings"/>). A heading that appears twice
+    /// keeps its first section.
     /// </summary>
     private static (string Intro, Dictionary<string, string> Sections) Split(string definition)
     {
+        var lines = PersonaHeadings.Lines(definition);
+        var headings = PersonaHeadings.Find(lines);
         var sections = new Dictionary<string, string>(StringComparer.Ordinal);
-        var intro = "";
-        string? heading = null;
-        var lines = new List<string>();
-        var fenced = false;
-        foreach (var line in definition.Replace("\r\n", "\n").Split('\n'))
-        {
-            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal)) fenced = !fenced;
-            if (!fenced && line.StartsWith("# ", StringComparison.Ordinal))
-            {
-                Close();
-                heading = line[2..].Trim();
-                continue;
-            }
-            lines.Add(line);
-        }
-        Close();
+        var intro = Text(0, headings.Count > 0 ? headings[0].Line : lines.Length);
+        for (var i = 0; i < headings.Count; i++)
+            sections.TryAdd(headings[i].Heading, Text(headings[i].Line + 1, i + 1 < headings.Count ? headings[i + 1].Line : lines.Length));
         return (intro, sections);
 
-        void Close()
-        {
-            var text = string.Join("\n", lines).Trim();
-            lines.Clear();
-            if (heading is null) intro = text;
-            else sections.TryAdd(heading, text);
-        }
+        string Text(int from, int to) => string.Join("\n", lines[from..to]).Trim();
     }
 }

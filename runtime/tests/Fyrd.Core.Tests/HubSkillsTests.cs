@@ -134,6 +134,26 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
+    public void Watch_StartsAMonitorWithItsModeVariant_AndNeverSwitchesItsMode()
+    {
+        var text = Read("fyrd-watch");
+        Assert.Contains("without the section that `<peasant-persona-variant id=\"monitor\" mode=\"pr\">` names for PR mode, or `mode=\"slack\"` for Slack mode, copied as Mode variants in the Controller prompt says, or the whole persona if you didn't receive that block", text, StringComparison.Ordinal);
+        Assert.Contains("both modes get it", text, StringComparison.Ordinal);
+        Assert.Contains("never send a running Monitor a task of the other mode", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Peasant_UsesTheWholePersonaForAWaitingSession_AndAModeVariantForAStandaloneReview()
+    {
+        var text = Read("fyrd-peasant");
+        Assert.Contains("the whole persona: a session that waits for its task could get either mode, so no `<peasant-persona-variant>` applies", text, StringComparison.Ordinal);
+        Assert.Contains("leave out the section its `<peasant-persona-variant>` block names (`id=\"reviewer\" mode=\"code\"` for a PR, `mode=\"plan\"` for a plan), copied as Mode variants in the Controller prompt says", text, StringComparison.Ordinal);
+        Assert.Contains("Use the whole reviewer persona if you didn't receive that block or the request isn't clearly one of the two.", text, StringComparison.Ordinal);
+        Assert.Contains("A Validator always gets its whole persona.", text, StringComparison.Ordinal);
+        Assert.Contains("start a new session for work of the other mode or kind instead of sending it", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Investigate_StartsAReadOnlyInvestigator_OnlyForTheOwner()
     {
         var text = Read("fyrd-investigate");

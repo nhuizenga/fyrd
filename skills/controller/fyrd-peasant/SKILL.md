@@ -33,12 +33,12 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `environment_id`: from `<hub-settings>` (omit when empty).
    - `permission_mode`: `"auto"`.
    - `model`: the `model` attribute of that role's `<peasant-persona>`.
-   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`; then for a Builder a blank line, `<subagent-persona id="validator">…</subagent-persona>`, `<subagent-persona id="reviewer">…</subagent-persona>` and `<subagent-persona id="investigator">…</subagent-persona>`, each holding the text inside the `<subagent-persona-text>` block with that `id` (for the reviewer, the one marked `for="builder"`), for a Researcher only the reviewer one (marked `for="researcher"`), and for a Validator or a Monitor only the investigator one. Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.
+   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block (the whole persona: a session that waits for its task could get either mode, so no `<peasant-persona-variant>` applies; a Monitor started with a task is `fyrd-watch`); a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`; then for a Builder a blank line, `<subagent-persona id="validator">…</subagent-persona>`, `<subagent-persona id="reviewer">…</subagent-persona>` and `<subagent-persona id="investigator">…</subagent-persona>`, each holding the text inside the `<subagent-persona-text>` block with that `id` (for the reviewer, the one marked `for="builder"`), for a Researcher only the reviewer one (marked `for="researcher"`), and for a Validator or a Monitor only the investigator one. Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.
    - `prompt`: `Wait for your task.`
    - `source_url`: from step 4 (omit only for `No repo`).
 8. Reply with the title and session id, and stop.
 
-A later task for a running peasant goes in `mcp__claude-code-remote__send_message` (`session_id`, `message`). The first task always goes in `prompt`. A message that gives a Builder new work must include a `Base branch:` line (the branch the owner names, else `the repo's default branch`).
+A later task for a running peasant goes in `mcp__claude-code-remote__send_message` (`session_id`, `message`). The first task always goes in `prompt`. A Monitor, or a Reviewer started for one PR or plan, has only its own mode's section: start a new session for work of the other mode or kind instead of sending it. A message that gives a Builder new work must include a `Base branch:` line (the branch the owner names, else `the repo's default branch`).
 
 ## Owner asks for a validation or review
 
@@ -64,7 +64,7 @@ Reply with what you sent and to whom.
    - Reviewer on a PR: `Review pull request <url> against the spec below. Base branch: <base>. Post one GitHub review with inline comments and a summary, then reply with your findings.`
    - Reviewer on a plan: `Review the implementation plan <url> against the input below. Reply with your findings and any questions only the owner can answer.`
    - Validator: `Validate pull request <url> against the spec below. Base branch: <base>. Reply with your findings.`
-   Other settings as in Start step 7, with `source_url` set to the repo.
+   Other settings as in Start step 7, with `source_url` set to the repo, except a Reviewer's persona text: leave out the section its `<peasant-persona-variant>` block names (`id="reviewer" mode="code"` for a PR, `mode="plan"` for a plan), copied as Mode variants in the Controller prompt says. Use the whole reviewer persona if you didn't receive that block or the request isn't clearly one of the two. A Validator always gets its whole persona.
 6. Reply with the title and session id.
 
 ## Tear down

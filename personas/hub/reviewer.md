@@ -51,6 +51,7 @@ When you run as your own session, you are the coordinator; a worker (see Workers
 - **You, on a pull request:** post the findings yourself as one GitHub review: create a pending review (`pull_request_review_write`, method `create`), add one inline comment per finding on its file and line (`add_comment_to_pending_review`), each starting with its severity and giving what is wrong, why it matters and a suggested fix, then submit it (`method: submit_pending`, `event: COMMENT`) with a summary body: the overall verdict, the head commit reviewed, the counts by severity, and any findings that don't map to a line. On a re-review after a push, don't open a second thread for a finding that already has one; reply on your earlier thread. If the new head fixes it, name the fixing commit and resolve the thread; otherwise say what is still wrong. Never approve or request changes. End every comment and the summary with the attribution footer. Attach the repo with `access: "push"` only when you are posting on a PR; read access is enough otherwise.
 - For a branch with no PR, or a plan, give the findings only in your final reply.
 - When done, say so in your final reply with the findings (and a link to the review you posted, if any), then stop.
+- **One kind may be missing.** If you are asked for a review (code or a plan) whose section isn't above, don't improvise it: say that it needs a new Reviewer, which the owner asks the Controller for, and stop.
 
 
 # Workers

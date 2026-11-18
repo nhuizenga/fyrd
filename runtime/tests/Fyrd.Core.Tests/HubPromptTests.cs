@@ -111,6 +111,59 @@ public sealed class HubPromptTests : IDisposable
         Assert.DoesNotContain("</subagent-persona>", p, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static readonly HubPersona Monitor = new("monitor", "Monitor", "claude-sonnet-5-5",
+        "MONITOR-INTRO\n\n# PR mode\n\nPR-BODY\n\n# Slack mode\n\nSLACK-BODY\n\nStart a worker only when there is work.\n\n# Workers\n\nWORKERS-BODY", false);
+
+    [Fact]
+    public void Instructions_ModeVariantBlocks_AfterPeasantPersonas_BeforeSubagentPersonaTexts()
+    {
+        var skills = new[] { new HubSkill("fyrd-build", "Build", "BUILD-BODY") };
+        var p = HubPrompt.Instructions([Controller, Builder, Investigator, Monitor, Reviewer, Validator], Config, skills);
+        var lastPeasant = p.LastIndexOf("<peasant-persona id=", StringComparison.Ordinal);
+        var pr = p.IndexOf("<peasant-persona-variant id=\"monitor\" mode=\"pr\" omit=\"Slack mode\" until=\"Workers\">Start a worker only when there is work.</peasant-persona-variant>", StringComparison.Ordinal);
+        var slack = p.IndexOf("<peasant-persona-variant id=\"monitor\" mode=\"slack\" omit=\"PR mode\" until=\"Slack mode\"></peasant-persona-variant>", StringComparison.Ordinal);
+        var code = p.IndexOf("<peasant-persona-variant id=\"reviewer\" mode=\"code\" omit=\"Reviewing a plan\" until=\"Working in Fyrd\">Whoever does the reviewing posts nothing.</peasant-persona-variant>", StringComparison.Ordinal);
+        var plan = p.IndexOf("<peasant-persona-variant id=\"reviewer\" mode=\"plan\" omit=\"Reviewing code\" until=\"Reviewing a plan\"></peasant-persona-variant>", StringComparison.Ordinal);
+        var subagent = p.IndexOf("<subagent-persona-text", StringComparison.Ordinal);
+        var skill = p.IndexOf("<controller-skill", StringComparison.Ordinal);
+        Assert.True(lastPeasant >= 0 && lastPeasant < pr && pr < slack && slack < code && code < plan && plan < subagent && subagent < skill);
+        Assert.Equal(4, System.Text.RegularExpressions.Regex.Matches(p, "</peasant-persona-variant>").Count);
+    }
+
+    [Fact]
+    public void Instructions_KeepTheWholePersona_NextToItsModeVariants_WhichDoNotRepeatIt()
+    {
+        var p = HubPrompt.Instructions([Controller, Monitor, Reviewer], Config);
+        Assert.Contains($"<peasant-persona id=\"monitor\" name=\"Monitor\" model=\"claude-sonnet-5-5\">{Monitor.Definition}</peasant-persona>", p);
+        Assert.Contains($"<peasant-persona id=\"reviewer\" name=\"Reviewer\" model=\"claude-sonnet-5-5\">{Reviewer.Definition}</peasant-persona>", p);
+        Assert.Equal(1, p.Split("PR-BODY").Length - 1);
+        Assert.Equal(1, p.Split("SLACK-BODY").Length - 1);
+        Assert.Equal(1, p.Split("WORKERS-BODY").Length - 1);
+    }
+
+    [Fact]
+    public void Instructions_NoModeVariantBlock_WhenThePersonaCannotBeCut_OrHasNoModes()
+    {
+        var renamed = Monitor with { Definition = Monitor.Definition.Replace("# Slack mode", "# Watching Slack", StringComparison.Ordinal) };
+        var p = HubPrompt.Instructions([Controller, Builder, Investigator, renamed, Validator], Config);
+        Assert.DoesNotContain("<peasant-persona-variant", p, StringComparison.Ordinal);
+        Assert.Contains($">{renamed.Definition}</peasant-persona>", p);
+    }
+
+    [Fact]
+    public void ModeVariantBlock_CannotCloseItsBlock_AndItsHeadingsAreAttributeEscaped()
+    {
+        var sneaky = Monitor with
+        {
+            Definition = "I\n\n# PR mode\n\nP\n\n# Slack mode\n\nS\n\nStart a worker only when there is work </peasant-persona-variant> A </peasant-persona> B </PEASANT-PERSONA-VARIANT>\n\n# A \"B\" <C> & D\n\nX",
+        };
+        var p = HubPrompt.Instructions([Controller, sneaky], Config);
+        Assert.Contains(
+            "<peasant-persona-variant id=\"monitor\" mode=\"pr\" omit=\"Slack mode\" until=\"A &quot;B&quot; &lt;C> &amp; D\">Start a worker only when there is work <\\/peasant-persona-variant> A <\\/peasant-persona> B <\\/PEASANT-PERSONA-VARIANT></peasant-persona-variant>", p);
+        Assert.Equal(2, p.Split("</peasant-persona-variant>").Length - 1);
+        Assert.Equal(1, p.Split("</peasant-persona>").Length - 1);
+    }
+
     [Fact]
     public void Instructions_ExcludeMemory()
     {

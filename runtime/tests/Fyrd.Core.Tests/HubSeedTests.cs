@@ -120,6 +120,42 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("the persona's text exactly as it appears inside its `<peasant-persona>` block", d, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Controller_UsesAModeVariantOnlyWhenTheModeIsCertain_AndKeepsFollowUpsInTheMode()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("- `<peasant-persona-variant id=\"…\" mode=\"…\" omit=\"…\" until=\"…\">`:", d, StringComparison.Ordinal);
+        Assert.Contains("# Mode variants", d, StringComparison.Ordinal);
+        Assert.Contains("use a variant only when the mode is certain when you create the session", d, StringComparison.Ordinal);
+        foreach (var row in new[]
+        {
+            "| A Monitor whose task starts `PR mode.` | `id=\"monitor\" mode=\"pr\"` |",
+            "| A Monitor whose task starts `Slack mode.` | `id=\"monitor\" mode=\"slack\"` |",
+            "| A Reviewer whose task is one pull request or branch to review | `id=\"reviewer\" mode=\"code\"` |",
+            "| A Reviewer whose task is one implementation plan to review | `id=\"reviewer\" mode=\"plan\"` |",
+        })
+            Assert.Contains(row, d, StringComparison.Ordinal);
+        Assert.Contains("leave out the heading line `# <omit>` and every line after it, up to but not including the heading line `# <until>`, and write the text inside the variant block in their place", d, StringComparison.Ordinal);
+        Assert.Contains("No other section is left out, shortened or moved.", d, StringComparison.Ordinal);
+        Assert.Contains("Use the whole persona when the session starts with `Wait for your task.`, when the task doesn't settle the mode or covers both, when you didn't receive that variant block, or when the persona doesn't have both heading lines the block names. Every other role always gets its whole persona.", d, StringComparison.Ordinal);
+        Assert.Contains("A Monitor gets the investigator `subagent-persona` element in both modes", d, StringComparison.Ordinal);
+        Assert.Contains("Never send a Monitor work of the other mode, or a Reviewer you started for one kind of review the other kind: start a new session for it.", d, StringComparison.Ordinal);
+        Assert.Contains("when you aren't sure how a Reviewer was started, start a new one", d, StringComparison.Ordinal);
+    }
+
+    /// <summary>A session created from a mode variant has no section for the other mode, so it must not improvise one.</summary>
+    [Fact]
+    public void MonitorAndReviewer_RefuseAModeTheirInstructionsHaveNoSectionFor()
+    {
+        var monitor = Get("monitor").Definition;
+        Assert.Contains("If you are asked to watch in a mode (PR mode, Slack mode) that has no section below, don't improvise it: say that it needs a new Monitor, which the owner asks the Controller for, and keep watching what you already watch.", monitor, StringComparison.Ordinal);
+        Assert.True(monitor.IndexOf("that has no section below", StringComparison.Ordinal) < monitor.IndexOf("# PR mode", StringComparison.Ordinal));
+        var reviewer = Get("reviewer").Definition;
+        Assert.Contains("- **One kind may be missing.** If you are asked for a review (code or a plan) whose section isn't above, don't improvise it: say that it needs a new Reviewer, which the owner asks the Controller for, and stop.", reviewer, StringComparison.Ordinal);
+        // The line lives in Your job, which no subagent text carries.
+        Assert.All(SubagentPersonas.All(Load()).Where(t => t.Id == "reviewer"), t => Assert.DoesNotContain("One kind may be missing", t.Text, StringComparison.Ordinal));
+    }
+
     /// <summary>A subagent's persona text can still say to ask the owner (the Inputs rule, or a whole-persona fallback), so every brief overrides it.</summary>
     [Theory]
     [InlineData("builder", "Ignore any instruction above to ask the owner, post a review or message anyone; return your findings only.")]

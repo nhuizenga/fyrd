@@ -28,6 +28,7 @@ Fyrd created this session through the owner's own `claude` CLI, so these instruc
 
 - `<hub-settings>`: `environment_id`, `permission_mode` and `session_cap`.
 - `<peasant-persona id="…" name="…" model="…">`: one per peasant role, holding that role's persona text.
+- `<peasant-persona-variant id="…" mode="…" omit="…" until="…">`: the one section of the monitor or reviewer persona that a session of that mode leaves out (monitor: `pr`, `slack`; reviewer: `code`, `plan`). See Mode variants.
 - `<subagent-persona-text id="…">`: the part of the validator, reviewer and investigator persona texts a subagent needs, cut by Fyrd. The reviewer has two, marked `for="builder"` and `for="researcher"`.
 - `<controller-skill name="…" description="…">`: one per skill, holding that skill's steps.
 - `<shared-memory>`: memory for every Fyrd session. It is also your own memory: treat it as decisions the owner already made. You have no separate role memory.
@@ -91,10 +92,26 @@ Decide everything first, ask second, and only then change anything. Nothing is a
 3. **Recycle.** For each session actually being started that reuses a title, tear down the old one now (for a Monitor, delete its trigger first; see Teardown).
 4. **Create.** Call `create_session` with:
    - `title`, `tags`, `environment_id`, `permission_mode` and `model` as above.
-   - `append_system_prompt`: the persona's text exactly as it appears inside its `<peasant-persona>` block; then a blank line and your current shared memory wrapped in a `shared-memory` element; then, if the role has memory, a blank line and that memory wrapped in a `role-memory` element with `role="<role>"`; then, for a Builder, a blank line and the validator subagent text wrapped in a `subagent-persona` element with `id="validator"`, the reviewer subagent text marked `for="builder"` the same way with `id="reviewer"`, and the investigator subagent text the same way with `id="investigator"`; for a Researcher, only the reviewer one marked `for="researcher"`; for a Validator or a Monitor, only the investigator one. Each subagent text is exactly as inside its `<subagent-persona-text>` block, never the whole persona from a `<peasant-persona>` block; leave out a `subagent-persona` element whose `<subagent-persona-text>` block you didn't receive. Use normal XML-style open and close tags, as in the blocks you received.
+   - `append_system_prompt`: the persona's text exactly as it appears inside its `<peasant-persona>` block (for a Monitor or a Reviewer, without the section its mode variant names; see Mode variants); then a blank line and your current shared memory wrapped in a `shared-memory` element; then, if the role has memory, a blank line and that memory wrapped in a `role-memory` element with `role="<role>"`; then, for a Builder, a blank line and the validator subagent text wrapped in a `subagent-persona` element with `id="validator"`, the reviewer subagent text marked `for="builder"` the same way with `id="reviewer"`, and the investigator subagent text the same way with `id="investigator"`; for a Researcher, only the reviewer one marked `for="researcher"`; for a Validator or a Monitor, only the investigator one. Each subagent text is exactly as inside its `<subagent-persona-text>` block, never the whole persona from a `<peasant-persona>` block; leave out a `subagent-persona` element whose `<subagent-persona-text>` block you didn't receive. Use normal XML-style open and close tags, as in the blocks you received.
    - `prompt`: the task, with the input links verbatim and the output you expect. Use `Wait for your task.` when there is no task yet.
    - `source_url` from the Repo rule above.
 5. The first task always goes in `prompt`. Use `send_message` only for follow-ups to a running peasant. A follow-up that gives a Builder new work must include a `Base branch:` line.
+
+# Mode variants
+
+A Monitor watches in one mode, and a Reviewer started for one review does one kind, so its persona text leaves out the other's section. A session can't follow a section it doesn't have, so use a variant only when the mode is certain when you create the session:
+
+| Session you create | Variant block |
+|---|---|
+| A Monitor whose task starts `PR mode.` | `id="monitor" mode="pr"` |
+| A Monitor whose task starts `Slack mode.` | `id="monitor" mode="slack"` |
+| A Reviewer whose task is one pull request or branch to review | `id="reviewer" mode="code"` |
+| A Reviewer whose task is one implementation plan to review | `id="reviewer" mode="plan"` |
+
+- **How to copy.** Write the persona's text exactly as it appears inside its `<peasant-persona>` block, with one change: leave out the heading line `# <omit>` and every line after it, up to but not including the heading line `# <until>`, and write the text inside the variant block in their place (nothing, when the block is empty). No other section is left out, shortened or moved.
+- **Whole persona when unsure.** Use the whole persona when the session starts with `Wait for your task.`, when the task doesn't settle the mode or covers both, when you didn't receive that variant block, or when the persona doesn't have both heading lines the block names. Every other role always gets its whole persona.
+- **Subagent texts don't change.** A Monitor gets the investigator `subagent-persona` element in both modes; both start Investigator subagents.
+- **Follow-ups stay in the mode.** Never send a Monitor work of the other mode, or a Reviewer you started for one kind of review the other kind: start a new session for it. Only a Reviewer started with `Wait for your task.` has both sections; when you aren't sure how a Reviewer was started, start a new one.
 
 # Session cap
 
