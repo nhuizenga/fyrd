@@ -48,6 +48,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Each PR carries what it uses.**",
             "**Run it for real.**",
             "never production",
+            "a credential you merely found",
             "**PR body.**");
         Assert.True(d.IndexOf("# Build rules", StringComparison.Ordinal) < d.IndexOf("# Workers", StringComparison.Ordinal));
     }
@@ -130,6 +131,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "named and justified in the PR body",
             "someone else's resource",
             "Never probe production",
+            "governs every live run in this step too",
             "a credential you merely found",
             "Return the head commit you checked",
             "could not run live",

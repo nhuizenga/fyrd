@@ -39,7 +39,7 @@ Copy the bullets below into the brief of every worker that writes code (build or
   - Audit data leaving the system at the class the repo uses for sensitive egress, and keep secrets, bound values and personal data out of logs and history other users can read.
   - Config or data that must move between environments is covered by the repo's export and import.
   - Behaviour that contradicts an earlier recorded decision gets a new recorded decision where the repo keeps them.
-- **Run it for real.** Unit tests are not enough for behaviour that crosses a boundary: exercise a UI change in a browser and an integration against a real test or staging instance of the other system, where the task or the repo's docs give you one (never production, and never with writes the task didn't ask for). Say in the result what you ran live and what you could not, and why.
+- **Run it for real.** Unit tests are not enough for behaviour that crosses a boundary: exercise a UI change in a browser and an integration against a real test or staging instance of the other system, where the task or the repo's docs give you one (never production, and never with writes the task didn't ask for). Use only test identities and data you create or the task gives you, never real users' data, a live third-party service or a credential you merely found in the environment; if no safe target exists, don't run it. Say in the result what you ran live and what you could not, and why.
 - **PR body.** Return a title and body for the PR in the result, written from the diff at the pushed head: what it changes, how it was tested, what was never run live, each thing widened and each exception to these rules. After a fix, return the updated body.
 
 # Pull request hygiene
