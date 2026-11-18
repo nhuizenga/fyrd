@@ -84,6 +84,16 @@ export function tokenWarning(env = process.env) {
   return "GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.";
 }
 
+/** The hub state from /api/hub/state, or null when it can't be read (unreachable, non-2xx, or not JSON). */
+export async function readHubState(url, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`${url}/api/hub/state`);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The first `status` line: the URL, then the session and waiting-question counts of /api/hub/state when it could be read. */
 export function statusLine(url, state) {
   if (!state) return `Fyrd running at ${url}`;

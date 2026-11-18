@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState } from "./lib.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -89,6 +89,20 @@ test("statusLine counts sessions and waiting questions, or gives only the URL", 
   assert.equal(statusLine("http://127.0.0.1:4870", { sessions: [{}, {}], questions: [{}] }),
     "Fyrd running at http://127.0.0.1:4870 · 2 sessions · 1 questions waiting");
   assert.equal(statusLine("http://127.0.0.1:4870", null), "Fyrd running at http://127.0.0.1:4870");
+});
+
+test("readHubState returns the state on 2xx and null on a non-2xx JSON body, bad JSON or a failed fetch", async () => {
+  const url = "http://127.0.0.1:4870";
+  const state = { sessions: [{}], questions: [] };
+  let asked;
+  assert.deepEqual(await readHubState(url, async (u) => { asked = u; return { ok: true, status: 200, json: async () => state }; }), state);
+  assert.equal(asked, `${url}/api/hub/state`);
+  // A ProblemDetails 500 is valid JSON; it must not be read as an empty hub state.
+  const problem = async () => ({ ok: false, status: 500, json: async () => ({ title: "An error occurred", status: 500 }) });
+  assert.equal(await readHubState(url, problem), null);
+  assert.equal(statusLine(url, await readHubState(url, problem)), `Fyrd running at ${url}`);
+  assert.equal(await readHubState(url, async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("bad json"); } })), null);
+  assert.equal(await readHubState(url, async () => { throw new Error("ECONNREFUSED"); }), null);
 });
 
 test("gitHubLine names the login, the error, or says not configured", () => {

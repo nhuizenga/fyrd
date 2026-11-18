@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   runDir, readServerFile, writeServerFile, removeServerFile,
-  isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine,
+  isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState,
 } from "./lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -109,10 +109,7 @@ async function status() {
     console.log("Fyrd is not running. Start it with /fyrd:up.");
     return;
   }
-  let state = null;
-  try {
-    state = await (await fetch(`${urlOf(info)}/api/hub/state`)).json();
-  } catch {}
+  const state = await readHubState(urlOf(info));
   console.log(statusLine(urlOf(info), state));
   console.log(state ? gitHubLine(state.gitHub) : "GitHub: unknown (could not read hub state)");
 }
