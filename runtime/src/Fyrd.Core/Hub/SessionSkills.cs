@@ -30,7 +30,8 @@ public enum SessionSkillMode
 /// <summary>
 /// Session skill store: one JSON file per skill under <see cref="FyrdPaths.HubSessionSkillsDir"/>, seeded from
 /// <c>skills/session/&lt;name&gt;/SKILL.md</c> the way <see cref="HubPersonas"/> seeds personas: a seed is written once, an
-/// unedited skill follows its seed, an edited one is left alone and flagged, and a deleted one stays deleted.
+/// unedited skill follows its seed (and is removed when its seed is), an edited one is left alone and flagged, and a
+/// deleted one stays deleted.
 /// </summary>
 public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
 {
@@ -51,9 +52,6 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
 
     [GeneratedRegex(@"^[a-z0-9-]{1,40}\z", RegexOptions.CultureInvariant)]
     private static partial Regex RoleRegex();
-
-    [GeneratedRegex(@"\A---[ \t]*\r?\n(?<fm>.*?)\r?\n---[ \t]*\r?\n?(?<body>.*)\z", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
-    private static partial Regex FrontMatterRegex();
 
     /// <summary>Every stored skill, ordered by name.</summary>
     public IReadOnlyList<SessionSkill> List()
@@ -124,6 +122,16 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
         }
     }
 
+    /// <summary>The seeds that have no skill in the store (the owner deleted it), by name. <see cref="Reset"/> brings one back.</summary>
+    public IReadOnlyList<string> MissingSeeds()
+    {
+        lock (_gate)
+        {
+            SeedIfNeeded();
+            return _seeds.Keys.Where(name => !File.Exists(FileFor(name))).Order(StringComparer.Ordinal).ToList();
+        }
+    }
+
     public static bool IsValidName(string? name) => name is { Length: <= MaxNameLength } && NameRegex().IsMatch(name);
 
     public static int WordCount(string? text) => (text ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
@@ -140,7 +148,8 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             throw new ArgumentException($"A session skill's name is 'fyrd-' followed by lower-case letters, digits and single hyphens, at most {MaxNameLength} characters.", nameof(skill));
         var description = (skill.Description ?? "").Trim();
         if (description.Length == 0) throw new ArgumentException("Description is required: one line saying what the skill holds and when to load it.", nameof(skill));
-        if (description.Any(char.IsControl)) throw new ArgumentException("Description must be one line.", nameof(skill));
+        // U+2028 and U+2029 end a line too, though they are no control characters (U+0085 is one).
+        if (description.Any(c => char.IsControl(c) || c is '\u2028' or '\u2029')) throw new ArgumentException("Description must be one line.", nameof(skill));
         if (description.Length > MaxDescriptionLength) throw new ArgumentException($"Description is longer than {MaxDescriptionLength} characters.", nameof(skill));
         var roles = (skill.Roles ?? []).Select(r => (r ?? "").Trim()).Where(r => r.Length > 0).Distinct(StringComparer.Ordinal).ToList();
         if (roles.Count == 0) throw new ArgumentException("A session skill belongs to at least one role.", nameof(skill));
@@ -161,7 +170,8 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// <summary>
     /// SHA-256 (lowercase hex) of a set of skills: the same for the same skills in any order, and different when a name,
     /// description, role or body differs. It names the setup script generated from them. The roles are part of it
-    /// although the script doesn't hold them: a role change moves which personas point at the skill.
+    /// although the script doesn't hold them: a role change moves which personas point at the skill. So is
+    /// <see cref="SessionSkillScript.TemplateVersion"/>: a block with other shell text is another script.
     /// </summary>
     public static string Hash(IEnumerable<SessionSkill> skills)
     {
@@ -169,7 +179,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
         using (var json = new Utf8JsonWriter(stream))
         {
             json.WriteStartArray();
-            json.WriteStringValue("fyrd-session-skills-1");
+            json.WriteStringValue($"fyrd-session-skills-{SessionSkillScript.TemplateVersion}");
             foreach (var s in skills.OrderBy(s => s.Name, StringComparer.Ordinal))
             {
                 json.WriteStartArray();
@@ -197,7 +207,8 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
 
     /// <summary>
     /// The persona text a session of this persona's role gets: the stored definition, then its role's session skills.
-    /// Installed, each skill is one line that says when to load it; otherwise each skill's whole body is a section, so
+    /// Installed, each skill is one line that says when to load it, under an intro that carries the hash of
+    /// <paramref name="skills"/> (all of them, as the setup script has it) for the session to check; otherwise each skill's whole body is a section, so
     /// the session has every rule whether or not the setup script ran. A persona without session skills is unchanged.
     /// </summary>
     public static string Compose(HubPersona persona, IReadOnlyList<SessionSkill>? skills, bool installed)
@@ -206,7 +217,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
         if (own.Count == 0) return persona.Definition;
         var parts = new List<string> { persona.Definition };
         if (installed)
-            parts.Add(PointerHeading + "\n\n" + PointerIntro + "\n\n" + string.Join("\n", own.Select(Pointer)));
+            parts.Add(PointerHeading + "\n\n" + PointerIntro(Hash(skills!)) + "\n\n" + string.Join("\n", own.Select(Pointer)));
         else
             parts.AddRange(own.Select(Section));
         return string.Join("\n\n", parts.Where(p => p.Length > 0));
@@ -214,9 +225,15 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
 
     public const string PointerHeading = "# Session skills";
 
-    /// <summary>Said once for every line under it: load the skill first, and never go on without it.</summary>
-    public const string PointerIntro =
-        "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. If the skill is not in your skill list, stop and ask the owner.";
+    /// <summary>
+    /// Said once for every line under it: load the skill first, check once that the environment holds the skills this
+    /// text was made for (the setup script writes their hash last, and only after a complete run), and never go on
+    /// without them. <paramref name="hash"/> is the hash of all the skills, which is the confirmed one in installed mode.
+    /// </summary>
+    public static string PointerIntro(string hash) =>
+        "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
+        + $"Before the first load, check once that the file `{SessionSkillScript.HashFile}` holds exactly `{hash}`. "
+        + "If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.";
 
     /// <summary>The line that stands for an installed skill in a persona: its name and its description (what it holds and when to load it).</summary>
     public static string Pointer(SessionSkill skill) => $"- `{skill.Name}`: {skill.Description}";
@@ -255,22 +272,12 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// </summary>
     public static SessionSkill? ParseSeed(string directoryName, string text)
     {
-        var m = FrontMatterRegex().Match(text);
-        if (!m.Success) return null;
-        string name = directoryName, description = "";
-        string[] roles = [];
-        foreach (var line in m.Groups["fm"].Value.Split('\n'))
-        {
-            var i = line.IndexOf(':');
-            if (i < 0) continue;
-            var key = line[..i].Trim();
-            var val = line[(i + 1)..].Trim();
-            if (key == "name") name = val;
-            else if (key == "description") description = val;
-            else if (key == "roles") roles = val.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        }
+        if (!FrontMatter.TryParse(text, out var fields, out var body)) return null;
+        var name = fields.GetValueOrDefault("name", directoryName);
+        var description = fields.GetValueOrDefault("description", "");
+        var roles = fields.GetValueOrDefault("roles", "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (name != directoryName) return null;
-        try { return Normalize(new SessionSkill(name, description, roles, m.Groups["body"].Value)); }
+        try { return Normalize(new SessionSkill(name, description, roles, body)); }
         catch (ArgumentException) { return null; }
     }
 
@@ -314,6 +321,18 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             // Edited, or one the owner made under a name a seed took later: leave the text alone.
             if (stored.SeedHash is null || Hash(stored) != stored.SeedHash || stored.SeedHash == seedHash) continue;
             Write(seed with { SeedHash = seedHash });
+        }
+        // A seed that is gone: a skill that was seeded from it and never edited goes with it, as an unedited skill
+        // follows its seed; an edited one is the owner's text and stays, as a skill of their own.
+        foreach (var name in seededNames.Where(n => !_seeds.ContainsKey(n)).ToList())
+        {
+            // Only a seed whose file is gone; one that is there but can't be read as a skill removes nothing.
+            if (!IsValidName(name) || File.Exists(Path.Combine(seedDir, name, "SKILL.md"))) continue;
+            var stored = Read(FileFor(name));
+            if (stored is not null && (stored.SeedHash is null || Hash(stored) != stored.SeedHash)) continue;
+            if (stored is not null) File.Delete(FileFor(name));
+            seededNames.Remove(name);
+            markerChanged = true;
         }
         if (markerChanged) AtomicFile.Write(marker, string.Join("\n", seededNames.Order(StringComparer.Ordinal)) + "\n");
     }

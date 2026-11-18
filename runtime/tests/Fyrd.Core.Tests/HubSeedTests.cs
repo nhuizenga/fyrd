@@ -167,7 +167,7 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("markPullRequestReadyForReview", d, StringComparison.Ordinal);
         Assert.Contains("event: COMMENT", d, StringComparison.Ordinal);
         Assert.Contains("return your findings only", d, StringComparison.Ordinal);
-        Assert.Contains("authored by you: it is not new work", Whole("builder"), StringComparison.Ordinal);
+        Assert.Contains("authored by you: it is not new work", d, StringComparison.Ordinal);
         foreach (var relay in new[] { "Controller session:", "Validation request:", "Validation failed:", "Review request:" })
             Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
     }
@@ -357,7 +357,7 @@ public sealed class HubSeedTests : IDisposable
     /// tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("builder", 3700)]
+    [InlineData("builder", 3830)]
     [InlineData("controller", 2630)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]

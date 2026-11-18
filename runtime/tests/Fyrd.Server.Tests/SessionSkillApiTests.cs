@@ -37,8 +37,8 @@ public class SessionSkillApiTests
     {
         using var f = new FyrdFactory();
         var list = await Get(f.CreateClient(), "/api/hub/session-skills");
-        Assert.Equal(["fyrd-pull-request-events", Stacks], list.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
-        var stacks = list[1];
+        Assert.Equal([Stacks], list.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
+        var stacks = list[0];
         Assert.Equal(["builder"], stacks.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
         Assert.StartsWith("Stacked pull requests: ", stacks.GetProperty("description").GetString());
         Assert.StartsWith("# Stacked pull requests\n", stacks.GetProperty("body").GetString());
@@ -88,12 +88,16 @@ public class SessionSkillApiTests
         {
             var r = await c.PutAsJsonAsync($"/api/hub/session-skills/{name}", body);
             Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-            Assert.Contains(detail, (await ReadJson(r)).GetProperty("detail").GetString(), StringComparison.Ordinal);
+            var text = (await ReadJson(r)).GetProperty("detail").GetString();
+            Assert.Contains(detail, text, StringComparison.Ordinal);
+            // The owner reads this text: no parameter name of the code is in it.
+            Assert.DoesNotContain("(Parameter", text, StringComparison.Ordinal);
         }
         await Refused("mine", Skill(), "'fyrd-' followed by");
         await Refused("fyrd-Mine", Skill(), "'fyrd-' followed by");
         await Refused("fyrd-mine", Skill(description: " "), "Description is required");
         await Refused("fyrd-mine", Skill(description: "two\nlines"), "one line");
+        await Refused("fyrd-mine", Skill(description: "two\u2028lines"), "Description must be one line.");
         await Refused("fyrd-mine", Skill(body: " "), "Body is required");
         await Refused("fyrd-mine", Skill(body: string.Join(' ', Enumerable.Repeat("word", 1501))), "1501 words; a session skill holds at most 1500");
         await Refused("fyrd-mine", new { description = "d", body = "b", roles = Array.Empty<string>() }, "at least one role");
@@ -119,7 +123,7 @@ public class SessionSkillApiTests
             req.Headers.Add("Origin", "http://evil.example");
             Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
         }
-        Assert.Equal(2, (await Get(c, "/api/hub/session-skills")).GetArrayLength());
+        Assert.Equal(1, (await Get(c, "/api/hub/session-skills")).GetArrayLength());
     }
 
     [Fact]
@@ -138,7 +142,7 @@ public class SessionSkillApiTests
         Assert.Equal("env_test1", state.GetProperty("environmentId").GetString());
         Assert.Equal("/root/.claude/skills", state.GetProperty("skillsDir").GetString());
         Assert.Equal("/root/.claude/fyrd-session-skills/hash", state.GetProperty("hashFile").GetString());
-        Assert.Equal(["fyrd-pull-request-events", Stacks], state.GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
+        Assert.Equal([Stacks], state.GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
         var script = state.GetProperty("script").GetString()!;
         Assert.Equal(SessionSkillScript.Render(skills), script);
         Assert.StartsWith($"# >>> fyrd session skills {hash} >>>\n", script, StringComparison.Ordinal);
@@ -167,7 +171,8 @@ public class SessionSkillApiTests
         Assert.Equal("installed", prompt.GetProperty("mode").GetString());
         var installed = prompt.GetProperty("text").GetString()!;
         Assert.Contains($"\n- `{Stacks}`: Stacked pull requests: ", installed, StringComparison.Ordinal);
-        Assert.Contains("If the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
+        // The session is told which skills its environment must hold: the hash the owner confirmed.
+        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds exactly `{hash}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
         Assert.DoesNotContain("POST /repos/{owner}/{repo}/stacks", installed, StringComparison.Ordinal);
         Assert.True(prompt.GetProperty("words").GetInt32() < SessionSkills.WordCount(inline));
         // A persona without session skills is the stored text in either mode.
@@ -202,12 +207,66 @@ public class SessionSkillApiTests
         await Confirm(c, (await Script(c)).GetProperty("hash").GetString());
         await c.PutAsJsonAsync("/api/hub/session-skills/fyrd-mine", Skill());
         Assert.Equal("out-of-date", (await Script(c)).GetProperty("mode").GetString());
-        Assert.Contains("\n\n# Mine\n\nMy rule.\n\n# Pull request events\n", await BuilderPrompt(c), StringComparison.Ordinal);
+        Assert.Contains("\n\n# Mine\n\nMy rule.\n\n# Stacked pull requests\n", await BuilderPrompt(c), StringComparison.Ordinal);
         await c.DeleteAsync("/api/hub/session-skills/fyrd-mine");
         Assert.Equal("installed", (await Script(c)).GetProperty("mode").GetString());
         await c.DeleteAsync($"/api/hub/session-skills/{Stacks}");
         Assert.Equal("out-of-date", (await Script(c)).GetProperty("mode").GetString());
         Assert.DoesNotContain(Stacks, (await Script(c)).GetProperty("script").GetString()!.Split('\n').Where(l => l.Contains("mkdir", StringComparison.Ordinal)).Aggregate("", string.Concat), StringComparison.Ordinal);
+    }
+
+    /// <summary>A default the owner deleted is named by the setup endpoint, and reset brings it back.</summary>
+    [Fact]
+    public async Task ADeletedDefault_IsListedAsMissing_UntilItIsReset()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        await c.PutAsJsonAsync("/api/hub/session-skills/fyrd-mine", Skill());
+        Assert.Empty((await Script(c)).GetProperty("missingDefaults").EnumerateArray());
+        await c.DeleteAsync("/api/hub/session-skills/fyrd-mine");
+        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync($"/api/hub/session-skills/{Stacks}")).StatusCode);
+        Assert.Equal([Stacks], (await Script(c)).GetProperty("missingDefaults").EnumerateArray().Select(n => n.GetString()));
+        Assert.DoesNotContain("POST /repos/{owner}/{repo}/stacks", await BuilderPrompt(c), StringComparison.Ordinal);
+
+        Assert.Equal(HttpStatusCode.OK, (await c.PostAsync($"/api/hub/session-skills/{Stacks}/reset", null)).StatusCode);
+        Assert.Empty((await Script(c)).GetProperty("missingDefaults").EnumerateArray());
+        Assert.Contains("POST /repos/{owner}/{repo}/stacks", await BuilderPrompt(c), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The Controller message as the running server builds it (the ControllerManager from its own services, not only the
+    /// prompt endpoint): the Builder's block carries the session skills, whole or as lines with the confirmed hash.
+    /// </summary>
+    [Fact]
+    public async Task TheServersControllerMessage_CarriesTheSessionSkills_InTheModeTheConfirmationGives()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var controller = f.Services.GetRequiredService<ControllerManager>();
+        string BuilderBlock()
+        {
+            var message = controller.BuildPrompt().Prompt;
+            var start = message.IndexOf("<peasant-persona id=\"builder\"", StringComparison.Ordinal);
+            return message[start..message.IndexOf("</peasant-persona>", start, StringComparison.Ordinal)];
+        }
+
+        var inline = BuilderBlock();
+        Assert.EndsWith(">" + await BuilderPrompt(c), inline, StringComparison.Ordinal);
+        Assert.Contains("# Stacked pull requests\n", inline, StringComparison.Ordinal);
+        Assert.Contains("POST /repos/{owner}/{repo}/stacks", inline, StringComparison.Ordinal);
+        var inlineHash = controller.BuildPrompt().InstructionsHash;
+
+        var hash = (await Script(c)).GetProperty("hash").GetString()!;
+        Assert.Equal(HttpStatusCode.OK, (await Confirm(c, hash)).StatusCode);
+        var installed = BuilderBlock();
+        Assert.EndsWith(">" + await BuilderPrompt(c), installed, StringComparison.Ordinal);
+        Assert.Contains($"\n- `{Stacks}`: Stacked pull requests: ", installed, StringComparison.Ordinal);
+        Assert.Contains($"holds exactly `{hash}`", installed, StringComparison.Ordinal);
+        Assert.DoesNotContain("POST /repos/{owner}/{repo}/stacks", installed, StringComparison.Ordinal);
+        Assert.NotEqual(inlineHash, controller.BuildPrompt().InstructionsHash);
+
+        await c.PutAsJsonAsync("/api/hub/session-skills/fyrd-mine", Skill());
+        Assert.Contains("\n\n# Mine\n\nMy rule.\n\n# Stacked pull requests\n", BuilderBlock(), StringComparison.Ordinal);
     }
 
     [Theory]

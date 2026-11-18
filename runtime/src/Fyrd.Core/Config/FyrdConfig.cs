@@ -40,6 +40,8 @@ public sealed partial record FyrdConfig(
 
 public sealed class ConfigStore(FyrdPaths paths)
 {
+    private readonly object _gate = new();
+
     public FyrdConfig Load()
     {
         try
@@ -63,6 +65,20 @@ public sealed class ConfigStore(FyrdPaths paths)
         }
     }
 
+    /// <summary>
+    /// Reads the stored config, applies <paramref name="change"/> and saves the result, as one step: no other
+    /// <see cref="Update"/> or <see cref="Save"/> of this store comes between the read and the write. Returns what was saved.
+    /// </summary>
+    public FyrdConfig Update(Func<FyrdConfig, FyrdConfig> change)
+    {
+        lock (_gate)
+        {
+            var changed = change(Load());
+            Save(changed);
+            return changed;
+        }
+    }
+
     public void Save(FyrdConfig config)
     {
         if (config.SessionCap is < FyrdConfig.MinSessionCap or > FyrdConfig.MaxSessionCap)
@@ -80,6 +96,6 @@ public sealed class ConfigStore(FyrdPaths paths)
             throw new ArgumentException("EnvironmentId must match ^(env|ccpool)_[A-Za-z0-9]+$.", nameof(config));
         if (config.SessionSkillsHash is not null && !FyrdConfig.IsValidSessionSkillsHash(config.SessionSkillsHash))
             throw new ArgumentException("SessionSkillsHash must be a lowercase hex SHA-256.", nameof(config));
-        AtomicFile.Write(paths.ConfigFile, JsonSerializer.Serialize(config, Json.Options));
+        lock (_gate) AtomicFile.Write(paths.ConfigFile, JsonSerializer.Serialize(config, Json.Options));
     }
 }

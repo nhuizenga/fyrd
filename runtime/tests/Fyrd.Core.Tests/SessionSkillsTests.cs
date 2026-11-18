@@ -88,6 +88,77 @@ public sealed class SessionSkillsTests : IDisposable
     }
 
     [Fact]
+    public void MissingSeeds_AreTheDefaultsTheOwnerDeleted_AndResetBringsOneBack()
+    {
+        var store = Make();
+        Assert.Empty(store.MissingSeeds());
+        store.Save(Skill());
+        store.Delete("fyrd-stacks");
+        store.Delete("fyrd-events");
+        Assert.Equal(["fyrd-events", "fyrd-stacks"], store.MissingSeeds());
+        Assert.Equal(["fyrd-events", "fyrd-stacks"], Make().MissingSeeds());
+        store.Reset("fyrd-stacks");
+        Assert.Equal(["fyrd-events"], store.MissingSeeds());
+    }
+
+    /// <summary>
+    /// A seed removed from the repo: the unedited skill that came from it goes with it (an unedited skill follows its
+    /// seed), an edited one stays as the owner's own, and the name can be seeded again later.
+    /// </summary>
+    [Fact]
+    public void ARemovedSeed_TakesItsUneditedSkillWithIt_AndLeavesAnEditedOne()
+    {
+        var store = Make();
+        store.Save(store.Get("fyrd-events")! with { Body = "Mine." });
+        store.Save(Skill());
+        Directory.Delete(Path.Combine(_seeds, "fyrd-stacks"), true);
+        Directory.Delete(Path.Combine(_seeds, "fyrd-events"), true);
+
+        var again = Make();
+        Assert.Equal(["fyrd-events", "fyrd-mine"], again.List().Select(s => s.Name));
+        var kept = again.Get("fyrd-events")!;
+        Assert.Equal("Mine.", kept.Body);
+        Assert.False(kept.UpdateAvailable);
+        Assert.Empty(again.MissingSeeds());
+        Assert.Throws<KeyNotFoundException>(() => again.Reset("fyrd-stacks"));
+        Assert.Equal("fyrd-events\n", File.ReadAllText(Path.Combine(_home.Paths.HubSessionSkillsDir, ".seeded")));
+
+        // The seed comes back: it is seeded as new.
+        Seed("fyrd-stacks", "Stacks: use for a stack.", "builder", "# Stacks\n\nStack rules.");
+        Assert.Equal("# Stacks\n\nStack rules.", Make().Get("fyrd-stacks")!.Body);
+    }
+
+    /// <summary>A seed that is there but no longer a valid skill removes nothing; a skill the owner deleted has nothing to remove.</summary>
+    [Fact]
+    public void ASeedThatBecameInvalid_OrWhoseSkillTheOwnerDeleted_RemovesNothing()
+    {
+        var store = Make();
+        store.Delete("fyrd-events");
+        Seed("fyrd-stacks", "Stacks: use for a stack.", "", "# Stacks\n\nStack rules.");
+        Directory.Delete(Path.Combine(_seeds, "fyrd-events"), true);
+        var again = Make();
+        Assert.Equal(["fyrd-stacks"], again.List().Select(s => s.Name));
+        Assert.Equal("# Stacks\n\nStack rules.", again.Get("fyrd-stacks")!.Body);
+    }
+
+    /// <summary>A quoted description (valid YAML when it holds ": ") is read without its quotes, as the Controller skills' are.</summary>
+    [Fact]
+    public void ParseSeed_ReadsAQuotedDescription_WithoutItsQuotes()
+    {
+        var quoted = SessionSkills.ParseSeed("fyrd-q", "---\nname: fyrd-q\ndescription: \"Stacks: say \\\"when\\\" and C:\\\\dir.\"\nroles: builder, monitor\n---\r\n# Q\r\n\r\nBody.\r\n")!;
+        Assert.Equal("Stacks: say \"when\" and C:\\dir.", quoted.Description);
+        Assert.Equal(["builder", "monitor"], quoted.Roles);
+        Assert.Equal("# Q\n\nBody.", quoted.Body);
+        // What the script writes for a session reads back as the same description.
+        Assert.True(FrontMatter.TryParse(SessionSkillScript.SkillFile(quoted), out var fields, out var body));
+        Assert.Equal(quoted.Description, fields["description"]);
+        Assert.Equal(quoted.Body, body);
+        var plain = SessionSkills.ParseSeed("fyrd-q", "---\ndescription: Stacks: plain \"inner\" quotes.\nroles: builder\n---\nBody.")!;
+        Assert.Equal("Stacks: plain \"inner\" quotes.", plain.Description);
+        Assert.Null(SessionSkills.ParseSeed("fyrd-q", "no front matter"));
+    }
+
+    [Fact]
     public void OwnerSkill_IsSaved_HasNoSeed_AndCannotBeReset()
     {
         var store = Make();
@@ -156,6 +227,9 @@ public sealed class SessionSkillsTests : IDisposable
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("two\nlines")]
+    [InlineData("two\u2028lines")]
+    [InlineData("two\u2029paragraphs")]
+    [InlineData("next\u0085line")]
     public void Save_RejectsAnEmptyOrMultiLineDescription(string description) =>
         Assert.Throws<ArgumentException>(() => Make().Save(Skill(description: description)));
 
@@ -238,11 +312,30 @@ public sealed class SessionSkillsTests : IDisposable
         var text = SessionSkills.Compose(Builder, skills, installed: true);
         Assert.Equal(
             "BUILDER-DEF\n\n# Session skills\n\n"
-            + "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. If the skill is not in your skill list, stop and ask the owner.\n\n"
+            + "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
+            + $"Before the first load, check once that the file `/root/.claude/fyrd-session-skills/hash` holds exactly `{SessionSkills.Hash(skills)}`. "
+            + "If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.\n\n"
             + "- `fyrd-a`: First: use for one.\n"
             + "- `fyrd-b`: Second: use for two.",
             text);
         Assert.DoesNotContain("Two.", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The hash a session checks is the hash of every skill, not only its role's: it is what the setup script writes
+    /// to its hash file, and what the owner confirmed.
+    /// </summary>
+    [Fact]
+    public void Compose_Installed_NamesTheHashOfAllSkills_WhichIsTheOneTheScriptWrites()
+    {
+        var skills = new[] { Skill("fyrd-a", "First: use for one.", "One."), Skill("fyrd-m", "M.", "Monitor only.", "monitor") };
+        var hash = SessionSkills.Hash(skills);
+        var text = SessionSkills.Compose(Builder, skills, installed: true);
+        Assert.Contains($"check once that the file `{SessionSkillScript.HashFile}` holds exactly `{hash}`.", text, StringComparison.Ordinal);
+        Assert.Contains($"[ \"$fyrd_ok\" = 1 ] && printf '%s\\n' {hash} > \"$fyrd_state/hash\"", SessionSkillScript.Render(skills), StringComparison.Ordinal);
+        Assert.DoesNotContain("fyrd-m", text, StringComparison.Ordinal);
+        // Inline text names no hash: nothing in the environment is relied on.
+        Assert.DoesNotContain(hash, SessionSkills.Compose(Builder, skills, installed: false), StringComparison.Ordinal);
     }
 
     [Fact]

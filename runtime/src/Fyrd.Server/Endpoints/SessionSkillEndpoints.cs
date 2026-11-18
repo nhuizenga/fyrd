@@ -32,14 +32,12 @@ internal static class SessionSkillEndpoints
             var current = SessionSkills.Hash(skills.List());
             if (body!.Hash != current)
                 return Results.Problem("The session skills changed after this script was made. Copy the current script, paste it, then confirm.", statusCode: StatusCodes.Status409Conflict);
-            config.Save(config.Load() with { SessionSkillsHash = current });
-            return Results.Ok(State(skills, config.Load()));
+            return Results.Ok(State(skills, config.Update(c => c with { SessionSkillsHash = current })));
         }));
 
         group.MapDelete("/setup-script/confirm", (SessionSkills skills, ConfigStore config) => ApiErrors.Run(() =>
         {
-            config.Save(config.Load() with { SessionSkillsHash = null });
-            return Results.Ok(State(skills, config.Load()));
+            return Results.Ok(State(skills, config.Update(c => c with { SessionSkillsHash = null })));
         }));
 
         // The onboarding guide, read from the repo's docs so the console shows the text that ships with this version.
@@ -86,6 +84,8 @@ internal static class SessionSkillEndpoints
             confirmedHash = config.SessionSkillsHash,
             environmentId = config.EnvironmentId,
             skills = list.Select(s => s.Name),
+            // Defaults the owner deleted: POST /{name}/reset brings one back.
+            missingDefaults = skills.MissingSeeds(),
             script = SessionSkillScript.Render(list),
             skillsDir = SessionSkillScript.SkillsDir,
             hashFile = SessionSkillScript.HashFile,

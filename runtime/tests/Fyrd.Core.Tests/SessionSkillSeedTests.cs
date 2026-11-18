@@ -7,7 +7,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in session skill seeds under <c>skills/session</c>, and the Builder persona they were cut from.</summary>
 public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposable
 {
-    private static readonly string[] Names = ["fyrd-pull-request-events", "fyrd-stacked-pull-requests"];
+    private static readonly string[] Names = ["fyrd-stacked-pull-requests"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -35,7 +35,6 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// <summary>A description opens with the name of the section the skill holds (the persona refers to it by that name) and says when to load it.</summary>
     [Theory]
     [InlineData("fyrd-stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
-    [InlineData("fyrd-pull-request-events", "Pull request events", "before you post your review in step 7")]
     public void EachDescription_NamesItsSection_AndSaysWhenToLoadIt(string name, string section, string when)
     {
         var skill = Skills().Single(s => s.Name == name);
@@ -52,7 +51,6 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("fyrd-pull-request-events", 160)]
     [InlineData("fyrd-stacked-pull-requests", 520)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
@@ -76,17 +74,25 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var d = Builder().Definition;
         foreach (var gone in new[]
         {
-            "# Stacked pull requests", "# Pull request events", "POST /repos/{owner}/{repo}/stacks", "**Moved work.**",
-            "authored by you: it is not new work", "unsubscribe_pr_activity` for it", "add the body the worker below returned",
+            "# Stacked pull requests", "POST /repos/{owner}/{repo}/stacks", "**Moved work.**", "add the body the worker below returned",
             "validate each changed PR once",
         })
             Assert.DoesNotContain(gone, d, StringComparison.Ordinal);
         // What every Builder needs on every task stays.
-        foreach (var kept in new[] { "# Your job", "# Build rules", "# Pull request hygiene", "# Base branch", "# Persona subagents", "# Workers", "# Working in Fyrd", "# Who is talking to you", "# Memory" })
+        foreach (var kept in new[] { "# Your job", "# Build rules", "# Pull request hygiene", "# Base branch", "# Persona subagents", "# Pull request events", "# Workers", "# Working in Fyrd", "# Who is talking to you", "# Memory" })
             Assert.Contains(kept, d, StringComparison.Ordinal);
         Assert.Contains("use a stack of PRs (see Stacked pull requests)", d, StringComparison.Ordinal);
         Assert.Contains("or a native stack of draft PRs (see Stacked pull requests)", d, StringComparison.Ordinal);
-        Assert.Contains("it comes back to you as an event (see Pull request events)", d, StringComparison.Ordinal);
+        // Every build reaches step 7 and gets pull request events, so those rules are no skill: they stay in the persona.
+        foreach (var rule in new[]
+        {
+            "# Pull request events\n\n"
+            + "- The review you post yourself in step 7 comes back as a review-comment event authored by you: it is not new work, so don't start a worker for it. Act only on comments and reviews from others.\n"
+            + "- Review comments and failing checks that reach you after review are work: start a fresh worker to fix them, run the tests and push, validate again, then update the PR body and reply on each thread as Pull request hygiene says. A fix made after your report is validated but not re-reviewed unless the owner asks; say in your reply that the new head is unreviewed. Never resolve a reviewer's thread for them.\n"
+            + "- When a PR is merged or closed, call `mcp__claude-code-remote__unsubscribe_pr_activity` for it. When every PR is merged or closed, stop.\n\n# Workers",
+            "`event: COMMENT`; never approve or request changes). Then start a fresh worker",
+        })
+            Assert.Contains(rule, d, StringComparison.Ordinal);
         Assert.Contains("Never run two workers on the same branch.", d, StringComparison.Ordinal);
     }
 
@@ -110,14 +116,19 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
             "- Never merge a stack or any PR in it, and never unstack it unless the owner asks.",
         })
             Assert.Contains(rule, stacks, StringComparison.Ordinal);
+    }
 
-        var events = Skills().Single(s => s.Name == "fyrd-pull-request-events").Body;
-        Assert.Equal(
-            "# Pull request events\n\n"
-            + "- The review you post yourself in step 7 comes back as a review-comment event authored by you: it is not new work, so don't start a worker for it. Act only on comments and reviews from others.\n"
-            + "- Review comments and failing checks that reach you after review are work: start a fresh worker to fix them, run the tests and push, validate again, then update the PR body and reply on each thread as Pull request hygiene says. A fix made after your report is validated but not re-reviewed unless the owner asks; say in your reply that the new head is unreviewed. Never resolve a reviewer's thread for them.\n"
-            + "- When a PR is merged or closed, call `mcp__claude-code-remote__unsubscribe_pr_activity` for it. When every PR is merged or closed, stop.",
-            events);
+    /// <summary>The seed files are valid YAML front matter: a description that holds ": " is a double-quoted scalar.</summary>
+    [Fact]
+    public void EverySeedFile_QuotesADescriptionThatHoldsAColon()
+    {
+        foreach (var name in Names)
+        {
+            var line = File.ReadAllLines(Path.Combine(RepoSeeds.Dir("skills", "session"), name, "SKILL.md")).Single(l => l.StartsWith("description:", StringComparison.Ordinal));
+            var value = line["description:".Length..].Trim();
+            Assert.True(!value.Contains(": ", StringComparison.Ordinal) || (value.StartsWith('"') && value.EndsWith('"')), $"{name}: quote the description, it holds \": \".");
+            Assert.DoesNotContain("\"", Skills().Single(s => s.Name == name).Description, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -135,6 +146,8 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without a confirmed setup script every rule is inline; with one, the
     /// skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
+    private const int InstalledBudget = 3930;
+
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
     {
@@ -144,8 +157,10 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var installed = SessionSkills.Compose(builder, skills, installed: true);
         output.WriteLine($"builder persona {Words(builder.Definition)} words; with session skills inline {Words(inline)}, installed {Words(installed)}");
         Assert.Equal(Words(builder.Definition) + skills.Sum(s => Words(s.Body)), Words(inline));
-        Assert.True(Words(installed) <= 3800, $"The Builder's prompt with installed session skills is {Words(installed)} words, over the budget of 3800.");
-        Assert.Contains("load its skill with the Skill tool. If the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
+        Assert.True(Words(installed) <= InstalledBudget, $"The Builder's prompt with installed session skills is {Words(installed)} words, over the budget of {InstalledBudget}.");
+        Assert.True(Words(installed) < Words(inline));
+        Assert.Contains("load its skill with the Skill tool. ", installed, StringComparison.Ordinal);
+        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds exactly `{SessionSkills.Hash(skills)}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
         foreach (var s in skills)
         {
             Assert.Contains($"\n- `{s.Name}`: {s.Description}", installed, StringComparison.Ordinal);
