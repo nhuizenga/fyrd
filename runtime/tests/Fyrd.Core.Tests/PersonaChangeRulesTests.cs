@@ -137,6 +137,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "tell registering new code from widening",
             "a rule the PR body's list missed",
             "only where the body has such a list",
+            "between two rules where neither is nearer",
             "doesn't show the owner settled",
             "earlier recorded decision",
             "that the PR body doesn't justify",
