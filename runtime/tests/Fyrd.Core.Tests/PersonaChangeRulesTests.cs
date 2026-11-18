@@ -45,9 +45,10 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "in each directory down to the files you change",
             "the guards that encode rules",
             "by name too",
-            "a guard that fails is a rule you missed",
+            "before you return: a guard that fails is a rule you missed",
             "a start, not the limit",
             "A written rule beats a precedent",
+            "with another rule where neither is nearer",
             "is a question for the owner",
             "return `blocked`",
             "earlier recorded decision",
@@ -74,9 +75,10 @@ public sealed class PersonaChangeRulesTests : IDisposable
             Assert.InRange(d.IndexOf(rule, StringComparison.Ordinal), d.IndexOf("# Build rules", StringComparison.Ordinal), hygiene);
         // The lists survive fix rounds and a stack, and reach the report.
         ContainsAll(d,
-            "add the PR's current body to the brief",
-            "the body of the PR below",
-            "keeping the earlier rules and guards that still hold",
+            "add its PR's current body to the brief",
+            "add the body the worker below returned",
+            "lists only the rules and guards its own diff touches",
+            "keeping the earlier rules, guards, settled conflicts and exceptions that still hold",
             "the repo rules applied, each guard changed");
     }
 
@@ -100,6 +102,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
         ContainsAll(d,
             "# Pull request hygiene",
             "**Body matches the diff.**",
+            "carries the worker's rules applied",
             "**Moved work.**",
             "both PR bodies",
             "**Current head.**",
