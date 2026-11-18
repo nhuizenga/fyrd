@@ -16,9 +16,17 @@ public sealed record SubagentPersonaText(string Id, string? For, string Text, bo
 /// <para>
 /// Each variant is a keep-list, applied to the definition by its <c># </c> headings, so the store, the console editor
 /// and the seed hashes keep working on whole personas. When the definition lacks something the list needs (the owner
-/// renamed a heading in the console), the variant is the whole definition: a longer brief, never a missing rule. That
-/// fallback, and the "say which and ask" in the Inputs rule, are why the coordinators still follow the pasted text with
-/// a line telling the subagent to ignore any instruction to ask the owner or post.
+/// renamed a heading or a bullet in the console, or moved or reworded the reviewer's rule that a review changes and
+/// posts nothing), the variant is the whole definition: a longer brief, never a missing rule. The Untrusted content
+/// rule is required of the investigator, whose persona has one, and optional for the validator and the reviewer,
+/// whose personas don't. That fallback, and the "say which and ask" in the Inputs rule, are why the coordinators still
+/// follow the pasted text with a line telling the subagent to ignore any instruction to ask the owner or post.
+/// </para>
+/// <para>
+/// A kept bullet is cut whole: it runs to the next top-level bullet or unindented line, across blank lines while the
+/// text after them is still indented. Code fences are read as CommonMark does (three or more backticks or tildes,
+/// closed only by a fence of the same character that is at least as long), so a <c># </c> line inside one is not a heading.
+/// A persona whose definition is empty has no variant.
 /// </para>
 /// </summary>
 public static class SubagentPersonas
@@ -36,33 +44,46 @@ public static class SubagentPersonas
     /// <summary>One paragraph of a section, without the section's heading.</summary>
     private sealed record Paragraph(string Heading, string StartsWith) : Keep;
 
+    /// <summary>
+    /// Adds no text: requires that a paragraph of what the variant has kept so far starts with this. Without one the
+    /// variant is the whole definition.
+    /// </summary>
+    private sealed record Rule(string StartsWith) : Keep;
+
     /// <summary>A section's heading with only the named bullets. A missing optional bullet is left out.</summary>
     private sealed record Bullets(string Heading, string[] Required, string[] Optional) : Keep;
 
     private sealed record Variant(string Id, string? For, Keep[] Keeps);
 
-    // Every persona has the Inputs rule; only some have an Untrusted content rule.
+    // Every persona has the Inputs rule. The validator and reviewer personas have no Untrusted content rule, so for
+    // them it is kept when present; the investigator's has one, so there it is required like any other part.
     private static readonly Keep Rules = new Bullets(WorkingInFyrd, ["Inputs"], ["Untrusted content"]);
+    private static readonly Keep InvestigatorRules = new Bullets(WorkingInFyrd, ["Inputs", "Untrusted content"], []);
+
+    // The rule that a review changes and posts nothing closes the reviewer's Reviewing a plan section but covers both kinds of review.
+    private const string ReviewChangesNothing = "Whoever does the reviewing";
 
     private static readonly Variant[] Variants =
     [
         new("validator", null, [new Intro(), new Section("The check"), Rules]),
-        // The rule that a review changes and posts nothing closes the reviewer's Reviewing a plan section but covers both kinds of review.
-        new("reviewer", "builder", [new Intro(), new Section("Reviewing code"), new Paragraph("Reviewing a plan", "Whoever does the reviewing"), Rules]),
-        new("reviewer", "researcher", [new Intro(), new Section("Reviewing a plan"), Rules]),
-        new("investigator", null, [new Intro(), new Section("The investigation"), new Section("As a subagent"), Rules]),
+        new("reviewer", "builder", [new Intro(), new Section("Reviewing code"), new Paragraph("Reviewing a plan", ReviewChangesNothing), Rules]),
+        new("reviewer", "researcher", [new Intro(), new Section("Reviewing a plan"), new Rule(ReviewChangesNothing), Rules]),
+        new("investigator", null, [new Intro(), new Section("The investigation"), new Section("As a subagent"), InvestigatorRules]),
     ];
 
-    /// <summary>The subagent variants of the personas present, in a fixed order: validator, reviewer (builder, researcher), investigator.</summary>
+    /// <summary>
+    /// The subagent variants of the personas present, in a fixed order: validator, reviewer (builder, researcher),
+    /// investigator. A persona that is missing or whose definition is empty has none.
+    /// </summary>
     public static IReadOnlyList<SubagentPersonaText> All(IReadOnlyList<HubPersona> personas)
     {
         var all = new List<SubagentPersonaText>();
         foreach (var v in Variants)
         {
             var persona = personas.FirstOrDefault(p => p.Id == v.Id);
-            if (persona is null) continue;
-            var slim = Cut(persona.Definition ?? "", v.Keeps);
-            all.Add(new SubagentPersonaText(v.Id, v.For, slim ?? persona.Definition ?? "", slim is not null));
+            if (persona is null || string.IsNullOrWhiteSpace(persona.Definition)) continue;
+            var slim = Cut(persona.Definition, v.Keeps);
+            all.Add(new SubagentPersonaText(v.Id, v.For, slim ?? persona.Definition, slim is not null));
         }
         return all;
     }
@@ -81,11 +102,12 @@ public static class SubagentPersonas
                 Paragraph p => sections.TryGetValue(p.Heading, out var body)
                     ? Paragraphs(body).FirstOrDefault(x => x.StartsWith(p.StartsWith, StringComparison.Ordinal))
                     : null,
+                Rule r => parts.SelectMany(Paragraphs).Any(x => x.StartsWith(r.StartsWith, StringComparison.Ordinal)) ? "" : null,
                 Bullets b => sections.TryGetValue(b.Heading, out var body) ? Pick(b, body) : null,
                 _ => null,
             };
             if (part is null) return null;
-            parts.Add(part);
+            if (part.Length > 0) parts.Add(part);
         }
         return string.Join("\n\n", parts);
     }
@@ -114,11 +136,15 @@ public static class SubagentPersonas
     private static bool HasLabel(string bullet, string label) =>
         bullet.StartsWith($"- **{label}**", StringComparison.Ordinal) || bullet.StartsWith($"- **{label}.**", StringComparison.Ordinal);
 
-    /// <summary>The top-level bullets of a section body, each with its continuation lines.</summary>
+    /// <summary>
+    /// The top-level bullets of a section body, each with its continuation lines. A bullet stays open across blank
+    /// lines while the next line with text is indented; the next top-level bullet or unindented line ends it.
+    /// </summary>
     private static List<string> BulletList(string body)
     {
         var bullets = new List<string>();
         List<string>? current = null;
+        var blanks = new List<string>();
         foreach (var line in body.Split('\n'))
         {
             if (line.StartsWith("- ", StringComparison.Ordinal))
@@ -126,8 +152,16 @@ public static class SubagentPersonas
                 Flush();
                 current = [line];
             }
-            else if (current is not null && line.Length > 0 && char.IsWhiteSpace(line[0]) && line.Trim().Length > 0)
+            else if (line.Trim().Length == 0)
+            {
+                if (current is not null) blanks.Add(line);
+            }
+            else if (current is not null && char.IsWhiteSpace(line[0]))
+            {
+                current.AddRange(blanks);
+                blanks.Clear();
                 current.Add(line);
+            }
             else
                 Flush();
         }
@@ -138,6 +172,7 @@ public static class SubagentPersonas
         {
             if (current is not null) bullets.Add(string.Join("\n", current).TrimEnd());
             current = null;
+            blanks.Clear();
         }
     }
 
@@ -146,7 +181,8 @@ public static class SubagentPersonas
 
     /// <summary>
     /// Splits a definition at its level-one headings (a line starting <c># </c> outside a code fence). A heading that
-    /// appears twice keeps its first section.
+    /// appears twice keeps its first section. A fence that is never closed runs to the end, so the headings after it
+    /// are not sections and the variants that need them fall back to the whole definition.
     /// </summary>
     private static (string Intro, Dictionary<string, string> Sections) Split(string definition)
     {
@@ -154,11 +190,18 @@ public static class SubagentPersonas
         var intro = "";
         string? heading = null;
         var lines = new List<string>();
-        var fenced = false;
+        (char Mark, int Length)? open = null;
         foreach (var line in definition.Replace("\r\n", "\n").Split('\n'))
         {
-            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal)) fenced = !fenced;
-            if (!fenced && line.StartsWith("# ", StringComparison.Ordinal))
+            var fence = Fence(line);
+            if (open is { } o)
+            {
+                // Only a fence of the same character, at least as long and with nothing after it, closes.
+                if (fence is { } f && f.Mark == o.Mark && f.Length >= o.Length && f.After.Trim().Length == 0) open = null;
+            }
+            else if (fence is { } f && (f.Mark == '~' || !f.After.Contains('`')))
+                open = (f.Mark, f.Length); // a backtick fence has no backtick after its opening run
+            else if (line.StartsWith("# ", StringComparison.Ordinal))
             {
                 Close();
                 heading = line[2..].Trim();
@@ -176,5 +219,18 @@ public static class SubagentPersonas
             if (heading is null) intro = text;
             else sections.TryAdd(heading, text);
         }
+    }
+
+    /// <summary>
+    /// The run of three or more backticks or tildes a line starts with after its indentation: the character, the
+    /// run's length and what follows it. Null when the line starts with no such run.
+    /// </summary>
+    private static (char Mark, int Length, string After)? Fence(string line)
+    {
+        var t = line.TrimStart();
+        if (t.Length < 3 || (t[0] != '`' && t[0] != '~')) return null;
+        var n = 0;
+        while (n < t.Length && t[n] == t[0]) n++;
+        return n >= 3 ? (t[0], n, t[n..]) : null;
     }
 }

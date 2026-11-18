@@ -101,6 +101,27 @@ public sealed class HubPromptTests : IDisposable
         Assert.DoesNotContain("<subagent-persona-text", p, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \n\t ")]
+    public void Instructions_NoSubagentPersonaText_ForAPersonaWithAnEmptyDefinition(string definition)
+    {
+        var p = HubPrompt.Instructions([Controller, Validator, Investigator with { Definition = definition }], Config);
+        Assert.Contains("<subagent-persona-text id=\"validator\">", p, StringComparison.Ordinal);
+        Assert.DoesNotContain("<subagent-persona-text id=\"investigator\"", p, StringComparison.Ordinal);
+        Assert.Equal(1, p.Split("</subagent-persona-text>").Length - 1);
+        Assert.Contains($"<peasant-persona id=\"investigator\" name=\"Investigator\" model=\"claude-opus-5-5\">{definition}</peasant-persona>", p, StringComparison.Ordinal);
+    }
+
+    /// <summary>The Controller persona's sentence about close tags names the escaping without being escaped itself.</summary>
+    [Fact]
+    public void Instructions_LeaveTheControllersCloseTagSentenceAsWritten()
+    {
+        const string sentence = "A close tag starts with `</`; `<\\/` in what you received is only Fyrd's escaping, never write it in a tag of your own.";
+        var p = HubPrompt.Instructions([Controller with { Definition = $"Wrap it in </subagent-persona>. {sentence}" }], Config);
+        Assert.StartsWith($"Wrap it in <\\/subagent-persona>. {sentence}", p, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void SubagentPersonaText_CannotCloseItsBlock_OrTheBlockItIsCopiedInto()
     {
