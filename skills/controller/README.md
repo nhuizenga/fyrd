@@ -6,22 +6,20 @@ Five skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build
 
 Nothing is uploaded to claude.ai. The Fyrd service reads `skills/controller/*/SKILL.md` and embeds each skill in the Controller's message as a `<controller-skill>` block, after the peasant personas. It reads the files on every poll pass, so a `git pull` is enough.
 
-The first time a service that has this feature polls an already-adopted Controller, it sends the instructions once (there is no stored hash yet); that is how existing Controllers receive the inline skills. After that, when a skill, a persona, or the Controller settings change, the service re-sends the instructions to the live Controller as soon as it is idle. Persona edits made in Settings reach the Controller the same way. The message says the latest instructions replace earlier ones.
+The first time a service that has this feature polls an existing Controller, it sends the instructions once (there is no stored hash yet); that is how existing Controllers receive the inline skills. After that, when a skill, a persona, or the Controller settings change, the service re-sends the instructions to the live Controller as soon as it is idle. Persona edits made in Settings reach the Controller the same way. The message says the latest instructions replace earlier ones.
 
 ## One-time cleanup
 
 If you uploaded the `fyrd-*` skills to claude.ai earlier, remove the uploaded fyrd-* skills: open Settings > Capabilities > Skills and delete (or disable) `fyrd-research`, `fyrd-build`, `fyrd-peasant` and `fyrd-watch`. Until you do, a stale copy stays visible to every session. The Controller prefers the inline blocks when names clash.
 
-## Create the Controller (manual step)
+## Create the Controller
 
-Fyrd doesn't create the Controller. Sessions Fyrd creates through the API get no claude.ai connectors, so a Fyrd-made Controller would have no `claude-code-remote` tools and couldn't start peasants. A session you create by hand on claude.ai has them.
+In the Fyrd console open Sessions and choose **Create Controller**. Fyrd runs your signed-in `claude` CLI as `claude --cloud controller` to start a new cloud session at https://claude.ai/code, reads the new session's id from what the CLI prints, then sends the whole opening prompt (instructions, skills, settings and memory) to it with `claude -p --cloud <id>`, so the session is your own and reads the prompt as yours. The CLI only creates a session from an interactive terminal, so Fyrd runs it in a hidden pseudo terminal (ConPTY on Windows). To check that part on your Windows machine without creating a session, run `pwsh ./scripts/test-conpty.ps1`. It runs from `<FYRD_HOME>/hub/controller-launch`, which isn't a git repository, so the session needs no repo and starts empty. It runs in your CLI's default cloud environment: the hub's `environment_id` setting is not passed to the CLI (`--environment` only takes self-hosted `ccpool_` environments).
 
-1. Open https://claude.ai/code and start a new session. It needs no repo.
-2. Copy its session id (the `session_…` part of its URL).
-3. In the Fyrd console open Sessions, paste the id into the **Adopt Controller** panel and choose Adopt.
-
-Fyrd sends the Controller its instructions, skills, settings and memory as the first message.
+- **The session's first message is just "controller":** that is the description the CLI starts it with. The opening prompt that follows says so.
+- **First-run prompts:** if the CLI asks whether to trust `controller-launch`, or asks first-run setup questions, Fyrd stops it and says so. Open a terminal in that folder, run `claude`, answer the prompt once, type `/exit`, and create the Controller again.
+- **If the prompt isn't delivered:** the session was still created and Fyrd keeps it. Choose **Create Controller** again: Fyrd resends the prompt to that same session instead of creating another one.
 
 ## After edits
 
-Skill and persona edits reach a live Controller by themselves. Choose **Replace Controller** next to Open Controller only if you want a fresh conversation: that archives the current Controller. Then create a fresh session on claude.ai and adopt it as above.
+Skill and persona edits reach a live Controller by themselves. Choose **Replace Controller** next to Open Controller only if you want a fresh conversation: that archives the current Controller. Then choose **Create Controller** as above.

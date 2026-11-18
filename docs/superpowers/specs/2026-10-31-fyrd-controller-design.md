@@ -57,7 +57,7 @@ Personas are managed in the console under **Settings › Personas** (owner's dec
 - **Seeding:** this work adds the six personas to Settings: Controller, Researcher, Builder, Reviewer, Validator and Monitor. Their starting text comes from the owner's `personas/controller.md` (hardened per §11) and from new drafts. Builder is adapted from `implementer.md`. The pipeline's persona files are not used here. *(Claude's call: the seed text is checked in, for example under `personas/hub/`, and copied into `~/.fyrd` only when a persona doesn't exist there yet.)*
 - **Model:** `create_session` gets the persona's model.
 - **Deletion:** the Controller can't be deleted.
-- **Changes** apply to sessions created afterwards. A change to the Controller persona applies after "Replace Controller" and adopting a fresh session.
+- **Changes** apply to sessions created afterwards. A change to the Controller persona applies after "Replace Controller" and creating a new one.
 
 Each peasant persona tells the session to:
 1. Read its inputs. They are GitHub file URLs or claude.ai artifact links (owner's decision). Then do the task it was given, and attach any repo it lacks with `add_repo` (`access: "push"` when it must commit), clone it, then call `register_repo_root`.
@@ -81,6 +81,8 @@ Slash commands such as `/clear` can't be triggered through any API (spike, 5 run
 - **Finding peasants:** `list_sessions` can't filter by tag for in-session callers. So the Controller pages `list_sessions` (`mine: true`) and matches titles with a role prefix. *(Claude's call.)*
 
 ### The Controller itself
+
+> **Superseded (2026-11-17, PR #52).** Fyrd now creates the Controller itself through the owner's signed-in `claude` CLI (`claude --cloud controller` in a pseudo terminal, with the new session id read from its output, then the whole opening prompt sent with `claude -p --cloud <id>` on stdin), and the paste-an-id adopt flow below is removed. See `skills/controller/README.md`. The adoption notes are kept as history.
 
 > **Adopted, not created (2026-10-31).** Sessions Fyrd creates through the API get no claude.ai connectors (its OAuth client's `mcp_connector_ids` are dropped), so a Fyrd-made Controller would have no `claude-code-remote` tools and couldn't create sessions. A session made by hand on claude.ai has every connector (hub spike, "Connectors"). So the owner creates the Controller and Fyrd adopts it. **To confirm in the smoke run:** that peasants the Controller creates with `create_session` inherit its connectors.
 
