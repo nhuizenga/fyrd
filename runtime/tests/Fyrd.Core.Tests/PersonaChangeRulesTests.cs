@@ -40,30 +40,43 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "into the brief of every worker that writes code",
             "Build rules below copied into its brief",
             "**Repo rules first.**",
+            "list the kinds of thing the change adds or alters",
             "not the whole repo",
             "in each directory down to the files you change",
             "the guards that encode rules",
+            "by name too",
+            "a guard that fails is a rule you missed",
+            "a start, not the limit",
             "A written rule beats a precedent",
             "is a question for the owner",
+            "return `blocked`",
+            "earlier recorded decision",
             "`Rules applied:`",
+            "`none found`",
             "**Guards are rules.**",
+            "is following the rule",
+            "is changing the rule",
             "`Guards changed:`",
+            "each as registered or widened",
             "**True at the head.**",
             "each PR carries what it uses",
+            "nothing only a later PR uses",
             "**Run it for real.**",
             "never production",
             "a credential you merely found",
             "**PR body.**",
-            "the rules applied, each guard changed and why");
+            "the rules applied, each guard changed and why",
+            "each rule conflict the owner settled");
         Assert.True(d.IndexOf("# Build rules", StringComparison.Ordinal) < d.IndexOf("# Workers", StringComparison.Ordinal));
         // The worker rules sit in the section that is copied into briefs, before the coordinator-only hygiene.
         var hygiene = d.IndexOf("# Pull request hygiene", StringComparison.Ordinal);
         foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**" })
             Assert.InRange(d.IndexOf(rule, StringComparison.Ordinal), d.IndexOf("# Build rules", StringComparison.Ordinal), hygiene);
-        // The coordinator passes the lists on.
+        // The lists survive fix rounds and a stack, and reach the report.
         ContainsAll(d,
-            "You put the rules applied, the guards changed and the exceptions in the PR body and your report",
-            "carries the worker's rules applied and guards changed",
+            "add the PR's current body to the brief",
+            "the body of the PR below",
+            "keeping the earlier rules and guards that still hold",
             "the repo rules applied, each guard changed");
     }
 
@@ -77,8 +90,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "rate limit",
             "someone else's resource",
             "privileged identity",
-            "sensitive egress",
-            "earlier recorded decision");
+            "sensitive egress");
     }
 
     [Fact]
@@ -118,9 +130,14 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Repo rules.**",
             "derive the rules yourself",
             "in each directory down to the changed files",
+            "a possible guard change",
+            "tell registering new code from widening",
             "a rule the PR body's list missed",
-            "settled without the owner",
+            "only where the body has such a list",
+            "doesn't show the owner settled",
+            "earlier recorded decision",
             "that the PR body doesn't justify",
+            "duplicate a mechanism it already has",
             "that the change touches",
             "**Trust boundaries.**",
             "**Checks on the final value.**",
@@ -128,7 +145,6 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Authorization tests.**",
             "**Privileged identities.**",
             "**Egress and records.**",
-            "**Decisions.**",
             "**True at the head.**",
             "**Never run.**",
             "Never ask for a run against production",
@@ -150,7 +166,9 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "isn't in the repo at this commit",
             "each repo rule the PR body lists as applied",
             "the diff meets it as claimed",
+            "if the body lists none, say so",
             "named and justified in the PR body",
+            "needs no justification",
             "someone else's resource",
             "Never probe production",
             "governs every live run in this step too",
@@ -165,6 +183,8 @@ public sealed class PersonaChangeRulesTests : IDisposable
     {
         ContainsAll(Def("researcher"),
             "the repo's own rules for those areas and where each is written",
+            "at the root and down to the directories concerned",
+            "goes against an earlier recorded decision",
             "every conflict between a repo rule and the input",
             "names the repo rules that constrain each work item",
             "any guard it expects to change and why",
@@ -176,19 +196,21 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "runs the change live",
             "test or staging instance",
             "repo rules the plan breaks or doesn't name",
+            "derive them yourself, for the areas the plan touches",
             "that the owner didn't settle",
+            "contradicts an earlier recorded decision without the owner's decision",
             "design rationale the code will need");
     }
 
     [Fact]
     public void OneReposConventionsAreNotRulesOfTheirOwn()
     {
-        // A repo's conventions reach a session through that repo's rules, not through a catalogue in the personas.
+        // A repo's conventions reach a session through that repo's rules, not through a catalogue of rule headings in the personas.
         foreach (var id in new[] { "builder", "reviewer", "validator", "researcher" })
         {
             var d = Def(id);
-            foreach (var phrase in new[] { "Off by default", "off by default", "grandfathered", "backfilled", "Newest precedent", "Reuse first", "export and import", "environment variable", "sequence number" })
-                Assert.DoesNotContain(phrase, d, StringComparison.Ordinal);
+            foreach (var heading in new[] { "**Off by default.**", "**Newest precedent.**", "**Reuse first.**", "**Config.**", "**Migrations", "**Portability.**", "**Defaults.**", "**Widening.**" })
+                Assert.DoesNotContain(heading, d, StringComparison.Ordinal);
         }
     }
 
