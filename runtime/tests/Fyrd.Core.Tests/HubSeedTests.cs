@@ -355,7 +355,7 @@ public sealed class HubSeedTests : IDisposable
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
         var words = Get(id).Definition.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
-        Assert.True(words <= budget, $"{id}: {words} words, over the budget of {budget}");
+        Assert.True(words <= budget, $"{id}: {words} words, over the budget of {budget}. Tighten the persona, or raise its budget in this test on purpose (a guard change to list in the PR).");
     }
 
     [Fact]
