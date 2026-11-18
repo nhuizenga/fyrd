@@ -78,12 +78,14 @@ The web UI creates sessions with `POST /v1/code/sessions`, putting a `config` ob
 
 ## 4. Creating a session (verified)
 
+Fyrd's server no longer creates sessions through this endpoint: the Controller is created with the `claude` CLI, and the Controller creates the other sessions with its `create_session` tool. `CloudSessionClient.CreateAsync` is kept for the spike.
+
 `POST /v1/sessions`:
 
 ```json
 {
   "title": "<title>",
-  "tags": ["fyrd", "fyrd-role-<persona id>"],
+  "tags": ["fyrd-hub", "fyrd-role-<role>"],
   "environment_id": "env_… | ccpool_…",
   "events": [
     {"type":"event","data":{"type":"control_request","request_id":"set-mode-<uuid>",
@@ -103,7 +105,7 @@ The web UI creates sessions with `POST /v1/code/sessions`, putting a `config` ob
 
 - **Permission modes:** `default`, `plan`, `acceptEdits`, `dontAsk`, `bypassPermissions`, `auto`.
   - Without a mode event, a session stops at its first tool-permission prompt. The spike's q2 hit this.
-  - Fyrd always sends `auto`.
+  - `CloudSessionClient.CreateAsync` sends the mode event only when the request sets a mode. The Controller passes `permission_mode: "auto"` to `create_session`.
 - **Fields the CLI also sends** (seen in its create body; not used by Fyrd): `seed_bundle_file_id` (for uploads with no GitHub remote), `custom_system_prompt`, `max_turns`, `output_schema`, `correlation_id`.
 
 ## 5. The event stream (verified 2026-10-31)
