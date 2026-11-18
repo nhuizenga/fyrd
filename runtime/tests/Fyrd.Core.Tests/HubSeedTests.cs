@@ -135,6 +135,15 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains($"`{line}`", section, StringComparison.Ordinal);
     }
 
+    /// <summary>The Builder is told outright what its persona subagents don't do; asking the owner is the Builder's.</summary>
+    [Fact]
+    public void Builder_SaysAPersonaSubagentNeverAsksTheOwner()
+    {
+        var d = Get("builder").Definition;
+        var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
+        Assert.Contains("A persona subagent never asks the owner,", section, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Builder_PushesAsItGoes_AndKnowsItsBase()
     {
