@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine, sessionSkillsWarning } from "./lib.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -125,4 +125,31 @@ test("gitHubLine names the login, the error, or says not configured", () => {
   assert.equal(gitHubLine({ configured: false, login: null, error: null }), "GitHub: not configured");
   assert.equal(gitHubLine(undefined), "GitHub: not configured");
   assert.match(gitHubLine({ configured: true, login: null, error: "bad or expired" }), /bad or expired/);
+});
+
+test("sessionSkillsLine names the mode in one line", () => {
+  assert.equal(sessionSkillsLine({ mode: "inline" }), "Session skills: inline (no setup script confirmed)");
+  assert.equal(sessionSkillsLine({ mode: "installed" }), "Session skills: installed (sessions load them from the environment's setup script)");
+  assert.equal(sessionSkillsLine({ mode: "out-of-date" }),
+    "Session skills: out of date, so sessions get the inline text. Paste the new setup script (Settings, Session skills) and confirm.");
+  assert.equal(sessionSkillsLine(null), "Session skills: unknown (could not read them)");
+  for (const mode of ["inline", "installed", "out-of-date"]) assert.ok(!sessionSkillsLine({ mode }).includes("\n"));
+});
+
+test("sessionSkillsWarning speaks only when the pasted script is out of date", () => {
+  assert.equal(sessionSkillsWarning({ mode: "inline" }), null);
+  assert.equal(sessionSkillsWarning({ mode: "installed" }), null);
+  assert.equal(sessionSkillsWarning(null), null);
+  assert.match(sessionSkillsWarning({ mode: "out-of-date" }), /^Session skills: out of date.*Paste the new setup script/);
+});
+
+test("readSessionSkills reads the setup-script state, and gives null when it can't", async () => {
+  const urls = [];
+  const setup = { mode: "installed", hash: "h" };
+  const okFetch = async (url, init) => { urls.push(url); assert.ok(init.signal); return { ok: true, json: async () => setup }; };
+  assert.deepEqual(await readSessionSkills("http://127.0.0.1:4870", okFetch), setup);
+  assert.deepEqual(urls, ["http://127.0.0.1:4870/api/hub/session-skills/setup-script"]);
+  assert.equal(await readSessionSkills("http://x", async () => ({ ok: false, json: async () => ({}) })), null);
+  assert.equal(await readSessionSkills("http://x", async () => { throw new Error("timeout"); }), null);
+  assert.equal(await readSessionSkills("http://x", async () => ({ ok: true, json: async () => { throw new SyntaxError("not json"); } })), null);
 });

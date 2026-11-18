@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   runDir, readServerFile, writeServerFile, removeServerFile,
   isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState,
+  readSessionSkills, sessionSkillsLine, sessionSkillsWarning,
 } from "./lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,6 +82,8 @@ async function up() {
         writeServerFile(dir, info);
         console.log(`Fyrd running at ${urlOf(info)}`);
         if (tokenWarning()) console.log(tokenWarning());
+        const stale = sessionSkillsWarning(await readSessionSkills(urlOf(info)));
+        if (stale) console.log(stale);
         openBrowser(urlOf(info));
         return;
       }
@@ -109,9 +112,10 @@ async function status() {
     console.log("Fyrd is not running. Start it with /fyrd:up.");
     return;
   }
-  const state = await readHubState(urlOf(info));
+  const [state, skills] = await Promise.all([readHubState(urlOf(info)), readSessionSkills(urlOf(info))]);
   console.log(statusLine(urlOf(info), state));
   console.log(state ? gitHubLine(state.gitHub) : "GitHub: unknown (could not read hub state)");
+  console.log(sessionSkillsLine(skills));
 }
 
 const cmds = { up, down, status };
