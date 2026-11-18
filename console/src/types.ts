@@ -214,6 +214,8 @@ export interface SessionSkillSetup {
   confirmedHash: string | null;
   environmentId: string | null;
   skills: string[];
+  /** Defaults the owner deleted; resetting one by name brings it back. */
+  missingDefaults?: string[];
   /** The block to paste into the environment's setup script. */
   script: string;
   skillsDir: string;

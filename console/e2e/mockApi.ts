@@ -154,7 +154,7 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
     if (path === "/api/hub/session-skills") return route.fulfill({ json: [] });
     if (path === "/api/hub/session-skills/setup-script") {
       return route.fulfill({ json: {
-        mode: "inline", hash: "0".repeat(64), confirmedHash: null, environmentId: null, skills: [],
+        mode: "inline", hash: "0".repeat(64), confirmedHash: null, environmentId: null, skills: [], missingDefaults: [],
         script: "# >>> fyrd session skills >>>\n# <<< fyrd session skills <<<\n", skillsDir: "/root/.claude/skills", hashFile: "/root/.claude/fyrd-session-skills/hash",
       } });
     }
