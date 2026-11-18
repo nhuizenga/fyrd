@@ -4,7 +4,9 @@ Five skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build
 
 ## Delivery (automatic)
 
-Nothing is uploaded to claude.ai. The Fyrd service reads `skills/controller/*/SKILL.md` and embeds each skill in the Controller's message as a `<controller-skill>` block, after the peasant personas. It reads the files on every poll pass, so a `git pull` is enough.
+Nothing is uploaded to claude.ai. The Fyrd service reads `skills/controller/*/SKILL.md` and embeds each skill in the Controller's message as a `<controller-skill>` block, after the peasant personas and the subagent persona texts. It reads the files on every poll pass, so a `git pull` is enough.
+
+The same message carries one `<peasant-persona>` block per role with the whole persona, which the Controller copies into the `append_system_prompt` of a session of that role, and `<subagent-persona-text>` blocks (`validator`, `reviewer` once `for="builder"` and once `for="researcher"`, `investigator`). Those hold only the part of a persona that a subagent needs; the service cuts them from the stored persona by heading (`runtime/src/Fyrd.Core/Hub/SubagentPersonas.cs` has the keep-lists) each time it builds the message, and falls back to the whole persona when a heading it needs was renamed. The skills tell the Controller to copy them, not whole personas, into the `<subagent-persona>` blocks of a Builder, Researcher, Validator or Monitor.
 
 The first time a service that has this feature polls an existing Controller, it sends the instructions once (there is no stored hash yet); that is how existing Controllers receive the inline skills. After that, when a skill, a persona, or the Controller settings change, the service re-sends the instructions to the live Controller as soon as it is idle. Persona edits made in Settings reach the Controller the same way. The message says the latest instructions replace earlier ones.
 

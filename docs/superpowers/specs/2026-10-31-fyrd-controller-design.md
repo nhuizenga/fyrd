@@ -90,6 +90,7 @@ Slash commands such as `/clear` can't be triggered through any API (spike, 5 run
 - **Its instructions arrive as the first message**, not as `append_system_prompt`. On adoption the service sends a user message that starts with "You are the Fyrd Controller." and holds:
   - `controller.md` and `<hub-settings>`
   - every peasant persona's text, so the Controller can pass each one to `create_session`
+  - the subagent text of the validator, reviewer and investigator personas (see Delivery below)
   - shared memory and every role's memory, each in its own delimited block
 - **No Fyrd tags.** Fyrd can't tag a session it didn't create, so the poll fetches the Controller by its stored id and treats it as a hub session (role `controller`).
 - **Memory updates:** when a memory file changes, the service posts the changed memory to the Controller as a user message. The Controller uses the latest version for every peasant it creates after that.
@@ -152,6 +153,7 @@ The service polls every live `fyrd-hub` session's events for `fyrd-remember` blo
 
 - Peasants get `shared.md` and their role file inside `append_system_prompt` when they are created. The Controller copies them from its latest memory.
 - Live sessions are not updated (owner's choice).
+- **Subagent persona text.** A Builder runs the validator, reviewer and investigator personas as subagents in its own session, a Researcher the reviewer, a Validator and a Monitor the investigator. Their `append_system_prompt` carries those personas in `<subagent-persona id="…">` blocks, which the coordinator pastes into the subagent's brief. The blocks hold a cut of the persona, not all of it: the opening paragraph, the sections that describe the work and its findings (validator: The check; reviewer: Reviewing code for a Builder, Reviewing a plan for a Researcher, and in both the rule that a review changes and posts nothing; investigator: The investigation and As a subagent), and from Working in Fyrd the Inputs rule and, where the persona has one, the Untrusted content rule (owner's decision). A subagent has no workers, no owner turn and no memory, so the sections about those would only cost context. The service makes the cut by heading from the stored persona when it builds the Controller message and sends it as `<subagent-persona-text>` blocks (the reviewer's two marked `for="builder"` and `for="researcher"`), so Settings, seeding and the seed hashes still work on whole personas. If a heading the cut needs is gone (renamed in Settings), that block holds the whole persona instead. The whole personas stay in the message too, because the owner still starts standalone Validators, Reviewers and Investigators (owner's decision).
 
 ### Console
 
