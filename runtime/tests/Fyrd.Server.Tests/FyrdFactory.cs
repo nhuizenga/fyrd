@@ -16,6 +16,9 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
 
     public TempHome Home { get; }
 
+    /// <summary>Set before the first request to point the server at another docs folder.</summary>
+    public string? DocsDir { get; init; }
+
     public FakeCloudSessions Cloud { get; } = new();
 
     public FakeGitHub GitHub { get; } = new();
@@ -30,6 +33,7 @@ public sealed class FyrdFactory : WebApplicationFactory<Program>
         builder.UseSetting("Fyrd:DisableRunner", "true");
         builder.UseSetting("Fyrd:HubPersonasSeedDir", Path.Combine(RepoRoot(), "personas", "hub"));
         builder.UseSetting("Fyrd:SessionSkillsSeedDir", Path.Combine(RepoRoot(), "skills", "session"));
+        builder.UseSetting("Fyrd:DocsDir", DocsDir ?? Path.Combine(RepoRoot(), "docs"));
         builder.ConfigureTestServices(s =>
         {
             s.RemoveAll<ICloudSessions>();

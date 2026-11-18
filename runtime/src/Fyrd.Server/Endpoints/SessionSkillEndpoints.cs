@@ -11,6 +11,11 @@ internal static class SessionSkillEndpoints
 {
     private sealed record ConfirmBody(string? Hash);
 
+    private const string GuideFile = "session-skills.md";
+
+    private static string DocsDir(IConfiguration configuration, IWebHostEnvironment environment) =>
+        Path.GetFullPath(configuration["Fyrd:DocsDir"] ?? Path.Combine(environment.ContentRootPath, "..", "..", "..", "docs"));
+
     public static IEndpointRouteBuilder MapSessionSkills(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/hub/session-skills");
@@ -36,6 +41,15 @@ internal static class SessionSkillEndpoints
             config.Save(config.Load() with { SessionSkillsHash = null });
             return Results.Ok(State(skills, config.Load()));
         }));
+
+        // The onboarding guide, read from the repo's docs so the console shows the text that ships with this version.
+        group.MapGet("/guide", (IConfiguration configuration, IWebHostEnvironment environment) =>
+        {
+            var file = Path.Combine(DocsDir(configuration, environment), GuideFile);
+            return File.Exists(file)
+                ? Results.Ok(new { text = File.ReadAllText(file) })
+                : Results.Problem($"The guide is not on this computer (docs/{GuideFile}).", statusCode: StatusCodes.Status404NotFound);
+        });
 
         group.MapGet("/{name}", (string name, SessionSkills skills) => ApiErrors.Run(() =>
             skills.Get(name) is { } s ? Results.Ok(s) : NotFound(name)));

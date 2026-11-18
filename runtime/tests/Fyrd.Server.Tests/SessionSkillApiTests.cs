@@ -267,4 +267,14 @@ public class SessionSkillApiTests
         using var f = new FyrdFactory();
         Assert.Equal(HttpStatusCode.NotFound, (await f.CreateClient().GetAsync("/api/hub/personas/nope/prompt")).StatusCode);
     }
+
+    [Fact]
+    public async Task Guide_IsTheOnboardingDocument_And404WhenItIsMissing()
+    {
+        using var f = new FyrdFactory();
+        var text = (await Get(f.CreateClient(), "/api/hub/session-skills/guide")).GetProperty("text").GetString()!;
+        Assert.StartsWith("# Session skills", text, StringComparison.Ordinal);
+        using var none = new FyrdFactory { DocsDir = Path.Combine(Path.GetTempPath(), "fyrd-no-docs-" + Guid.NewGuid()) };
+        Assert.Equal(HttpStatusCode.NotFound, (await none.CreateClient().GetAsync("/api/hub/session-skills/guide")).StatusCode);
+    }
 }
