@@ -324,7 +324,7 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("Leave out `persistent_session_id` and `create_new_session_on_fire`", d, StringComparison.Ordinal);
         Assert.Contains("delete_trigger", d, StringComparison.Ordinal);
         Assert.Contains("merged in the past 24 hours", d, StringComparison.Ordinal);
-        Assert.Contains("whatever its state or age", d, StringComparison.Ordinal);
+        Assert.Contains("whatever its state, age", d, StringComparison.Ordinal);
         Assert.Contains("`session_context.sources`", d, StringComparison.Ordinal);
         Assert.Contains("`fyrd-hub`", d, StringComparison.Ordinal);
         Assert.Contains("list_events", d, StringComparison.Ordinal);
