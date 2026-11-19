@@ -145,6 +145,8 @@ public sealed class HubSkillsTests
         Assert.Contains("never start a second one", text, StringComparison.Ordinal);
         Assert.Contains("`Manual run: <link>`", text, StringComparison.Ordinal);
         Assert.Contains("Set up your daily schedule.", text, StringComparison.Ordinal);
+        Assert.Contains("A link to any pull request in a stack means the whole stack", text, StringComparison.Ordinal);
+        Assert.Contains("isn't limited to pull requests Fyrd built", text, StringComparison.Ordinal);
         var delete = text.IndexOf("delete_trigger", StringComparison.Ordinal);
         var archive = text.LastIndexOf("archive_session", StringComparison.Ordinal);
         Assert.True(delete > 0 && archive > delete, "the trigger must be deleted before the Tuner is archived");

@@ -339,6 +339,45 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Tuner_KeepsOnlyATriggerThatTargetsThisSession_AndDeletesStaleOnes()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("only if it targets this session (its `persistent_session_id` is your session id)", d, StringComparison.Ordinal);
+        Assert.Contains("Delete every other scheduled task named with your title", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("already has your title as its name, keep it", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_FindsTheBuildingSession_InManualRunsToo()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("In both runs it finds, for each pull request, the Fyrd session that built it", d, StringComparison.Ordinal);
+        Assert.Contains("`current_branches`", d, StringComparison.Ordinal);
+        Assert.Contains("the session id of the Fyrd session that built it from step 1", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("(scheduled runs only)", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_ScheduledRunsReviewOnlyFyrdBuiltPullRequests()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("every pull request built by Fyrd and merged in the past 24 hours", d, StringComparison.Ordinal);
+        Assert.Contains("its head branch starts with `fyrd/`", d, StringComparison.Ordinal);
+        Assert.Contains("Skip every other pull request.", d, StringComparison.Ordinal);
+        Assert.Contains("keeps only the ones built by Fyrd", d, StringComparison.Ordinal);
+        Assert.Contains("whatever its state, age or who built it", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_ManualRunOnAnyStackedPullRequestReviewsTheWholeStack()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("A link to any pull request in a stack means the whole stack", d, StringComparison.Ordinal);
+        Assert.Contains("always look up its stack (`GET /repos/{owner}/{repo}/stacks?pull_request=<n>`", d, StringComparison.Ordinal);
+        Assert.Contains("In a manual run it looks up the linked pull request's stack", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Controller_RoutesTheTuner_AndDeletesItsTriggerOnTeardown()
     {
         var d = Get("controller").Definition;

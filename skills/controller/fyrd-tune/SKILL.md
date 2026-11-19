@@ -20,7 +20,7 @@ Request: "Start the tuner", or a manual run (below) when no Tuner is live.
 
 ## Manual run
 
-Request: "Tune <PR or stack url>" (or "Have the tuner look at <url>"). The link is a pull request, a stack, or any pull request in a stack, in any repo; pass it verbatim. There is no time limit on a manual run.
+Request: "Tune <PR or stack url>" (or "Have the tuner look at <url>"). The link is a pull request, a stack, or any pull request in a stack, in any repo; pass it verbatim. A link to any pull request in a stack means the whole stack: the Tuner looks up the stack and reviews every pull request in it. There is no time limit on a manual run, and it isn't limited to pull requests Fyrd built.
 
 1. Find the live Tuner as in Start step 1. If there is none, start it (Start above) with the manual run in its prompt.
 2. Otherwise call `mcp__claude-code-remote__send_message` with its `session_id` and `Manual run: <link>`. A busy Tuner queues it; don't wait.
