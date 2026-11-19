@@ -2,6 +2,7 @@ import type {
   SecretName,
   SecretsView,
   AnswerBody, ControllerInfo, FyrdConfig, HubCostView, HubMemory, HubPersona, HubState, MemoryEntry, MemoryScope, PendingMemoryEntry, PullRequestStatus,
+  SessionSkill, SessionSkillSetup,
 } from "./types";
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -88,6 +89,19 @@ export const getPersonas = () => call<HubPersona[]>("GET", "/api/hub/personas");
 export const savePersona = (p: HubPersona) => call<HubPersona>("PUT", `/api/hub/personas/${enc(p.id)}`, p);
 export const resetPersona = (id: string) => call<HubPersona>("POST", `/api/hub/personas/${enc(id)}/reset`);
 export const deletePersona = (id: string) => call<void>("DELETE", `/api/hub/personas/${enc(id)}`);
+
+export const getSessionSkills = () => call<SessionSkill[]>("GET", "/api/hub/session-skills");
+export const saveSessionSkill = (s: SessionSkill) => call<SessionSkill>("PUT", `/api/hub/session-skills/${enc(s.name)}`, s);
+export const resetSessionSkill = (name: string) => call<SessionSkill>("POST", `/api/hub/session-skills/${enc(name)}/reset`);
+export const deleteSessionSkill = (name: string) => call<void>("DELETE", `/api/hub/session-skills/${enc(name)}`);
+/** The setup script for the current skills, and whether the owner confirmed pasting it. */
+export const getSessionSkillSetup = () => call<SessionSkillSetup>("GET", "/api/hub/session-skills/setup-script");
+/** Records that the script with this hash is pasted; rejects with status 409 when the skills changed since. */
+export const confirmSessionSkillSetup = (hash: string) =>
+  call<SessionSkillSetup>("POST", "/api/hub/session-skills/setup-script/confirm", { hash });
+export const clearSessionSkillSetup = () => call<SessionSkillSetup>("DELETE", "/api/hub/session-skills/setup-script/confirm");
+/** The onboarding guide (docs/session-skills.md) as markdown. */
+export const getSessionSkillGuide = () => call<{ text: string }>("GET", "/api/hub/session-skills/guide");
 
 /** Shared-memory proposals from peasants, newest first, waiting for the owner. */
 export const getPendingMemory = () => call<PendingMemoryEntry[]>("GET", "/api/hub/memory/pending");

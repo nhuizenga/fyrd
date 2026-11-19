@@ -60,6 +60,9 @@ builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPa
         ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "personas", "hub"))));
 builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Configuration["Fyrd:HubSkillsDir"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "controller"))));
+builder.Services.AddSingleton(sp => new SessionSkills(sp.GetRequiredService<FyrdPaths>(),
+    Path.GetFullPath(builder.Configuration["Fyrd:SessionSkillsSeedDir"]
+        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "session"))));
 builder.Services.AddSingleton<HubMemory>();
 builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();
@@ -96,6 +99,7 @@ app.MapConfig();
 app.MapSecrets();
 app.MapSessionOrder();
 app.MapHub();
+app.MapSessionSkills();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 

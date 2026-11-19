@@ -107,3 +107,33 @@ export function gitHubLine(gitHub) {
   if (gitHub?.configured && gitHub.error) return `GitHub: ${gitHub.error}`;
   return "GitHub: not configured";
 }
+
+/** The session-skill state from /api/hub/session-skills/setup-script, or null when it can't be read (as readHubState). */
+export async function readSessionSkills(url, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`${url}/api/hub/session-skills/setup-script`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The `status` line for session skills: which mode sessions get them in, and what to do when the pasted script is stale. */
+export function sessionSkillsLine(setup) {
+  if (!setup) return "Session skills: unknown (could not read them)";
+  if (setup.mode === "installed") return "Session skills: installed (sessions load them from the environment's setup script)";
+  if (setup.mode === "out-of-date") {
+    return "Session skills: out of date, so sessions get the inline text. Paste the new setup script (Settings, Session skills) and confirm.";
+  }
+  return "Session skills: inline (no setup script confirmed)";
+}
+
+/** The one-line warning for `up` when the pasted setup script is stale, else null. */
+export function sessionSkillsWarning(setup) {
+  return setup?.mode === "out-of-date" ? sessionSkillsLine(setup) : null;
+}
+
+/** What `up` prints about session skills for the server at `url`: the out-of-date line, or null (also when it can't be read). */
+export async function staleSessionSkillsWarning(url, fetchImpl = fetch) {
+  return sessionSkillsWarning(await readSessionSkills(url, fetchImpl));
+}
