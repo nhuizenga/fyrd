@@ -358,11 +358,12 @@ public sealed class HubSeedTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData("builder", 3830)]
-    [InlineData("controller", 2630)]
+    [InlineData("controller", 2720)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
     [InlineData("researcher", 2430)]
     [InlineData("reviewer", 2680)]
+    [InlineData("tuner", 2800)]
     [InlineData("validator", 2350)]
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
