@@ -357,7 +357,7 @@ public sealed class HubSeedTests : IDisposable
     /// tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("builder", 3830)]
+    [InlineData("builder", 3920)]
     [InlineData("controller", 2720)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]

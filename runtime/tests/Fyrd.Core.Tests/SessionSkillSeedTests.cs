@@ -51,7 +51,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("fyrd-stacked-pull-requests", 520)]
+    [InlineData("fyrd-stacked-pull-requests", 540)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -87,8 +87,8 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         foreach (var rule in new[]
         {
             "# Pull request events\n\n"
-            + "- The review you post yourself in step 7 comes back as a review-comment event authored by you: it is not new work, so don't start a worker for it. Act only on comments and reviews from others.\n"
-            + "- Review comments and failing checks that reach you after review are work: start a fresh worker to fix them, run the tests and push, validate again, then update the PR body and reply on each thread as Pull request hygiene says. A fix made after your report is validated but not re-reviewed unless the owner asks; say in your reply that the new head is unreviewed. Never resolve a reviewer's thread for them.\n"
+            + "- The review you post yourself in step 7, and each reply you post on a thread, comes back as a review-comment event authored by you: it is not new work, so don't start a worker for it. Act only on comments and reviews from others.\n"
+            + "- Review comments and failing checks that reach you after review are work: start a fresh worker to fix them, run the tests and push, validate again, then update the PR body and reply on each thread as Pull request hygiene says. A check that failed on a commit that is no longer the PR's head, or a roll-up check that only reports a failure a worker already has, is not new work: say so in one line and end your turn. A fix made after your report is validated but not re-reviewed unless the owner asks; say in your reply that the new head is unreviewed. When a bot reviewer has raised new findings on heads your own post-report fixes produced for a third round on one PR, ask the owner whether to keep fixing before you start another worker. Never resolve a reviewer's thread for them.\n"
             + "- When a PR is merged or closed, call `mcp__claude-code-remote__unsubscribe_pr_activity` for it. When every PR is merged or closed, stop.\n\n# Workers",
             "`event: COMMENT`; never approve or request changes). Then start a fresh worker",
         })
@@ -146,7 +146,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without a confirmed setup script every rule is inline; with one, the
     /// skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 3930;
+    private const int InstalledBudget = 4020;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
