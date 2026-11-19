@@ -115,6 +115,22 @@ public sealed class HubSkillsTests
         Assert.Contains("draft pull request", text, StringComparison.Ordinal);
         Assert.Contains("<subagent-persona id=\"validator\">", text, StringComparison.Ordinal);
         Assert.Contains("<subagent-persona id=\"reviewer\">", text, StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona-text id=\"validator\">", text, StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona-text id=\"reviewer\" for=\"builder\">", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>A subagent block holds the cut text Fyrd sends, never a whole persona.</summary>
+    [Theory]
+    [InlineData("fyrd-build")]
+    [InlineData("fyrd-peasant")]
+    [InlineData("fyrd-research")]
+    [InlineData("fyrd-watch")]
+    public void SubagentBlocks_AreCopiedFromTheSubagentPersonaTexts(string name)
+    {
+        var text = Read(name);
+        Assert.Contains("<subagent-persona-text", text, StringComparison.Ordinal);
+        foreach (var whole in new[] { "(the validator persona text)", "(the reviewer persona text)", "(the investigator persona text)", "with the investigator persona text", "with those personas' text" })
+            Assert.DoesNotContain(whole, text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -132,8 +148,22 @@ public sealed class HubSkillsTests
     [InlineData("fyrd-build")]
     [InlineData("fyrd-peasant")]
     [InlineData("fyrd-watch")]
-    public void BuilderValidatorAndMonitorStarts_CarryTheInvestigatorPersona(string name) =>
+    public void BuilderValidatorAndMonitorStarts_CarryTheInvestigatorPersona(string name)
+    {
         Assert.Contains("<subagent-persona id=\"investigator\">", Read(name), StringComparison.Ordinal);
+        Assert.Contains(name == "fyrd-peasant" ? "<subagent-persona-text>" : "<subagent-persona-text id=\"investigator\">", Read(name), StringComparison.Ordinal);
+    }
+
+    /// <summary>The reviewer has two subagent texts; the peasant skill says which goes to a Builder and which to a Researcher.</summary>
+    [Fact]
+    public void Peasant_PicksTheReviewerTextByTheRoleItIsFor()
+    {
+        var text = Read("fyrd-peasant");
+        Assert.Contains("each holding the text inside the `<subagent-persona-text>` block with that `id` (for the reviewer, the one marked `for=\"builder\"`)", text, StringComparison.Ordinal);
+        Assert.Contains("for a Researcher only the reviewer one (marked `for=\"researcher\"`)", text, StringComparison.Ordinal);
+        Assert.Contains("for a Validator or a Monitor only the investigator one", text, StringComparison.Ordinal);
+        Assert.Contains("Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.", text, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void Tune_StartsOneTunerOnTheFyrdRepo_SendsManualRuns_AndDeletesItsTrigger()
@@ -159,6 +189,7 @@ public sealed class HubSkillsTests
     public void Research_GivesTheResearcherTheReviewerPersona()
     {
         Assert.Contains("<subagent-persona id=\"reviewer\">", Read("fyrd-research"), StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona-text id=\"reviewer\" for=\"researcher\">", Read("fyrd-research"), StringComparison.Ordinal);
     }
 
     [Fact]

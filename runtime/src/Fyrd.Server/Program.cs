@@ -3,8 +3,6 @@ using Fyrd.Core;
 using Fyrd.Core.Config;
 using Fyrd.Core.CloudSessions;
 using Fyrd.Core.Hub;
-using Fyrd.Core.Orchestration;
-using Fyrd.Core.Specs;
 using Fyrd.Server;
 using Fyrd.Server.Endpoints;
 
@@ -21,10 +19,6 @@ builder.Services.AddProblemDetails();
 builder.Services.AddSingleton(FyrdPaths.Resolve(builder.Configuration["Fyrd:Home"]));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ConfigStore>();
-builder.Services.AddSingleton<SpecStore>();
-builder.Services.AddSingleton<DecisionMemory>();
-builder.Services.AddSingleton<OwnerProxy>();
-builder.Services.AddSingleton<InboxStore>();
 builder.Services.AddSingleton<ClaudeCredentials>();
 builder.Services.AddSingleton<ICloudSessions>(_ => new CloudSessionClient(new HttpClient { Timeout = TimeSpan.FromSeconds(30) }, _.GetRequiredService<ClaudeCredentials>()));
 builder.Services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
@@ -61,16 +55,14 @@ builder.Services.AddSingleton<OwnedPullRequests>();
 builder.Services.AddSingleton(sp => new StackMergeJobs(sp.GetRequiredService<IGitHub>(), sp.GetRequiredService<TimeProvider>(),
     sp.GetRequiredService<OwnedPullRequests>(), sp.GetRequiredService<HubState>(),
     sp.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
-builder.Services.AddSingleton<RunnerState>();
-builder.Services.AddSingleton<SpecRunner>();
-builder.Services.AddSingleton<LeadRelay>();
-if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
-    builder.Services.AddHostedService<SpecRunnerService>();
 builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPaths>(),
     Path.GetFullPath(builder.Configuration["Fyrd:HubPersonasSeedDir"]
         ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "personas", "hub"))));
 builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Configuration["Fyrd:HubSkillsDir"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "controller"))));
+builder.Services.AddSingleton(sp => new SessionSkills(sp.GetRequiredService<FyrdPaths>(),
+    Path.GetFullPath(builder.Configuration["Fyrd:SessionSkillsSeedDir"]
+        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "session"))));
 builder.Services.AddSingleton<HubMemory>();
 builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();
@@ -88,22 +80,6 @@ if (!builder.Configuration.GetValue<bool>("Fyrd:DisableRunner"))
     builder.Services.AddHostedService<GitHubSignInService>();
     builder.Services.AddHostedService<SessionProgressService>();
 }
-builder.Services.AddSingleton(sp =>
-{
-    var dir = Path.GetFullPath(builder.Configuration["Fyrd:PersonasDir"]
-        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "personas"));
-    try { return new PersonasSource(Personas.Load(dir), dir); }
-    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-    {
-        sp.GetRequiredService<ILogger<PersonasSource>>().LogError("Personas not loaded from {Dir}: {Message}", dir, e.Message);
-        return new PersonasSource(null, dir);
-    }
-});
-builder.Services.AddSingleton(sp => new SpecLauncher(sp.GetRequiredService<SpecStore>(),
-    sp.GetRequiredService<ConfigStore>(), sp.GetRequiredService<DecisionMemory>(),
-    sp.GetRequiredService<ICloudSessions>(),
-    sp.GetRequiredService<PersonasSource>().Value ?? throw new InvalidOperationException("Personas not loaded."),
-    sp.GetRequiredService<OwnerProxy>()));
 
 var app = builder.Build();
 
@@ -120,19 +96,14 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }));
-app.MapSpecs();
-app.MapInbox();
 app.MapConfig();
 app.MapSecrets();
 app.MapSessionOrder();
-app.MapBoard();
-app.MapMemory();
 app.MapHub();
+app.MapSessionSkills();
 app.Map("/api/{**rest}", () => Results.Problem("Not found.", statusCode: StatusCodes.Status404NotFound));
 app.MapFallbackToFile("index.html");
 
 app.Run();
 
 public partial class Program;
-
-internal sealed record PersonasSource(Personas? Value, string Dir);

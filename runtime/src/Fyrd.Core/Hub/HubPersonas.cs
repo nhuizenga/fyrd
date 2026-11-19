@@ -27,9 +27,6 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
     [GeneratedRegex("^[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex IdRegex();
 
-    [GeneratedRegex(@"\A---[ \t]*\r?\n(?<fm>.*?)\r?\n---[ \t]*\r?\n?(?<body>.*)\z", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
-    private static partial Regex FrontMatterRegex();
-
     public IReadOnlyList<HubPersona> List()
     {
         lock (_gate)
@@ -161,23 +158,13 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
     private static HubPersona? ParseSeed(string file)
     {
         var id = Path.GetFileNameWithoutExtension(file);
-        var m = FrontMatterRegex().Match(File.ReadAllText(file, Encoding.UTF8));
-        if (!m.Success) return null;
-        string name = id, model = "claude-sonnet-5-5";
-        var locked = false;
-        foreach (var line in m.Groups["fm"].Value.Split('\n'))
-        {
-            var i = line.IndexOf(':');
-            if (i < 0) continue;
-            var key = line[..i].Trim();
-            var val = line[(i + 1)..].Trim();
-            if (key == "name") name = val;
-            else if (key == "model") model = val;
-            else if (key == "locked") locked = val.Equals("true", StringComparison.OrdinalIgnoreCase);
-        }
+        if (!FrontMatter.TryParse(File.ReadAllText(file, Encoding.UTF8), out var fields, out var body)) return null;
+        var name = fields.GetValueOrDefault("name", id);
+        var model = fields.GetValueOrDefault("model", "claude-sonnet-5-5");
+        var locked = fields.GetValueOrDefault("locked", "").Equals("true", StringComparison.OrdinalIgnoreCase);
         if (!AllowedModels.Contains(model)) return null;
         // Normalised so a CRLF checkout hashes the same as the LF text seed-history.json was built from.
-        return new HubPersona(id, name, model, m.Groups["body"].Value.Replace("\r\n", "\n").Trim(), locked);
+        return new HubPersona(id, name, model, body, locked);
     }
 
     private Dictionary<string, HashSet<string>> ReadHistory()

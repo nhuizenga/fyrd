@@ -16,7 +16,7 @@ export const hubState = (o: Partial<HubState> = {}): HubState => ({
   sessions: [], questions: [], signedOut: false, lastError: null, lastPollAt: null, controller: null, ...o,
 });
 export const config = (o: Partial<FyrdConfig> = {}): FyrdConfig => ({
-  squadCap: 3, sessionCap: 20, environmentId: null, leadModel: "claude-opus-5-5", peerModel: "claude-sonnet-5-5",
+  sessionCap: 20, environmentId: null,
   sessionDailyLimitUsd: 50, fyrdDailyLimitUsd: 500, timeZone: null, ...o,
 });
 export const cost = (o: Partial<HubCostView> = {}): HubCostView => ({
