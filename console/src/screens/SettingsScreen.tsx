@@ -8,6 +8,7 @@ import { relativeTime } from "../time";
 import { getItemLimit, MAX_ITEM_LIMIT, MIN_ITEM_LIMIT, setItemLimit } from "../useTranscript";
 import type { HubBudgetView, SecretName, SecretsView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
+import SessionSkillsCard from "./SessionSkillsCard";
 
 const MODELS = [
   { id: "claude-opus-5-5", label: "Opus 5.5" },
@@ -653,6 +654,7 @@ const SECTIONS = [
   { id: "limits", label: "Spend limits", Card: SpendLimitsCard },
   { id: "display", label: "Display", Card: DisplayCard },
   { id: "personas", label: "Personas", Card: PersonasCard },
+  { id: "session-skills", label: "Session skills", Card: SessionSkillsCard },
   { id: "memory", label: "Agent memory", Card: MemoryCard },
 ] as const;
 

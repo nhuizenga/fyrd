@@ -5,7 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   runDir, readServerFile, writeServerFile, removeServerFile,
-  isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine,
+  isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState,
+  readSessionSkills, sessionSkillsLine, staleSessionSkillsWarning,
 } from "./lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -46,10 +47,17 @@ function fail(info, logPath, message) {
   process.exit(1);
 }
 
+// Said on every `up`, also when the server was already running: the owner may have edited a skill since they pasted the script.
+async function warnOfStaleSessionSkills(url) {
+  const stale = await staleSessionSkillsWarning(url);
+  if (stale) console.log(stale);
+}
+
 async function up() {
   const existing = readServerFile(dir);
   if (existing && (await isServerAlive(existing))) {
     console.log(`Fyrd already running at ${urlOf(existing)}`);
+    await warnOfStaleSessionSkills(urlOf(existing));
     openBrowser(urlOf(existing));
     return;
   }
@@ -67,7 +75,7 @@ async function up() {
   const log = fs.openSync(logPath, "w");
   const dll = path.join(repoRoot, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll");
   // The content root must be the project dir so wwwroot (the built console) is found regardless of caller cwd.
-  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`, "--Fyrd:PersonasDir", path.join(repoRoot, "personas")], {
+  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`], {
     cwd: path.join(repoRoot, "runtime/src/Fyrd.Server"),
     detached: true, stdio: ["ignore", log, log], windowsHide: true,
   });
@@ -81,6 +89,7 @@ async function up() {
         writeServerFile(dir, info);
         console.log(`Fyrd running at ${urlOf(info)}`);
         if (tokenWarning()) console.log(tokenWarning());
+        await warnOfStaleSessionSkills(urlOf(info));
         openBrowser(urlOf(info));
         return;
       }
@@ -109,14 +118,10 @@ async function status() {
     console.log("Fyrd is not running. Start it with /fyrd:up.");
     return;
   }
-  const get = async (p) => (await fetch(`${urlOf(info)}${p}`)).json();
-  const [specs, inbox] = await Promise.all([get("/api/specs"), get("/api/inbox")]);
-  console.log(`Fyrd running at ${urlOf(info)} · ${specs.length} specs · ${inbox.length} decisions waiting`);
-  try {
-    console.log(gitHubLine((await get("/api/hub/state")).gitHub));
-  } catch {
-    console.log("GitHub: unknown (could not read hub state)");
-  }
+  const [state, skills] = await Promise.all([readHubState(urlOf(info)), readSessionSkills(urlOf(info))]);
+  console.log(statusLine(urlOf(info), state));
+  console.log(state ? gitHubLine(state.gitHub) : "GitHub: unknown (could not read hub state)");
+  console.log(sessionSkillsLine(skills));
 }
 
 const cmds = { up, down, status };

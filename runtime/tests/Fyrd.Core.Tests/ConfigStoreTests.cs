@@ -5,53 +5,41 @@ namespace Fyrd.Core.Tests;
 
 public class ConfigStoreTests
 {
-    [Fact] public void Load_MissingFile_ReturnsDefaultCap4()
-    { using var h = new TempHome(); Assert.Equal(4, new ConfigStore(h.Paths).Load().SquadCap); }
-
     [Fact] public void Save_ThenLoad_RoundTrips()
     { using var h = new TempHome(); var s = new ConfigStore(h.Paths);
-      s.Save(new FyrdConfig(6)); Assert.Equal(6, s.Load().SquadCap);
-      Assert.Contains("\"squadCap\": 6", File.ReadAllText(h.Paths.ConfigFile)); }
+      s.Save(new FyrdConfig(SessionCap: 6)); Assert.Equal(6, s.Load().SessionCap);
+      Assert.Contains("\"sessionCap\": 6", File.ReadAllText(h.Paths.ConfigFile)); }
 
-    [Theory, InlineData(0), InlineData(9)]
+    [Theory, InlineData(0), InlineData(101)]
     public void Save_OutOfRange_Throws(int cap)
     { using var h = new TempHome();
-      Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(h.Paths).Save(new FyrdConfig(cap))); }
+      Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(h.Paths).Save(new FyrdConfig(SessionCap: cap))); }
 
     [Fact] public void Load_MalformedFile_ReturnsDefaults()
     { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{ nope");
-      Assert.Equal(4, new ConfigStore(h.Paths).Load().SquadCap); }
+      Assert.Equal(20, new ConfigStore(h.Paths).Load().SessionCap); }
 
-    [Theory, InlineData(0, 1), InlineData(50, 8)]
+    [Theory, InlineData(0, 1), InlineData(500, 100)]
     public void Load_OutOfRangeCap_Clamps(int raw, int expected)
-    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, $"{{\"squadCap\": {raw}}}");
-      Assert.Equal(expected, new ConfigStore(h.Paths).Load().SquadCap); }
+    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, $"{{\"sessionCap\": {raw}}}");
+      Assert.Equal(expected, new ConfigStore(h.Paths).Load().SessionCap); }
 
     [Fact] public void Resolve_PrefersConfiguredOverEnv()
     { using var h = new TempHome(); Assert.Equal(h.Paths.Root, FyrdPaths.Resolve(h.Paths.Root).Root); }
 
-    [Fact] public void Config_DefaultsModelsAndNullEnvironment()
-    { using var h = new TempHome(); var c = new ConfigStore(h.Paths).Load();
-      Assert.Null(c.EnvironmentId); Assert.Equal("claude-opus-5-5", c.LeadModel); Assert.Equal("claude-sonnet-5-5", c.PeerModel); }
+    [Fact] public void Config_DefaultsNullEnvironment()
+    { using var h = new TempHome(); Assert.Null(new ConfigStore(h.Paths).Load().EnvironmentId); }
 
     [Fact] public void Config_Save_RejectsBadEnvironmentId()
     { using var h = new TempHome();
-      Assert.Throws<ArgumentException>(() => new ConfigStore(h.Paths).Save(new FyrdConfig(4, "env;rm"))); }
+      Assert.Throws<ArgumentException>(() => new ConfigStore(h.Paths).Save(new FyrdConfig("env;rm"))); }
 
     [Fact] public void Config_Save_AcceptsValidEnvironmentId()
     { using var h = new TempHome(); var s = new ConfigStore(h.Paths);
-      s.Save(new FyrdConfig(4, "env_01Abc")); Assert.Equal("env_01Abc", s.Load().EnvironmentId); }
+      s.Save(new FyrdConfig("env_01Abc")); Assert.Equal("env_01Abc", s.Load().EnvironmentId); }
 
     [Fact] public void Load_Default_SessionCapIs20()
     { using var home = new TempHome(); Assert.Equal(20, new ConfigStore(home.Paths).Load().SessionCap); }
-
-    [Fact] public void Load_OutOfRangeSessionCap_Clamped()
-    { using var home = new TempHome(); File.WriteAllText(home.Paths.ConfigFile, "{\"sessionCap\":500}");
-      Assert.Equal(100, new ConfigStore(home.Paths).Load().SessionCap); }
-
-    [Fact] public void Save_SessionCapZero_Throws()
-    { using var home = new TempHome();
-      Assert.Throws<ArgumentOutOfRangeException>(() => new ConfigStore(home.Paths).Save(new FyrdConfig(SessionCap: 0))); }
 
     [Fact] public void Paths_CreateHubDirs()
     { using var home = new TempHome();
@@ -59,10 +47,9 @@ public class ConfigStoreTests
       Assert.True(Directory.Exists(home.Paths.HubPersonasDir));
       Assert.True(Directory.Exists(home.Paths.HubMemoryDir)); }
 
-    [Fact] public void Config_Load_EmptyModelFallsBack()
-    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{\"leadModel\": \"\", \"peerModel\": null}");
-      var c = new ConfigStore(h.Paths).Load();
-      Assert.Equal("claude-opus-5-5", c.LeadModel); Assert.Equal("claude-sonnet-5-5", c.PeerModel); }
+    [Fact] public void Load_FileWithFieldsNoLongerUsed_KeepsTheRest()
+    { using var h = new TempHome(); File.WriteAllText(h.Paths.ConfigFile, "{\"squadCap\": 6, \"leadModel\": \"m\", \"sessionCap\": 7}");
+      Assert.Equal(7, new ConfigStore(h.Paths).Load().SessionCap); }
 
     [Fact] public void Load_DailyLimitDefaults_50And500()
     { using var home = new TempHome(); var c = new ConfigStore(home.Paths).Load();
@@ -94,4 +81,31 @@ public class ConfigStoreTests
     [Fact] public void Load_UnknownTimeZone_Ignored()
     { using var home = new TempHome(); File.WriteAllText(home.Paths.ConfigFile, "{\"timeZone\":\"Mars/Olympus\"}");
       Assert.Null(new ConfigStore(home.Paths).Load().TimeZone); }
+
+    [Fact] public void SessionSkillsHash_RoundTrips_AndDefaultsToNull()
+    { using var home = new TempHome(); var s = new ConfigStore(home.Paths);
+      Assert.Null(s.Load().SessionSkillsHash);
+      var hash = new string('a', 64);
+      s.Save(new FyrdConfig(SessionSkillsHash: hash)); Assert.Equal(hash, s.Load().SessionSkillsHash); }
+
+    [Theory, InlineData("abc"), InlineData("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"), InlineData("")]
+    public void SessionSkillsHash_ThatIsNotALowercaseSha256_IsRejectedOnSave_AndDroppedOnLoad(string hash)
+    { using var home = new TempHome(); var s = new ConfigStore(home.Paths);
+      Assert.Throws<ArgumentException>(() => s.Save(new FyrdConfig(SessionSkillsHash: hash)));
+      File.WriteAllText(home.Paths.ConfigFile, $"{{\"sessionSkillsHash\": \"{hash}\"}}");
+      Assert.Null(s.Load().SessionSkillsHash); }
+
+    /// <summary>Update reads, changes and writes as one step: changes made at the same time to different fields all land.</summary>
+    [Fact] public void Update_AppliesTheChangeToTheStoredConfig_AndConcurrentUpdatesDoNotLoseEachOther()
+    { using var home = new TempHome(); var s = new ConfigStore(home.Paths);
+      s.Save(new FyrdConfig(EnvironmentId: "env_a", SessionCap: 1));
+      var saved = s.Update(c => c with { SessionSkillsHash = new string('b', 64) });
+      Assert.Equal(new FyrdConfig(EnvironmentId: "env_a", SessionCap: 1, SessionSkillsHash: new string('b', 64)), saved);
+      Assert.Equal(saved, s.Load());
+      Parallel.For(0, 40, i => s.Update(c => i % 2 == 0 ? c with { SessionCap = c.SessionCap + 1 } : c with { SessionDailyLimitUsd = c.SessionDailyLimitUsd + 1 }));
+      Assert.Equal(21, s.Load().SessionCap);
+      Assert.Equal(FyrdConfig.DefaultSessionDailyLimitUsd + 20, s.Load().SessionDailyLimitUsd);
+      // A change the store would refuse is not written.
+      Assert.Throws<ArgumentException>(() => s.Update(c => c with { SessionSkillsHash = "nope" }));
+      Assert.Equal(new string('b', 64), s.Load().SessionSkillsHash); }
 }

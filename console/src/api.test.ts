@@ -5,7 +5,7 @@ import { config } from "./test/fixtures";
 afterEach(() => vi.unstubAllGlobals());
 
 it("updateConfig merges a partial over the loaded config and PUTs the full object", async () => {
-  const loaded = config({ squadCap: 5 });
+  const loaded = config({ sessionCap: 5 });
   const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
     const body = init?.method === "PUT" ? JSON.parse(init.body as string) : loaded;
     return new Response(JSON.stringify(body), { status: 200 });

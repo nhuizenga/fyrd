@@ -59,12 +59,24 @@ const renderSettings = async (section: "Environment" | "Spend limits" | "Display
 it("settings sections are a left nav showing one section at a time", async () => {
   render(<Routed state={hubState()} onChanged={vi.fn()} />);
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
-  expect(nav).toHaveTextContent("EnvironmentSpend limitsDisplayPersonasAgent memory");
+  expect(nav).toHaveTextContent("EnvironmentSpend limitsDisplayPersonasSession skillsAgent memory");
   expect(screen.getByRole("heading", { name: "Environment" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Personas" })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Agent memory" }));
   expect(screen.getByRole("heading", { name: "Agent memory" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Environment" })).not.toBeInTheDocument();
+});
+
+it("session skills are a settings section next to the personas", async () => {
+  vi.mocked(api.getSessionSkills).mockResolvedValue([]);
+  vi.mocked(api.getSessionSkillSetup).mockResolvedValue({
+    mode: "inline", hash: "h", confirmedHash: null, environmentId: null, skills: [], script: "SCRIPT", skillsDir: "/root/.claude/skills", hashFile: "f",
+  });
+  render(<Routed state={hubState()} onChanged={vi.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: "Session skills" }));
+  expect(window.location.hash).toBe("#/settings/session-skills");
+  expect(screen.getByRole("heading", { name: "Session skills" })).toBeInTheDocument();
+  expect(await screen.findByDisplayValue("SCRIPT")).toBeInTheDocument();
 });
 
 it("environment save calls updateConfig", async () => {

@@ -1,11 +1,8 @@
 export type MemoryScope = string;
 
 export interface FyrdConfig {
-  squadCap: number;
   sessionCap: number;
   environmentId: string | null;
-  leadModel: string;
-  peerModel: string;
   /** Daily spend limit per session, in USD (1–10,000). */
   sessionDailyLimitUsd: number;
   /** Daily spend limit for the whole fyrd, in USD (1–10,000). */
@@ -13,9 +10,6 @@ export interface FyrdConfig {
   /** IANA time zone that defines "today" for spend; null until the console reports one. */
   timeZone: string | null;
 }
-
-/** Mutating responses may carry a relay failure alongside the saved value. */
-export type WithRelay<T> = T & { relayError?: string };
 
 export interface HubSessionView {
   id: string;
@@ -207,6 +201,40 @@ export interface HubPersona {
   locked: boolean;
   seedHash?: string | null;
   updateAvailable?: boolean;
+}
+
+/** Text a role's sessions load on demand with the Skill tool. `roles` are persona ids. */
+export interface SessionSkill {
+  name: string;
+  /** One line: what the skill holds and when to load it. */
+  description: string;
+  roles: string[];
+  body: string;
+  /** Set for a skill that came from a default; such a skill can be reset. */
+  seedHash?: string | null;
+  updateAvailable?: boolean;
+}
+
+/**
+ * How sessions get their session skills: `inline` (no setup script confirmed: the whole text is in their instructions),
+ * `installed` (the confirmed script matches the skills: they load them on demand) or `out-of-date` (the skills changed
+ * after the script was confirmed: inline again until the new script is pasted and confirmed).
+ */
+export type SessionSkillMode = "inline" | "installed" | "out-of-date";
+
+export interface SessionSkillSetup {
+  mode: SessionSkillMode;
+  /** The hash of the current skills, which names `script`. */
+  hash: string;
+  confirmedHash: string | null;
+  environmentId: string | null;
+  skills: string[];
+  /** Defaults the owner deleted; resetting one by name brings it back. */
+  missingDefaults?: string[];
+  /** The block to paste into the environment's setup script. */
+  script: string;
+  skillsDir: string;
+  hashFile: string;
 }
 
 export interface MemoryEntry {

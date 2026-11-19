@@ -84,9 +84,56 @@ export function tokenWarning(env = process.env) {
   return "GH_TOKEN is not set: PR status and PR actions are off. Set it and run /fyrd:down then /fyrd:up.";
 }
 
+/** The hub state from /api/hub/state, or null when it can't be read (unreachable, no answer in 3 s, non-2xx, or not JSON). */
+export async function readHubState(url, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`${url}/api/hub/state`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The first `status` line: the URL, then the session and waiting-question counts of /api/hub/state when it could be read. */
+export function statusLine(url, state) {
+  if (!state) return `Fyrd running at ${url}`;
+  const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+  return `Fyrd running at ${url} · ${count(state.sessions?.length ?? 0, "session")} · ${count(state.questions?.length ?? 0, "question")} waiting`;
+}
+
 /** The `status` line for the `gitHub` part of /api/hub/state. */
 export function gitHubLine(gitHub) {
   if (gitHub?.configured && gitHub.login) return `GitHub: signed in as ${gitHub.login}`;
   if (gitHub?.configured && gitHub.error) return `GitHub: ${gitHub.error}`;
   return "GitHub: not configured";
+}
+
+/** The session-skill state from /api/hub/session-skills/setup-script, or null when it can't be read (as readHubState). */
+export async function readSessionSkills(url, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`${url}/api/hub/session-skills/setup-script`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The `status` line for session skills: which mode sessions get them in, and what to do when the pasted script is stale. */
+export function sessionSkillsLine(setup) {
+  if (!setup) return "Session skills: unknown (could not read them)";
+  if (setup.mode === "installed") return "Session skills: installed (sessions load them from the environment's setup script)";
+  if (setup.mode === "out-of-date") {
+    return "Session skills: out of date, so sessions get the inline text. Paste the new setup script (Settings, Session skills) and confirm.";
+  }
+  return "Session skills: inline (no setup script confirmed)";
+}
+
+/** The one-line warning for `up` when the pasted setup script is stale, else null. */
+export function sessionSkillsWarning(setup) {
+  return setup?.mode === "out-of-date" ? sessionSkillsLine(setup) : null;
+}
+
+/** What `up` prints about session skills for the server at `url`: the out-of-date line, or null (also when it can't be read). */
+export async function staleSessionSkillsWarning(url, fetchImpl = fetch) {
+  return sessionSkillsWarning(await readSessionSkills(url, fetchImpl));
 }

@@ -24,6 +24,9 @@ public sealed class HubSeedTests : IDisposable
 
     private HubPersona Get(string id) => Load().Single(p => p.Id == id);
 
+    /// <summary>The persona with its session skills: a rule that moved into a skill is still one the role is given.</summary>
+    private string Whole(string id) => RepoSeeds.Whole(_home.Paths, id);
+
     [Fact]
     public void AllSeedsParse()
     {
@@ -110,6 +113,41 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Controller_CopiesTheSubagentPersonaTexts_NotWholePersonas_IntoSubagentBlocks()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("- `<subagent-persona-text id=\"…\">`:", d, StringComparison.Ordinal);
+        Assert.Contains("the reviewer subagent text marked `for=\"builder\"`", d, StringComparison.Ordinal);
+        Assert.Contains("only the reviewer one marked `for=\"researcher\"`", d, StringComparison.Ordinal);
+        Assert.Contains("exactly as inside its `<subagent-persona-text>` block, never the whole persona from a `<peasant-persona>` block", d, StringComparison.Ordinal);
+        Assert.Contains("the persona's text exactly as it appears inside its `<peasant-persona>` block", d, StringComparison.Ordinal);
+        // The close tags of the skills' examples reach the Controller escaped, so the persona says what a close tag looks like.
+        Assert.Contains("A close tag starts with `</`; `<\\/` in what you received is only Fyrd's escaping, never write it in a tag of your own.", d, StringComparison.Ordinal);
+    }
+
+    /// <summary>A subagent's persona text can still say to ask the owner (the Inputs rule, or a whole-persona fallback), so every brief overrides it.</summary>
+    [Theory]
+    [InlineData("builder", "Ignore any instruction above to ask the owner, post a review or message anyone; return your findings only.")]
+    [InlineData("researcher", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("validator", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("monitor", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
+    public void EveryCoordinator_TellsItsPersonaSubagentToIgnoreInstructionsToAskOrPost(string id, string line)
+    {
+        var d = Get(id).Definition;
+        var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
+        Assert.Contains($"`{line}`", section, StringComparison.Ordinal);
+    }
+
+    /// <summary>The Builder is told outright what its persona subagents don't do; asking the owner is the Builder's.</summary>
+    [Fact]
+    public void Builder_SaysAPersonaSubagentNeverAsksTheOwner()
+    {
+        var d = Get("builder").Definition;
+        var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
+        Assert.Contains("A persona subagent never asks the owner,", section, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Builder_PushesAsItGoes_AndKnowsItsBase()
     {
         var d = Get("builder").Definition;
@@ -137,7 +175,7 @@ public sealed class HubSeedTests : IDisposable
     [Fact]
     public void Builder_StacksMultiPrWorkNativelyThroughTheApi()
     {
-        var d = Get("builder").Definition;
+        var d = Whole("builder");
         Assert.Contains("POST /repos/{owner}/{repo}/stacks", d, StringComparison.Ordinal);
         Assert.Contains("POST /repos/{owner}/{repo}/stacks/{stack_number}/add", d, StringComparison.Ordinal);
         Assert.Contains("POST /repos/{owner}/{repo}/merges", d, StringComparison.Ordinal);
@@ -149,7 +187,7 @@ public sealed class HubSeedTests : IDisposable
     [Fact]
     public void NoPersonaShellsOutToTheGhCli()
     {
-        foreach (var (id, text) in Load().Select(p => (p.Id, p.Definition)))
+        foreach (var (id, text) in Load().Select(p => (p.Id, Whole(p.Id))))
             foreach (var cli in new[] { "`gh pr", "`gh stack", "gh extension", "`gh api" })
                 Assert.False(text.Contains(cli, StringComparison.Ordinal), $"{id} shells out to the gh CLI ({cli})");
     }
@@ -311,6 +349,34 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("`monitor` and `investigator`", d, StringComparison.Ordinal);
         Assert.Contains("with `id=\"investigator\"`", d, StringComparison.Ordinal);
         Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A word budget per whole persona, a little above its size, so growth is noticed: every word here is sent to each
+    /// session of that role (and the Controller's message carries all of them). A persona that outgrows its budget is
+    /// tightened, or the budget is raised on purpose.
+    /// </summary>
+    [Theory]
+    [InlineData("builder", 3830)]
+    [InlineData("controller", 2630)]
+    [InlineData("investigator", 2300)]
+    [InlineData("monitor", 2070)]
+    [InlineData("researcher", 2430)]
+    [InlineData("reviewer", 2680)]
+    [InlineData("validator", 2350)]
+    public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
+    {
+        var words = Get(id).Definition.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        Assert.True(words <= budget, $"{id}: {words} words, over the budget of {budget}. Tighten the persona, or raise its budget in this test on purpose (a guard change to list in the PR).");
+    }
+
+    [Fact]
+    public void EveryPersonaHasAWordBudget()
+    {
+        var budgeted = typeof(HubSeedTests).GetMethod(nameof(EveryPersona_StaysUnderItsWordBudget))!
+            .GetCustomAttributesData().Where(a => a.AttributeType == typeof(InlineDataAttribute))
+            .Select(a => (string)((IEnumerable<System.Reflection.CustomAttributeTypedArgument>)a.ConstructorArguments[0].Value!).First().Value!);
+        Assert.Equal(Ids, budgeted.Order(StringComparer.Ordinal));
     }
 
     [Fact]
