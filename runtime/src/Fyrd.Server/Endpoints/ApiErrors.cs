@@ -34,7 +34,14 @@ internal static class ApiErrors
         }
         catch (ArgumentException e)
         {
-            return Results.Problem(e.Message, statusCode: StatusCodes.Status400BadRequest);
+            return Results.Problem(Message(e), statusCode: StatusCodes.Status400BadRequest);
         }
+    }
+
+    /// <summary>The exception's own text, without the " (Parameter 'name')" .NET adds at its end: the name means nothing to the owner.</summary>
+    internal static string Message(ArgumentException e)
+    {
+        var suffix = $" (Parameter '{e.ParamName}')";
+        return e.ParamName is not null && e.Message.EndsWith(suffix, StringComparison.Ordinal) ? e.Message[..^suffix.Length] : e.Message;
     }
 }

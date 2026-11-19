@@ -42,6 +42,7 @@ public sealed partial class ControllerManager
     private readonly ConfigStore _config;
     private readonly TimeProvider _time;
     private readonly HubSkills? _skills;
+    private readonly SessionSkills? _sessionSkills;
     private readonly string _file;
     private readonly SemaphoreSlim _gate = new(1);
     // Held for the whole CLI run, which can take minutes; _gate is only held for the short state and cloud steps around it,
@@ -52,9 +53,11 @@ public sealed partial class ControllerManager
     private DateTimeOffset? _createdAt;
 
     public ControllerManager(
-        ICloudSessions cloud, IOwnerMessages owner, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null, HubSkills? skills = null)
+        ICloudSessions cloud, IOwnerMessages owner, HubPersonas personas, HubMemory memory, ConfigStore config, FyrdPaths paths, TimeProvider? time = null, HubSkills? skills = null,
+        SessionSkills? sessionSkills = null)
     {
         _skills = skills;
+        _sessionSkills = sessionSkills;
         _time = time ?? TimeProvider.System;
         _cloud = cloud;
         _owner = owner;
@@ -111,8 +114,9 @@ public sealed partial class ControllerManager
         var personas = _personas.List();
         var config = _config.Load();
         var skills = _skills?.List();
-        return (PromptPreamble + "\n\n" + HubPrompt.Controller(personas, _memory, config, skills),
-            Hash(HubPrompt.Instructions(personas, config, skills)),
+        var sessionSkills = _sessionSkills?.List();
+        return (PromptPreamble + "\n\n" + HubPrompt.Controller(personas, _memory, config, skills, sessionSkills),
+            Hash(HubPrompt.Instructions(personas, config, skills, sessionSkills)),
             MemoryHash(_memory, personas));
     }
 

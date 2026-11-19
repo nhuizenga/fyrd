@@ -24,6 +24,9 @@ public sealed class HubSeedTests : IDisposable
 
     private HubPersona Get(string id) => Load().Single(p => p.Id == id);
 
+    /// <summary>The persona with its session skills: a rule that moved into a skill is still one the role is given.</summary>
+    private string Whole(string id) => RepoSeeds.Whole(_home.Paths, id);
+
     [Fact]
     public void AllSeedsParse()
     {
@@ -172,7 +175,7 @@ public sealed class HubSeedTests : IDisposable
     [Fact]
     public void Builder_StacksMultiPrWorkNativelyThroughTheApi()
     {
-        var d = Get("builder").Definition;
+        var d = Whole("builder");
         Assert.Contains("POST /repos/{owner}/{repo}/stacks", d, StringComparison.Ordinal);
         Assert.Contains("POST /repos/{owner}/{repo}/stacks/{stack_number}/add", d, StringComparison.Ordinal);
         Assert.Contains("POST /repos/{owner}/{repo}/merges", d, StringComparison.Ordinal);
@@ -184,7 +187,7 @@ public sealed class HubSeedTests : IDisposable
     [Fact]
     public void NoPersonaShellsOutToTheGhCli()
     {
-        foreach (var (id, text) in Load().Select(p => (p.Id, p.Definition)))
+        foreach (var (id, text) in Load().Select(p => (p.Id, Whole(p.Id))))
             foreach (var cli in new[] { "`gh pr", "`gh stack", "gh extension", "`gh api" })
                 Assert.False(text.Contains(cli, StringComparison.Ordinal), $"{id} shells out to the gh CLI ({cli})");
     }
@@ -354,7 +357,7 @@ public sealed class HubSeedTests : IDisposable
     /// tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("builder", 4310)]
+    [InlineData("builder", 3830)]
     [InlineData("controller", 2630)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]

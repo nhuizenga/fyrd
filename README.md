@@ -7,11 +7,13 @@ Build software with an army of specialized agents, managed from a one-click cons
 Requires Node, the .NET 10 SDK, and npm.
 
 - `/fyrd:up` builds (first run only) and starts the console on `127.0.0.1` (port 4870, or the next free one), then opens it in your browser. Running it again reuses the running server.
-- `/fyrd:status` shows the URL, the session count and the questions waiting.
+- `/fyrd:status` shows the URL, the session count, the questions waiting, the GitHub sign-in and how sessions get their session skills (`inline`, `installed` or `out of date`).
 - `/fyrd:down` stops the server.
 - In the console's Sessions list, the download icon on a session's row exports all of its saved events as raw JSONL (a header line, one event per line, an `fyrd_export_end` trailer; a file without the trailer is incomplete). The same file is at `GET /api/hub/sessions/{id}/export`. The export holds everything the session saw, including tool output and any secrets it printed, and Fyrd does no redaction.
 
 - In the console's session details, a pull request that is part of a stack (an open PR whose base is another open PR's head) shows the chain, and its menu offers **Merge stack**. That squash-merges the whole chain top down to the root, waiting for each PR's checks before merging it (polling every 20 s, at most 30 minutes per PR; after a merge the next PR must show its new head commit, and "no checks yet" counts as not yet for 2 minutes; each merge is pinned to the head commit that was checked, so a push in between makes GitHub refuse it; a GitHub rate limit is waited out), and stops with the reason on a failure, a conflict, a PR closed or merged by someone else, an unexpected base change or a timeout. Cancel stops before the next merge and never undoes merges already done. Stack-merge jobs live in the server's memory only: a restart drops a running job, leaving some PRs merged and the rest open. Click Merge stack again and the chain is recomputed from what is still open, so it resumes safely.
+
+- **Session skills** are parts of a role's instructions that only some tasks need (the Builder's rules for stacked pull requests). You edit them under Settings > Session skills. By default their text is part of every session's instructions; pasting the setup script the console generates into your cloud environment lets sessions load them on demand instead, which shortens those instructions. [docs/session-skills.md](docs/session-skills.md) is the step-by-step guide.
 
 Runtime state (PID/port, log) lives in `~/.fyrd/run/`; data lives in `~/.fyrd/data/`.
 

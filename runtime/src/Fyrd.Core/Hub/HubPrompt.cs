@@ -13,16 +13,25 @@ public static partial class HubPrompt
     private static partial Regex ClosingTagRegex();
 
     /// <summary>The full Controller message: <see cref="Instructions"/> followed by the memory blocks.</summary>
-    public static string Controller(IReadOnlyList<HubPersona> personas, HubMemory memory, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null) =>
-        string.Join("\n\n", new[] { Instructions(personas, config, skills) }.Concat(MemoryBlocks(memory, personas)));
+    public static string Controller(IReadOnlyList<HubPersona> personas, HubMemory memory, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null,
+        IReadOnlyList<SessionSkill>? sessionSkills = null) =>
+        string.Join("\n\n", new[] { Instructions(personas, config, skills, sessionSkills) }.Concat(MemoryBlocks(memory, personas)));
 
     /// <summary>
     /// Everything but memory: the Controller definition, settings, peasant personas, subagent persona texts and skills.
     /// A <c>subagent-persona-text</c> block holds what <see cref="SubagentPersonas"/> cuts from a persona; the Controller
     /// copies it, not the whole persona, into the <c>subagent-persona</c> blocks of the sessions that run that persona as a subagent.
+    /// <para>
+    /// A <c>peasant-persona</c> block holds what <see cref="SessionSkills.Compose"/> makes of the persona and its role's
+    /// session skills, so whatever the Controller copies from the block into a session's system prompt carries them: a
+    /// line per skill when the setup script the owner confirmed is the one for the current skills, else every skill's
+    /// whole body. The subagent texts are cut from the stored personas and carry no session skills.
+    /// </para>
     /// </summary>
-    public static string Instructions(IReadOnlyList<HubPersona> personas, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null)
+    public static string Instructions(IReadOnlyList<HubPersona> personas, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null,
+        IReadOnlyList<SessionSkill>? sessionSkills = null)
     {
+        var installed = sessionSkills is not null && SessionSkills.Mode(config, sessionSkills) == SessionSkillMode.Installed;
         var controller = personas.FirstOrDefault(p => p.Id == ControllerId)
             ?? throw new HubConfigException("The Controller persona is missing.");
         var sections = new List<string>
@@ -31,7 +40,7 @@ public static partial class HubPrompt
             $"<hub-settings>\nenvironment_id: {config.EnvironmentId ?? ""}\npermission_mode: auto\nsession_cap: {config.SessionCap}\n</hub-settings>",
         };
         foreach (var p in personas.Where(p => p.Id != ControllerId))
-            sections.Add($"<peasant-persona id=\"{AttrEscape(p.Id)}\" name=\"{AttrEscape(p.Name)}\" model=\"{AttrEscape(p.Model)}\">{Safe(p.Definition)}</peasant-persona>");
+            sections.Add($"<peasant-persona id=\"{AttrEscape(p.Id)}\" name=\"{AttrEscape(p.Name)}\" model=\"{AttrEscape(p.Model)}\">{Safe(SessionSkills.Compose(p, sessionSkills, installed))}</peasant-persona>");
         foreach (var t in SubagentPersonas.All(personas))
         {
             var target = t.For is null ? "" : $" for=\"{AttrEscape(t.For)}\"";
