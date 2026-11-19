@@ -151,6 +151,13 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
     }
     if (path === "/api/hub/personas") return route.fulfill({ json: PERSONAS });
+    if (path === "/api/hub/session-skills") return route.fulfill({ json: [] });
+    if (path === "/api/hub/session-skills/setup-script") {
+      return route.fulfill({ json: {
+        mode: "inline", hash: "0".repeat(64), confirmedHash: null, environmentId: null, skills: [], missingDefaults: [],
+        script: "# >>> fyrd session skills >>>\n# <<< fyrd session skills <<<\n", skillsDir: "/root/.claude/skills", hashFile: "/root/.claude/fyrd-session-skills/hash",
+      } });
+    }
     if (/^\/api\/hub\/memory\/pending\/[^/]+\/approve$/.test(path)) return route.fulfill({ json: { id: "approved", text: "approved", source: "agent", at: new Date().toISOString() } });
     if (path === "/api/hub/memory/pending") return route.fulfill({ json: opts.pending ?? [] });
     if (path === "/api/hub/memory") return route.fulfill({ json: { scopes: [{ scope: "shared", label: "Shared", entries: opts.memory ?? [] }] } });

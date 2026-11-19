@@ -24,6 +24,9 @@ public sealed class PersonaChangeRulesTests : IDisposable
 
     private string Def(string id) => new HubPersonas(_home.Paths, SeedDir()).List().Single(p => p.Id == id).Definition;
 
+    /// <summary>The persona with its session skills: the stack rules and the pull request event rules are skills.</summary>
+    private string Whole(string id) => RepoSeeds.Whole(_home.Paths, id);
+
     private static void ContainsAll(string definition, params string[] phrases)
     {
         foreach (var phrase in phrases) Assert.Contains(phrase, definition, StringComparison.Ordinal);
@@ -74,12 +77,31 @@ public sealed class PersonaChangeRulesTests : IDisposable
         foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**" })
             Assert.InRange(d.IndexOf(rule, StringComparison.Ordinal), d.IndexOf("# Build rules", StringComparison.Ordinal), hygiene);
         // The lists survive fix rounds and a stack, and reach the report.
-        ContainsAll(d,
+        ContainsAll(Whole("builder"),
             "add its PR's current body to the brief",
             "add the body the worker below returned",
             "lists only the rules and guards its own diff touches",
             "keeping the earlier rules, guards, settled conflicts and exceptions that still hold",
             "the repo rules applied, each guard changed");
+    }
+
+    /// <summary>
+    /// Planning the pull requests has its own ask: an input that doesn't settle the split (a Builder that itself judges
+    /// one PR too large, or an input that splits the work only partly) goes to the owner. Step 1's ask about an unclear
+    /// goal doesn't cover it.
+    /// </summary>
+    [Fact]
+    public void BuilderAsksTheOwnerWhenTheInputDoesNotSettleTheSplit()
+    {
+        var d = Def("builder");
+        var understand = d.IndexOf("1. **Understand the task.**", StringComparison.Ordinal);
+        var plan = d.IndexOf("2. **Plan the pull requests.**", StringComparison.Ordinal);
+        var build = d.IndexOf("3. **Build.**", StringComparison.Ordinal);
+        Assert.InRange(understand, 0, plan);
+        Assert.InRange(plan, 0, build);
+        Assert.InRange(build, 0, d.IndexOf("# Build rules", StringComparison.Ordinal));
+        Assert.Contains("how to split the work into pull requests is unclear, ask the owner before you start a worker", d[understand..plan], StringComparison.Ordinal);
+        Assert.Contains("if the input doesn't settle the split, ask the owner", d[plan..build], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -98,7 +120,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
     [Fact]
     public void BuilderKeepsPullRequestsHonest()
     {
-        var d = Def("builder");
+        var d = Whole("builder");
         ContainsAll(d,
             "# Pull request hygiene",
             "**Body matches the diff.**",

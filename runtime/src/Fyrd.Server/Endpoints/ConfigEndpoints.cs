@@ -20,17 +20,17 @@ internal static class ConfigEndpoints
             catch (JsonException) { return Results.Problem("Body is required.", statusCode: StatusCodes.Status400BadRequest); }
             if (raw.ValueKind != JsonValueKind.Object || raw.Deserialize<FyrdConfig>(json.Value.SerializerOptions) is not { } body)
                 return Results.Problem("Body is required.", statusCode: StatusCodes.Status400BadRequest);
-            var stored = config.Load();
             // A client that predates the spend-limit fields must not reset them: fields it omits keep their stored value.
             bool Has(string name) => raw.EnumerateObject().Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-            body = body with
+            return Results.Ok(config.Update(stored => body with
             {
                 SessionDailyLimitUsd = Has(nameof(FyrdConfig.SessionDailyLimitUsd)) ? body.SessionDailyLimitUsd : stored.SessionDailyLimitUsd,
                 FyrdDailyLimitUsd = Has(nameof(FyrdConfig.FyrdDailyLimitUsd)) ? body.FyrdDailyLimitUsd : stored.FyrdDailyLimitUsd,
                 TimeZone = Has(nameof(FyrdConfig.TimeZone)) ? body.TimeZone : stored.TimeZone,
-            };
-            config.Save(body);
-            return Results.Ok(config.Load());
+                // Only the session-skill endpoints record a confirmed setup script. It was confirmed for one environment,
+                // so a change of environment drops it: sessions there get the skills' text until the script is pasted again.
+                SessionSkillsHash = string.Equals(body.EnvironmentId, stored.EnvironmentId, StringComparison.Ordinal) ? stored.SessionSkillsHash : null,
+            }));
         }));
 
         return app;

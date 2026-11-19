@@ -540,10 +540,10 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
     /// that grows past its budget (a kept section that got longer, or a keep-list that got wider) fails here.
     /// </summary>
     [Theory]
-    [InlineData("builder", 2600)]
-    [InlineData("researcher", 600)]
-    [InlineData("validator", 900)]
-    [InlineData("monitor", 900)]
+    [InlineData("builder", 2500)]
+    [InlineData("researcher", 540)]
+    [InlineData("validator", 820)]
+    [InlineData("monitor", 820)]
     public void SubagentBlocks_StayUnderTheirWordBudget(string role, int budget)
     {
         var seeds = Seeds();
@@ -555,8 +555,8 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
         output.WriteLine($"{role}: persona {persona} words; subagent blocks {wholeWords} -> {slimWords}; prompt {persona + wholeWords} -> {persona + slimWords}");
         foreach (var (id, i) in Coordinators.Single(c => c.Role == role).Subagents.Select((id, i) => (id, i)))
             output.WriteLine($"  {id}: {Words(whole[i])} -> {Words(slim[i])}");
-        Assert.True(slimWords <= budget, $"{role}: subagent blocks are {slimWords} words, over the budget of {budget}");
-        Assert.True(slimWords * 2 <= wholeWords, $"{role}: subagent blocks ({slimWords} words) are more than half the whole personas ({wholeWords})");
+        Assert.True(slimWords <= budget, $"{role}: subagent blocks are {slimWords} words, over the budget of {budget}. Tighten the kept sections, or raise the budget in this test on purpose (a guard change to list in the PR).");
+        Assert.True(slimWords * 2 <= wholeWords, $"{role}: subagent blocks ({slimWords} words) are more than half the whole personas ({wholeWords}). Tighten the kept sections or narrow the keep-list; loosening this check is a guard change to list in the PR.");
     }
 
     [Fact]
