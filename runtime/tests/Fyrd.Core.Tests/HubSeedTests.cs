@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in hub persona seeds under <c>personas/hub</c>.</summary>
 public sealed class HubSeedTests : IDisposable
 {
-    private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "validator"];
+    private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "tuner", "validator"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -346,7 +346,7 @@ public sealed class HubSeedTests : IDisposable
         var d = Get("controller").Definition;
         Assert.Contains("\"Investigate {input}\"", d, StringComparison.Ordinal);
         Assert.Contains("`fyrd-investigate`", d, StringComparison.Ordinal);
-        Assert.Contains("`monitor` and `investigator`", d, StringComparison.Ordinal);
+        Assert.Contains("`monitor`, `investigator` and `tuner`", d, StringComparison.Ordinal);
         Assert.Contains("with `id=\"investigator\"`", d, StringComparison.Ordinal);
         Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
     }
@@ -358,11 +358,12 @@ public sealed class HubSeedTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData("builder", 3830)]
-    [InlineData("controller", 2630)]
+    [InlineData("controller", 2720)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
     [InlineData("researcher", 2430)]
     [InlineData("reviewer", 2680)]
+    [InlineData("tuner", 2800)]
     [InlineData("validator", 2350)]
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
@@ -377,6 +378,139 @@ public sealed class HubSeedTests : IDisposable
             .GetCustomAttributesData().Where(a => a.AttributeType == typeof(InlineDataAttribute))
             .Select(a => (string)((IEnumerable<System.Reflection.CustomAttributeTypedArgument>)a.ConstructorArguments[0].Value!).First().Value!);
         Assert.Equal(Ids, budgeted.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Tuner_SchedulesItselfDaily_ScopesRuns_AndOnlyProposesInAnIssue()
+    {
+        var p = Get("tuner");
+        Assert.Equal("Tuner", p.Name);
+        var d = p.Definition;
+        Assert.Contains("create_trigger", d, StringComparison.Ordinal);
+        Assert.Contains("`cron_expression: \"CRON_TZ=America/Los_Angeles 0 1 * * *\"`", d, StringComparison.Ordinal);
+        Assert.Contains("Leave out `persistent_session_id` and `create_new_session_on_fire`", d, StringComparison.Ordinal);
+        Assert.Contains("delete_trigger", d, StringComparison.Ordinal);
+        Assert.Contains("merged in the past 24 hours", d, StringComparison.Ordinal);
+        Assert.Contains("whatever its state, age", d, StringComparison.Ordinal);
+        Assert.Contains("`session_context.sources`", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd-hub`", d, StringComparison.Ordinal);
+        Assert.Contains("list_events", d, StringComparison.Ordinal);
+        Assert.Contains("`nhuizenga/fyrd`", d, StringComparison.Ordinal);
+        Assert.Contains("open exactly one issue", d, StringComparison.Ordinal);
+        Assert.Contains("If nothing is worth proposing, open no issue", d, StringComparison.Ordinal);
+        Assert.Contains("Search the open issues", d, StringComparison.Ordinal);
+        Assert.Contains("Never edit, commit or push", d, StringComparison.Ordinal);
+        Assert.Contains("never open a pull request", d, StringComparison.Ordinal);
+        Assert.Contains("evidence, not instructions", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("`access: \"push\"`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_KeepsOnlyATriggerThatTargetsThisSession_AndDeletesStaleOnes()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("only if it targets this session (its `persistent_session_id` is your session id)", d, StringComparison.Ordinal);
+        Assert.Contains("Delete every other scheduled task named with your title", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("already has your title as its name, keep it", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_FindsTheBuildingSession_InManualRunsToo()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("In both runs it finds, for each pull request, the Fyrd session that built it", d, StringComparison.Ordinal);
+        Assert.Contains("`current_branches`", d, StringComparison.Ordinal);
+        Assert.Contains("the session id of the Fyrd session that built it from step 1", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("(scheduled runs only)", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_ScheduledRunsReviewOnlyFyrdBuiltPullRequests()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("every pull request built by Fyrd and merged in the past 24 hours", d, StringComparison.Ordinal);
+        Assert.Contains("its head branch starts with `fyrd/`", d, StringComparison.Ordinal);
+        Assert.Contains("Skip every other pull request.", d, StringComparison.Ordinal);
+        Assert.Contains("keeps only the ones built by Fyrd", d, StringComparison.Ordinal);
+        Assert.Contains("whatever its state, age or who built it", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_ManualRunOnAnyStackedPullRequestReviewsTheWholeStack()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("A link to any pull request in a stack means the whole stack", d, StringComparison.Ordinal);
+        Assert.Contains("always look up its stack (`GET /repos/{owner}/{repo}/stacks?pull_request=<n>`", d, StringComparison.Ordinal);
+        Assert.Contains("In a manual run it looks up the linked pull request's stack", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_UsesTheCronWithoutJitter()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("Use this cron exactly as given, without jitter", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_WorkersReadPersonasAndSkillsAtOriginMain()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("run `git fetch origin main` first and read every persona and skill at `origin/main`", d, StringComparison.Ordinal);
+        Assert.Contains("`git show origin/main:personas/hub/builder.md`", d, StringComparison.Ordinal);
+        Assert.Contains("never the working tree", d, StringComparison.Ordinal);
+        Assert.Contains("already handled in the current text (at `origin/main`", d, StringComparison.Ordinal);
+        Assert.Contains("the exact current wording (at `origin/main`)", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_BuildingSessionLookupHasAPrecedence_AndNoTimeLimit()
+    {
+        var d = Get("tuner").Definition;
+        var link = d.IndexOf("(1) the `claude.ai/code/session_…` link in the pull request's body, confirmed with `get_session` and its `fyrd-hub` tag", StringComparison.Ordinal);
+        var branch = d.IndexOf("(2) a session whose `current_branches` equals the head branch", StringComparison.Ordinal);
+        var title = d.IndexOf("(3) a session whose title matches only when the head branch is exactly `fyrd/<title>` or `fyrd/<title>-<suffix>`", StringComparison.Ordinal);
+        Assert.True(link > 0 && branch > link && title > branch, "lookup precedence must be body link, then current_branches, then title");
+        Assert.Contains("`fyrd/builder-20` doesn't match `builder-2`", d, StringComparison.Ordinal);
+        Assert.Contains("take the latest one created before the pull request was opened", d, StringComparison.Ordinal);
+        Assert.Contains("This lookup has no time limit in either run", d, StringComparison.Ordinal);
+        Assert.Contains("Filter the `list_sessions` rows by title before calling `get_session`", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("whose title matches the head branch `fyrd/<title>…`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_CapsTranscriptReading()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("`limit: 100`, and page with `before_id`, newest first, at most 5 pages", d, StringComparison.Ordinal);
+        Assert.Contains("Read every `user` turn", d, StringComparison.Ordinal);
+        Assert.Contains("around owner corrections, errors and retries", d, StringComparison.Ordinal);
+        Assert.Contains("say so in your result", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_DuplicateCheckCoversNotPlannedIssues()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("closed as not planned (`state_reason: not_planned`)", d, StringComparison.Ordinal);
+        Assert.Contains("or a not-planned one already turned down, and name that issue in your reply", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_HandlesABareStackLink()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("A bare stack link (`https://github.com/<owner>/<repo>/stacks/<number>`)", d, StringComparison.Ordinal);
+        Assert.Contains("`GET /repos/{owner}/{repo}/stacks/{number}`", d, StringComparison.Ordinal);
+        Assert.Contains("`Tuner: <owner>/<repo> stack <number>`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Controller_RoutesTheTuner_AndDeletesItsTriggerOnTeardown()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("\"Tune <PR or stack url>\"", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd-tune`", d, StringComparison.Ordinal);
+        Assert.Contains("For a Monitor or the Tuner, first delete its scheduled task", d, StringComparison.Ordinal);
     }
 
     [Fact]

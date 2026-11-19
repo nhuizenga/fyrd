@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Peasants delegate each unit of work to a fresh (not forked) background worker; the Controller doesn't, and treats a tagged peasant as busy.</summary>
 public sealed class PersonaWorkerTests : IDisposable
 {
-    private static readonly string[] Peasants = ["builder", "researcher", "reviewer", "validator", "monitor", "investigator"];
+    private static readonly string[] Peasants = ["builder", "researcher", "reviewer", "validator", "monitor", "investigator", "tuner"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();

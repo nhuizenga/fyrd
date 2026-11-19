@@ -5,7 +5,7 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the Controller account skills under <c>skills/controller</c>.</summary>
 public sealed class HubSkillsTests
 {
-    private static readonly string[] Names = ["fyrd-build", "fyrd-investigate", "fyrd-peasant", "fyrd-research", "fyrd-watch"];
+    private static readonly string[] Names = ["fyrd-build", "fyrd-investigate", "fyrd-peasant", "fyrd-research", "fyrd-tune", "fyrd-watch"];
 
     private static string SkillsDir()
     {
@@ -163,6 +163,26 @@ public sealed class HubSkillsTests
         Assert.Contains("for a Researcher only the reviewer one (marked `for=\"researcher\"`)", text, StringComparison.Ordinal);
         Assert.Contains("for a Validator or a Monitor only the investigator one", text, StringComparison.Ordinal);
         Assert.Contains("Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tune_StartsOneTunerOnTheFyrdRepo_SendsManualRuns_AndDeletesItsTrigger()
+    {
+        var text = Read("fyrd-tune");
+        Assert.Contains("fyrd-role-tuner", text, StringComparison.Ordinal);
+        Assert.Contains("<peasant-persona id=\"tuner\" …>", text, StringComparison.Ordinal);
+        Assert.Contains("`source_url: \"https://github.com/nhuizenga/fyrd\"`", text, StringComparison.Ordinal);
+        Assert.Contains("never start a second one", text, StringComparison.Ordinal);
+        Assert.Contains("`Manual run: <link>`", text, StringComparison.Ordinal);
+        Assert.Contains("Set up your daily schedule.", text, StringComparison.Ordinal);
+        Assert.Contains("A link to any pull request in a stack means the whole stack", text, StringComparison.Ordinal);
+        Assert.Contains("isn't limited to pull requests Fyrd built", text, StringComparison.Ordinal);
+        var delete = text.IndexOf("delete_trigger", StringComparison.Ordinal);
+        var archive = text.LastIndexOf("archive_session", StringComparison.Ordinal);
+        Assert.True(delete > 0 && archive > delete, "the trigger must be deleted before the Tuner is archived");
+        Assert.Contains("Monitor or the Tuner", Read("fyrd-peasant"), StringComparison.Ordinal);
+        Assert.Contains("A bare stack link (`…/stacks/<number>`) means that stack", text, StringComparison.Ordinal);
+        Assert.Contains("Tuner starts and manual runs go to `fyrd-tune`, not this skill.", Read("fyrd-peasant"), StringComparison.Ordinal);
     }
 
     [Fact]
