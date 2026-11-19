@@ -378,6 +378,66 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Fact]
+    public void Tuner_UsesTheCronWithoutJitter()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("Use this cron exactly as given, without jitter", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_WorkersReadPersonasAndSkillsAtOriginMain()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("run `git fetch origin main` first and read every persona and skill at `origin/main`", d, StringComparison.Ordinal);
+        Assert.Contains("`git show origin/main:personas/hub/builder.md`", d, StringComparison.Ordinal);
+        Assert.Contains("never the working tree", d, StringComparison.Ordinal);
+        Assert.Contains("already handled in the current text (at `origin/main`", d, StringComparison.Ordinal);
+        Assert.Contains("the exact current wording (at `origin/main`)", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_BuildingSessionLookupHasAPrecedence_AndNoTimeLimit()
+    {
+        var d = Get("tuner").Definition;
+        var link = d.IndexOf("(1) the `claude.ai/code/session_…` link in the pull request's body, confirmed with `get_session` and its `fyrd-hub` tag", StringComparison.Ordinal);
+        var branch = d.IndexOf("(2) a session whose `current_branches` equals the head branch", StringComparison.Ordinal);
+        var title = d.IndexOf("(3) a session whose title matches only when the head branch is exactly `fyrd/<title>` or `fyrd/<title>-<suffix>`", StringComparison.Ordinal);
+        Assert.True(link > 0 && branch > link && title > branch, "lookup precedence must be body link, then current_branches, then title");
+        Assert.Contains("`fyrd/builder-20` doesn't match `builder-2`", d, StringComparison.Ordinal);
+        Assert.Contains("take the latest one created before the pull request was opened", d, StringComparison.Ordinal);
+        Assert.Contains("This lookup has no time limit in either run", d, StringComparison.Ordinal);
+        Assert.Contains("Filter the `list_sessions` rows by title before calling `get_session`", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("whose title matches the head branch `fyrd/<title>…`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_CapsTranscriptReading()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("`limit: 100`, and page with `before_id`, newest first, at most 5 pages", d, StringComparison.Ordinal);
+        Assert.Contains("Read every `user` turn", d, StringComparison.Ordinal);
+        Assert.Contains("around owner corrections, errors and retries", d, StringComparison.Ordinal);
+        Assert.Contains("say so in your result", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_DuplicateCheckCoversNotPlannedIssues()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("closed as not planned (`state_reason: not_planned`)", d, StringComparison.Ordinal);
+        Assert.Contains("or a not-planned one already turned down, and name that issue in your reply", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Tuner_HandlesABareStackLink()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("A bare stack link (`https://github.com/<owner>/<repo>/stacks/<number>`)", d, StringComparison.Ordinal);
+        Assert.Contains("`GET /repos/{owner}/{repo}/stacks/{number}`", d, StringComparison.Ordinal);
+        Assert.Contains("`Tuner: <owner>/<repo> stack <number>`", d, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Controller_RoutesTheTuner_AndDeletesItsTriggerOnTeardown()
     {
         var d = Get("controller").Definition;

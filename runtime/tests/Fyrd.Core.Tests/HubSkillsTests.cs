@@ -151,6 +151,8 @@ public sealed class HubSkillsTests
         var archive = text.LastIndexOf("archive_session", StringComparison.Ordinal);
         Assert.True(delete > 0 && archive > delete, "the trigger must be deleted before the Tuner is archived");
         Assert.Contains("Monitor or the Tuner", Read("fyrd-peasant"), StringComparison.Ordinal);
+        Assert.Contains("A bare stack link (`…/stacks/<number>`) means that stack", text, StringComparison.Ordinal);
+        Assert.Contains("Tuner starts and manual runs go to `fyrd-tune`, not this skill.", Read("fyrd-peasant"), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -13,6 +13,8 @@ The Lead role is not defined. For "Start a new lead…", reply "The Lead role is
 
 Request: "Start a new builder/reviewer/validator/investigator [suffix]". The task is `Wait for your task.`
 
+Tuner starts and manual runs go to `fyrd-tune`, not this skill.
+
 Decide first, ask second, change last: nothing is archived and no trigger is deleted until the session-cap check has passed and you know which sessions are actually being started.
 
 1. **Title.** `<role>-<suffix>`, lowercase with hyphens: the owner's suffix, else the input's file name without extension, else the lowest free number (`builder-1`).
