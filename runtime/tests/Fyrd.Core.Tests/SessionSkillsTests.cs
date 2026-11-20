@@ -71,6 +71,9 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.True(edited.UpdateAvailable);
         var reset = again.Reset("fyrd-stacks");
         Assert.Equal("# Stacks\n\nBetter stack rules.", reset.Body);
+        Assert.True(reset.InPlugin); // the reset response is flagged like a read
+        Assert.True(reset.IsDefault);
+        Assert.False(reset.UpdateAvailable);
         Assert.False(again.Get("fyrd-stacks")!.UpdateAvailable);
     }
 
