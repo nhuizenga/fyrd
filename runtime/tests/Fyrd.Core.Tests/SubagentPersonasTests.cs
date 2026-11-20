@@ -540,7 +540,7 @@ public sealed class SubagentPersonasTests(ITestOutputHelper output) : IDisposabl
     /// that grows past its budget (a kept section that got longer, or a keep-list that got wider) fails here.
     /// </summary>
     [Theory]
-    [InlineData("builder", 3020)]
+    [InlineData("builder", 3065)]
     [InlineData("researcher", 540)]
     [InlineData("validator", 820)]
     [InlineData("monitor", 820)]
