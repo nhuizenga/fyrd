@@ -408,7 +408,7 @@ public sealed class HubSeedTests : IDisposable
     [InlineData("monitor", 2070)]
     [InlineData("researcher", 2430)]
     [InlineData("reviewer", 2680)]
-    [InlineData("tuner", 2940)]
+    [InlineData("tuner", 3040)]
     [InlineData("validator", 2350)]
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
@@ -560,6 +560,47 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("never open an issue", d, StringComparison.Ordinal);
         foreach (var gone in new[] { "issue_write", "Tuner: <", "open exactly one issue", "the issue link", "The one issue per run", "in a GitHub issue" })
             Assert.DoesNotContain(gone, d, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Finding the ledger: the whole listing is paged, a candidate is confirmed as the Tuner's own page, a failed listing
+    /// never leads to a second ledger, and a new ledger's database is checked before rows go in.
+    /// </summary>
+    [Fact]
+    public void Tuner_FindsTheLedgerSafely()
+    {
+        var d = Get("tuner").Definition;
+        var ledger = d[d.IndexOf("# The ledger", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
+        Assert.Contains("`list` action (`scope: \"mine\"`, `limit: 200`, `page_token`) to the end", ledger, StringComparison.Ordinal);
+        Assert.Contains("confirm each with `read`: header `writer`, and the page has the `Fyrd Tuner ledger` comment", ledger, StringComparison.Ordinal);
+        Assert.Contains("Of several, take the oldest and name the others in your reply", ledger, StringComparison.Ordinal);
+        Assert.Contains("A failed `list` is not none: end the run and report", ledger, StringComparison.Ordinal);
+        Assert.Contains("then `ArtifactData` `list` `proposals` once to check its database answers", ledger, StringComparison.Ordinal);
+        Assert.DoesNotContain("fyrd-remember", ledger, StringComparison.Ordinal);
+        var html = File.ReadAllText(Path.Combine(SeedDir(), "tuner", "ledger.html"));
+        Assert.Contains("<!--\n  Fyrd Tuner ledger:", html, StringComparison.Ordinal);
+    }
+
+    /// <summary>The Tuner reads a row's status exactly as the page shows it, so only a row the owner declined is treated as turned down.</summary>
+    [Fact]
+    public void Tuner_ReadsStatusAsThePageDoes()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("Read `status` as the page does: anything but exactly `accepted` or `declined` is `open`, and only `declined` is turned down.", d, StringComparison.Ordinal);
+        var html = File.ReadAllText(Path.Combine(SeedDir(), "tuner", "ledger.html"));
+        Assert.Contains("const STATUSES = [\"open\", \"accepted\", \"declined\"];", html, StringComparison.Ordinal);
+        Assert.Contains("function statusOf(d) { return STATUSES.includes(d.status) ? d.status : \"open\"; }", html, StringComparison.Ordinal);
+    }
+
+    /// <summary>Rows go in bounded batches, never over an existing row, and proposals that couldn't be recorded still reach the reply.</summary>
+    [Fact]
+    public void Tuner_WritesRowsInBoundedBatches_AndReportsUnrecordedProposals()
+    {
+        var d = Get("tuner").Definition;
+        Assert.Contains("at most 50 rows and under 1 MiB per batch", d, StringComparison.Ordinal);
+        Assert.Contains("on a collision (a retry, or a run in the same minute) re-read the ids and take the next free `<n>`", d, StringComparison.Ordinal);
+        Assert.Contains("Never change or delete a row", d, StringComparison.Ordinal);
+        Assert.Contains("If a ledger lookup, publish or write fails or isn't approved, put the proposals in your final reply, saying they weren't recorded.", d, StringComparison.Ordinal);
     }
 
     /// <summary>The Tuner keeps to changes that apply across organizations, and flags, never drops, one that doesn't.</summary>
