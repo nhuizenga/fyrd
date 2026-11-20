@@ -1,10 +1,12 @@
 ---
 name: tune
-description: "Fyrd Controller only: use when the Fyrd Controller is asked to start the Tuner, or to have it review a pull request or stack for ways to improve the Fyrd personas and skills. Never use this outside the Fyrd Controller session."
+description: "Start the Fyrd Tuner: use when asked to start the Tuner session, or to have it review a pull request or stack for ways to improve the Fyrd personas and skills. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
 kind: controller-skill
 ---
 
 # tune
+
+**Needs:** the instructions Fyrd sends the Controller, with their `<hub-settings>`, `<peasant-persona>` and `<shared-memory>` blocks, and the `mcp__claude-code-remote__*` session tools. Without them, start and change nothing: say which is missing and carry on without this skill.
 
 Starts the Tuner (role `tuner`) and sends it manual runs. The Tuner persona holds the reviewing behavior: it sets up its own daily scheduled task (01:00 Pacific) and records its proposals in a private claude.ai artifact, `Tuner proposals`, never in a public issue. You only start it, give it links and tear it down. There is at most one live Tuner; never start a second one while one is live.
 

@@ -1,10 +1,12 @@
 ---
 name: build
-description: "Fyrd Controller only: use when the Fyrd Controller is asked to build from a list of GitHub file URLs or claude.ai artifact links, such as plans or specs. Never use this outside the Fyrd Controller session."
+description: "Start Fyrd Builders: use when asked to build from a list of GitHub file URLs or claude.ai artifact links, such as plans or specs, by starting one Builder session per link. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
 kind: controller-skill
 ---
 
 # build
+
+**Needs:** the instructions Fyrd sends the Controller, with their `<hub-settings>`, `<peasant-persona>` and `<shared-memory>` blocks, and the `mcp__claude-code-remote__*` session tools. Without them, start and change nothing: say which is missing and carry on without this skill.
 
 Request: "Build the following: {uri list}". Start one Builder per uri, all at once. You write no code yourself. The naming, tag, recycle and session-cap rules are the Controller prompt's; `fyrd:peasant` has the full step list.
 
@@ -15,7 +17,7 @@ Request: "Build the following: {uri list}". Start one Builder per uri, all at on
 5. **Create.** Call `mcp__claude-code-remote__create_session` once per uri, in parallel, with:
    - `title` from step 1; `tags: ["fyrd-hub", "fyrd-role-builder"]`.
    - `environment_id` from `<hub-settings>` (omit when empty), `permission_mode: "auto"`, `model` from `<peasant-persona id="builder" …>`.
-   - `append_system_prompt`: the builder persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="builder">…</role-memory>`, then a blank line, `<subagent-persona id="validator">…</subagent-persona>` (the text inside `<subagent-persona-text id="validator">`), a blank line, `<subagent-persona id="reviewer">…</subagent-persona>` (the text inside `<subagent-persona-text id="reviewer" for="builder">`), a blank line and `<subagent-persona id="investigator">…</subagent-persona>` (the text inside `<subagent-persona-text id="investigator">`). Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.
+   - `append_system_prompt`: the builder persona text, a blank line, `<shared-memory>…</shared-memory>`, then if the role has memory a blank line and `<role-memory role="builder">…</role-memory>`.
    - `prompt`, followed by the uri verbatim on its own line:
      ```
      Build what the input below describes.

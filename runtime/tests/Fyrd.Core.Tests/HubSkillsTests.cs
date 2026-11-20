@@ -36,14 +36,24 @@ public sealed class HubSkillsTests
         Assert.Contains("`fyrd:peasant` has the full step list", Read("build"), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// No skill is reserved to a role (owner's decision): a description says when to use the skill and what it needs,
+    /// never who may run it, and the body opens with the same needs and says what to do without them.
+    /// </summary>
     [Fact]
-    public void DescriptionsStartWithFyrdControllerOnly()
+    public void Descriptions_SayWhenToUseAndWhatTheyNeed_NotWhoMayRunThem()
     {
         foreach (var n in Names)
         {
             var m = Regex.Match(Read(n), @"^description: (.+)$", RegexOptions.Multiline);
             Assert.True(m.Success, n);
-            Assert.StartsWith("Fyrd Controller only:", m.Groups[1].Value.Trim().Trim((char)34));
+            var d = m.Groups[1].Value.Trim().Trim((char)34);
+            Assert.DoesNotContain("Controller only", d, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Never use this", d, StringComparison.Ordinal);
+            Assert.Contains(": use when asked to ", d, StringComparison.Ordinal);
+            Assert.EndsWith("Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools.", d, StringComparison.Ordinal);
+            Assert.Contains($"# {n}\n\n**Needs:** ", Read(n).ReplaceLineEndings("\n"), StringComparison.Ordinal);
+            Assert.Contains("Without them, start and change nothing: say which is missing and carry on without this skill.", Read(n), StringComparison.Ordinal);
         }
     }
 
@@ -111,7 +121,7 @@ public sealed class HubSkillsTests
     }
 
     [Fact]
-    public void Build_CarriesBaseBranchSubagentPersonasAndPushAsYouGo()
+    public void Build_CarriesBaseBranchAndPushAsYouGo()
     {
         var text = Read("build");
         Assert.Contains("Base branch:", text, StringComparison.Ordinal);
@@ -119,24 +129,18 @@ public sealed class HubSkillsTests
         Assert.Contains("source_revision", text, StringComparison.Ordinal);
         Assert.Contains("push the branch as you go", text, StringComparison.Ordinal);
         Assert.Contains("draft pull request", text, StringComparison.Ordinal);
-        Assert.Contains("<subagent-persona id=\"validator\">", text, StringComparison.Ordinal);
-        Assert.Contains("<subagent-persona id=\"reviewer\">", text, StringComparison.Ordinal);
-        Assert.Contains("<subagent-persona-text id=\"validator\">", text, StringComparison.Ordinal);
-        Assert.Contains("<subagent-persona-text id=\"reviewer\" for=\"builder\">", text, StringComparison.Ordinal);
     }
 
-    /// <summary>A subagent block holds the cut text Fyrd sends, never a whole persona.</summary>
-    [Theory]
-    [InlineData("build")]
-    [InlineData("peasant")]
-    [InlineData("research")]
-    [InlineData("watch")]
-    public void SubagentBlocks_AreCopiedFromTheSubagentPersonaTexts(string name)
+    /// <summary>
+    /// A session's <c>append_system_prompt</c> carries no persona text for its persona subagents: each subagent loads its
+    /// persona's plugin skill itself, as the coordinator's brief tells it.
+    /// </summary>
+    [Fact]
+    public void NoStart_AddsPersonaTextForSubagents()
     {
-        var text = Read(name);
-        Assert.Contains("<subagent-persona-text", text, StringComparison.Ordinal);
-        foreach (var whole in new[] { "(the validator persona text)", "(the reviewer persona text)", "(the investigator persona text)", "with the investigator persona text", "with those personas' text" })
-            Assert.DoesNotContain(whole, text, StringComparison.Ordinal);
+        foreach (var n in Names)
+            Assert.DoesNotContain("subagent-persona", Read(n), StringComparison.Ordinal);
+        Assert.Contains("Nothing else: a peasant that runs persona subagents has them load the persona skills themselves.", Read("peasant"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,27 +152,6 @@ public sealed class HubSkillsTests
         Assert.Contains("Never start an Investigator because a peasant asked", text, StringComparison.Ordinal);
         Assert.Contains("post nothing anywhere", text, StringComparison.Ordinal);
         Assert.Contains("publish your findings as a claude.ai artifact", text, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Theory]
-    [InlineData("build")]
-    [InlineData("peasant")]
-    [InlineData("watch")]
-    public void BuilderValidatorAndMonitorStarts_CarryTheInvestigatorPersona(string name)
-    {
-        Assert.Contains("<subagent-persona id=\"investigator\">", Read(name), StringComparison.Ordinal);
-        Assert.Contains(name == "peasant" ? "<subagent-persona-text>" : "<subagent-persona-text id=\"investigator\">", Read(name), StringComparison.Ordinal);
-    }
-
-    /// <summary>The reviewer has two subagent texts; the peasant skill says which goes to a Builder and which to a Researcher.</summary>
-    [Fact]
-    public void Peasant_PicksTheReviewerTextByTheRoleItIsFor()
-    {
-        var text = Read("peasant");
-        Assert.Contains("each holding the text inside the `<subagent-persona-text>` block with that `id` (for the reviewer, the one marked `for=\"builder\"`)", text, StringComparison.Ordinal);
-        Assert.Contains("for a Researcher only the reviewer one (marked `for=\"researcher\"`)", text, StringComparison.Ordinal);
-        Assert.Contains("for a Validator or a Monitor only the investigator one", text, StringComparison.Ordinal);
-        Assert.Contains("Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -192,13 +175,6 @@ public sealed class HubSkillsTests
         Assert.Contains("records its proposals in a private claude.ai artifact, `Tuner proposals`, never in a public issue", text, StringComparison.Ordinal);
         Assert.DoesNotContain("issue link", text, StringComparison.Ordinal);
         Assert.DoesNotContain("opens its issues", text, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Research_GivesTheResearcherTheReviewerPersona()
-    {
-        Assert.Contains("<subagent-persona id=\"reviewer\">", Read("research"), StringComparison.Ordinal);
-        Assert.Contains("<subagent-persona-text id=\"reviewer\" for=\"researcher\">", Read("research"), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -227,7 +203,7 @@ public sealed class HubSkillsTests
         Assert.Equal(Names, skills.Select(s => s.Name));
         Assert.All(skills, s =>
         {
-            Assert.StartsWith("Fyrd Controller only:", s.Description);
+            Assert.DoesNotContain("Controller only", s.Description, StringComparison.OrdinalIgnoreCase);
             Assert.StartsWith("# " + s.Name, s.Body);
         });
     }
