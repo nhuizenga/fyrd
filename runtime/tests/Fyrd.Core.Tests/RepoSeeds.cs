@@ -17,11 +17,11 @@ internal static class RepoSeeds
 
     public static IReadOnlyList<HubPersona> Personas(FyrdPaths paths) => new HubPersonas(paths, Dir("personas", "hub")).List();
 
-    public static IReadOnlyList<SessionSkill> SessionSkills(FyrdPaths paths) => new SessionSkills(paths, Dir("skills", "session")).List();
+    public static IReadOnlyList<SessionSkill> SessionSkills(FyrdPaths paths) => new SessionSkills(paths, Dir("skills")).List();
 
     /// <summary>
     /// Everything a session of this role is told: the persona with its session skills' bodies, as a session gets it
-    /// when no setup script is confirmed. A rule may sit in the persona or in one of its skills.
+    /// when the plugin setup script is not confirmed. A rule may sit in the persona or in one of its skills.
     /// </summary>
     public static string Whole(FyrdPaths paths, string id) =>
         Hub.SessionSkills.Compose(Personas(paths).Single(p => p.Id == id), SessionSkills(paths), installed: false);

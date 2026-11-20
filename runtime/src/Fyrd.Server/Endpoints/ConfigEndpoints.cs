@@ -27,9 +27,9 @@ internal static class ConfigEndpoints
                 SessionDailyLimitUsd = Has(nameof(FyrdConfig.SessionDailyLimitUsd)) ? body.SessionDailyLimitUsd : stored.SessionDailyLimitUsd,
                 FyrdDailyLimitUsd = Has(nameof(FyrdConfig.FyrdDailyLimitUsd)) ? body.FyrdDailyLimitUsd : stored.FyrdDailyLimitUsd,
                 TimeZone = Has(nameof(FyrdConfig.TimeZone)) ? body.TimeZone : stored.TimeZone,
-                // Only the session-skill endpoints record a confirmed setup script. It was confirmed for one environment,
+                // Only the session-skill endpoints record a confirmed plugin setup script. It was confirmed for one environment,
                 // so a change of environment drops it: sessions there get the skills' text until the script is pasted again.
-                SessionSkillsHash = string.Equals(body.EnvironmentId, stored.EnvironmentId, StringComparison.Ordinal) ? stored.SessionSkillsHash : null,
+                SessionSkillsPlugin = string.Equals(body.EnvironmentId, stored.EnvironmentId, StringComparison.Ordinal) && stored.SessionSkillsPlugin,
             }));
         }));
 

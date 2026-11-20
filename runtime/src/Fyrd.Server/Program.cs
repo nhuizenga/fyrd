@@ -62,7 +62,7 @@ builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Config
     ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "controller"))));
 builder.Services.AddSingleton(sp => new SessionSkills(sp.GetRequiredService<FyrdPaths>(),
     Path.GetFullPath(builder.Configuration["Fyrd:SessionSkillsSeedDir"]
-        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "session"))));
+        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));
 builder.Services.AddSingleton<HubMemory>();
 builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();
