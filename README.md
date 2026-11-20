@@ -18,7 +18,13 @@ The repository is public and MIT licensed.
 
 ## Install
 
-Requires Claude Code, Node, npm and the .NET 10 SDK.
+Requires:
+
+- Claude Code, Node, npm and the .NET 10 SDK.
+- The `claude` CLI on your `PATH`, signed in with a claude.ai account that can use Claude Code on the web: run `claude auth login`. Fyrd creates the Controller and sends it messages through that CLI, and reads its claude.ai OAuth login from `~/.claude/.credentials.json` to follow the cloud sessions.
+- A GitHub token for anything with pull requests, which is most work: see [Configuration](#configuration).
+
+Windows is the primary platform. On macOS and Linux, Fyrd gives `claude` a terminal with the `script` utility (util-linux or BSD), so that must be installed, and **Settings › Environment** can't save secrets: set the environment variables instead.
 
 ```
 /plugin marketplace add nhuizenga/fyrd
@@ -47,7 +53,7 @@ All of Fyrd's prompts are skills of this plugin, at `skills/<name>/SKILL.md`, lo
 
 ### Cloud environment setup
 
-By default every session gets its session skills and the Controller its request skills as text in their instructions. Paste the short setup script the console shows (**Settings › Session skills**) into your cloud environment and it installs the fyrd plugin from this repository, so sessions load the skills on demand and start with shorter instructions. [docs/session-skills.md](docs/session-skills.md) is the step-by-step guide.
+By default every session gets its session skills and the Controller its request skills as text in their instructions. Paste the short setup script the console shows (**Settings › Session skills**) into your cloud environment and it installs the fyrd plugin from this repository, so sessions load the skills on demand and start with shorter instructions. Once the script is pasted and the environment saved, click **I've pasted this script** in **Settings › Session skills**: until you do, sessions keep getting the skills as text. Then replace the Controller (Sessions › **Replace Controller**, then **Create Controller**), since a Controller that started before the plugin was installed doesn't have its skills. [docs/session-skills.md](docs/session-skills.md) is the step-by-step guide.
 
 ### Personas
 
@@ -66,7 +72,7 @@ Environment variables:
 
 - `FYRD_HOME` moves the data directory (default `~/.fyrd/data`). It moves data only; `~/.fyrd/run` (PID/port, log) is always shared.
 - `FYRD_NO_BROWSER=1` stops `/fyrd:up` from opening a browser.
-- `GH_TOKEN` (or, as a fallback, `GITHUB_TOKEN`) is the GitHub token Fyrd uses to read pull requests, mark them ready and squash-merge them. Without it no session shows any PRs, and `/fyrd:up` prints a warning. A classic token with `repo` works; a fine-grained token needs **Pull requests: read/write**, **Contents: read/write**, **Commit statuses: read** and **Checks: read** on the repos Fyrd works in. The server reads it at startup and keeps it in memory only. You can also save a token (and an optional Anthropic API key) under **Settings › Environment**: it is stored encrypted with Windows DPAPI, overrides `GH_TOKEN`, applies immediately, and "Remove saved value" goes back to the environment variable. After changing the environment variable, run `/fyrd:down` then `/fyrd:up`. If you use `gh`, `export GH_TOKEN=$(gh auth token)` before `/fyrd:up`. `/fyrd:status` shows `GitHub: signed in as <login>`.
+- `GH_TOKEN` (or, as a fallback, `GITHUB_TOKEN`) is the GitHub token Fyrd uses to read pull requests, mark them ready and squash-merge them. Without it no session shows any PRs, and `/fyrd:up` prints a warning. A classic token with `repo` works; a fine-grained token needs **Pull requests: read/write**, **Contents: read/write**, **Commit statuses: read** and **Checks: read** on the repos Fyrd works in. The server reads it at startup and keeps it in memory only. On Windows you can also save a token (and an optional Anthropic API key) under **Settings › Environment**: it is stored encrypted with Windows DPAPI, overrides `GH_TOKEN`, applies immediately, and "Remove saved value" goes back to the environment variable. On macOS and Linux saving is not available (Save is disabled), so use the environment variable. After changing the environment variable, run `/fyrd:down` then `/fyrd:up`. If you use `gh`, `export GH_TOKEN=$(gh auth token)` before `/fyrd:up`. `/fyrd:status` shows `GitHub: signed in as <login>`.
 
 ## Tests
 
