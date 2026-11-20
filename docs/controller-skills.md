@@ -1,10 +1,17 @@
 # Controller skills
 
-Six skills the Fyrd Controller cloud session uses: `fyrd-research`, `fyrd-build`, `fyrd-investigate`, `fyrd-peasant`, `fyrd-tune`, `fyrd-watch`. Each description starts with `Fyrd Controller only:`. The rules live in `personas/hub/controller.md`; each skill gives the tool-call steps for one request type.
+Six request skills the Fyrd Controller cloud session uses: `fyrd:research`, `fyrd:build`, `fyrd:investigate`, `fyrd:peasant`, `fyrd:tune`, `fyrd:watch`. Each is a skill of the fyrd plugin at `skills/<name>/SKILL.md` with `kind: controller-skill` in its front matter, and each description starts with `Fyrd Controller only:`, because the plugin is installed environment-wide and every cloud session lists them. The rules live in the Controller persona, `skills/controller/SKILL.md`; each skill gives the tool-call steps for one request type, and the Controller runs one as `/fyrd:<name>`.
+
+## Personas are plugin skills too
+
+Every persona is a skill of the fyrd plugin at `skills/<id>/SKILL.md` with `kind: persona`: `fyrd:builder`, `fyrd:controller`, `fyrd:investigator`, `fyrd:monitor`, `fyrd:researcher`, `fyrd:reviewer`, `fyrd:tuner` and `fyrd:validator`. The skill body is the persona text and the only copy of it: the Fyrd service seeds its personas from these files (`persona-name`, `persona-model` and `persona-locked` in the front matter give the rest), and `skills/persona-seed-history.json` lists the hash of every version (`node scripts/seed-history.mjs` updates it). They set `disable-model-invocation: true`, so no session loads one by itself; you run `/fyrd:builder` in a session to make it act as a Builder, or to read a persona. Sessions the Controller starts still get their persona in their system prompt, from the `<peasant-persona>` blocks below.
 
 ## Delivery (automatic)
 
-Nothing is uploaded to claude.ai. The Fyrd service reads `skills/controller/*/SKILL.md` and embeds each skill in the Controller's message as a `<controller-skill>` block, after the peasant personas and the subagent persona texts. It reads the files on every poll pass, so a `git pull` is enough.
+Nothing is uploaded to claude.ai. The Fyrd service reads the request skills from `skills/*/SKILL.md` on every poll pass, so a `git pull` is enough, and puts them in the Controller's message after the peasant personas and the subagent persona texts:
+
+- **Plugin confirmed.** When the owner confirmed that the environment's setup script installs the fyrd plugin (Settings › Session skills, see `docs/session-skills.md`), the message carries one `<controller-skills>` block with a line per skill: the name the Controller loads it by (`fyrd:<name>`) and its description. The Controller loads the skill with the Skill tool before it acts, and stops and tells the owner if the skill is not in its list.
+- **Otherwise** the message embeds each skill as a `<controller-skill name="fyrd:<name>">` block with its whole text, so a Controller works without the plugin. A block wins over a plugin skill of the same name.
 
 The same message carries one `<peasant-persona>` block per role with the whole persona and, after it, the role's session skills (`runtime/src/Fyrd.Core/Hub/SessionSkills.cs`, `docs/session-skills.md`): a `# Session skills` section with one line per plugin skill (`fyrd:<name>`) when the owner confirmed that the environment's setup script installs the fyrd plugin, else, and for a skill edited or added in the console, the skill's whole body as a section. The Controller copies the block's text as it is into the `append_system_prompt` of a session of that role, so it needs no rule of its own for session skills, and `<subagent-persona-text>` blocks (`validator`, `reviewer` once `for="builder"` and once `for="researcher"`, `investigator`). Those hold only the part of a persona that a subagent needs; the service cuts them from the stored persona by heading (`runtime/src/Fyrd.Core/Hub/SubagentPersonas.cs` has the keep-lists) each time it builds the message, and falls back to the whole persona when a part it needs is gone: a heading or the Inputs bullet renamed, the investigator's Untrusted content bullet renamed or removed (the validator and reviewer personas have none, so for them it is kept only when present), or the reviewer's "Whoever does the reviewing…" paragraph moved out of Reviewing a plan or reworded at its start. It also falls back when a heading the cut keeps appears twice. A persona with an empty definition gets no block. The skills tell the Controller to copy them, not whole personas, into the `<subagent-persona>` blocks of a Builder, Researcher, Validator or Monitor.
 
@@ -12,7 +19,7 @@ The first time a service that has this feature polls an existing Controller, it 
 
 ## One-time cleanup
 
-If you uploaded the `fyrd-*` skills to claude.ai earlier, remove the uploaded fyrd-* skills: open Settings > Capabilities > Skills and delete (or disable) `fyrd-research`, `fyrd-build`, `fyrd-peasant` and `fyrd-watch`. Until you do, a stale copy stays visible to every session. The Controller prefers the inline blocks when names clash.
+If you uploaded the `fyrd-*` skills to claude.ai earlier, remove the uploaded fyrd-* skills: open Settings > Capabilities > Skills and delete (or disable) `fyrd-research`, `fyrd-build`, `fyrd-peasant` and `fyrd-watch`. Until you do, a stale copy stays visible to every session. The plugin skills that replace them are named `fyrd:<name>`.
 
 ## Create the Controller
 

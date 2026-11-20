@@ -41,7 +41,7 @@ The repository is public, so the script needs nothing from Fyrd or your computer
    - If the script has content of your own, keep it and add the block (before or after it; the block doesn't depend on the rest and can't stop it).
    - If the script has a Fyrd block from an earlier version, from its `# >>> fyrd session skills … >>>` line to its `# <<< fyrd session skills <<<` line, replace that block with the new one. Keep one Fyrd block only.
 5. **Save** the environment.
-6. **Confirm in the console.** Back in **Settings › Session skills**, click **I've pasted this script**. The status changes to **Installed**. Sessions the Controller creates from now on get the short persona text. The Controller gets its new instructions the next time it is idle, so a session it creates in the moment between may still get the inline text.
+6. **Confirm in the console.** Back in **Settings › Session skills**, click **I've pasted this script**. The status changes to **Installed**. Sessions the Controller creates from now on get the short persona text. The Controller's own request skills (`fyrd:build`, `fyrd:research` and the rest, see `docs/controller-skills.md`) come from the plugin too, instead of as text in its instructions. The Controller gets its new instructions the next time it is idle, so a session it creates in the moment between may still get the inline text.
 
 Confirm only after you saved the environment. If you confirm without the script in place, a Builder that needs a skill doesn't find it in its skill list. Its instructions tell it to stop and ask you. Paste the script, or click **Stop using the script**.
 
