@@ -7,7 +7,10 @@ public sealed record HubSkill(string Name, string Description, string Body);
 /// <summary>
 /// The Controller request skills: the plugin skills <c>skills/&lt;name&gt;/SKILL.md</c> whose front matter says
 /// <c>kind: controller-skill</c>, which a Controller with the fyrd plugin loads as <c>fyrd:&lt;name&gt;</c>. They are read
-/// from disk on every call (the files are small), so a <c>git pull</c> reaches the Controller without a restart.
+/// from disk on every call (the files are small), so in inline mode, where the Controller's message holds their bodies,
+/// a <c>git pull</c> reaches the Controller without a restart. In plugin mode the message holds only their names and
+/// descriptions: the Controller runs the bodies of the plugin version cached when its session started, so a body change
+/// reaches it only after a plugin version bump, a marketplace update and a new Controller session.
 /// </summary>
 public sealed class HubSkills(string dir)
 {

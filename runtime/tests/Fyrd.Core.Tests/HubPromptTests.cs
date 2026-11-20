@@ -60,6 +60,9 @@ public sealed class HubPromptTests : IDisposable
         Assert.DoesNotContain("BUILD-BODY", installed, StringComparison.Ordinal);
         Assert.Contains("<controller-skills plugin=\"fyrd\">\n" + HubPrompt.ControllerSkillsIntro + "\n\n"
             + "- `fyrd:build`: Fyrd Controller only: build.\n- `fyrd:peasant`: Fyrd Controller only: peasants.\n</controller-skills>", installed, StringComparison.Ordinal);
+        // A Controller that started before the plugin was installed has none of them: it is told to have the owner replace it.
+        Assert.Contains("If the fyrd: skills are not in your skill list, this session started before the plugin was installed: do not act on the request, "
+            + "and tell the owner to replace the Controller (in the Fyrd console, Sessions, Replace Controller, then Create Controller).", installed, StringComparison.Ordinal);
         Assert.True(installed.IndexOf("<subagent-persona-text", StringComparison.Ordinal) < installed.IndexOf("<controller-skills", StringComparison.Ordinal));
         // The peasant personas and subagent texts are the same either way.
         Assert.Contains("<peasant-persona id=\"validator\"", installed, StringComparison.Ordinal);

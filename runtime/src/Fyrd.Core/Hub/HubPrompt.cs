@@ -59,10 +59,15 @@ public static partial class HubPrompt
         return string.Join("\n\n", sections);
     }
 
-    /// <summary>Said once above the request skills' lines when the Controller loads them from the fyrd plugin.</summary>
+    /// <summary>
+    /// Said once above the request skills' lines when the Controller loads them from the fyrd plugin. A Controller that
+    /// started before the owner installed the plugin gets these lines too, but its skill list has no <c>fyrd:</c> skills,
+    /// and only a new Controller session has them, so it names that step.
+    /// </summary>
     public const string ControllerSkillsIntro =
         "Your request skills are skills of the fyrd plugin in your session, not text here. Before you act on a request a line below covers, load its skill with the Skill tool. "
-        + "If the skill is not in your skill list, stop and tell the owner.";
+        + "If the fyrd: skills are not in your skill list, this session started before the plugin was installed: do not act on the request, "
+        + "and tell the owner to replace the Controller (in the Fyrd console, Sessions, Replace Controller, then Create Controller).";
 
     /// <summary>
     /// The request skills as one block of lines, a line per skill with the name the Controller loads it by
