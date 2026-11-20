@@ -101,7 +101,8 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var validator = RepoSeeds.Personas(_home.Paths).Single(p => p.Id == "validator").Definition;
         Assert.Contains("run the Validate dbt skill's checks (`fyrd:validate-dbt`) here and in step 3", Section(validator, "# The check"), StringComparison.Ordinal);
         var builder = Builder().Definition;
-        Assert.Contains("In a dbt project, also run the checks of the Validate dbt skill (`fyrd:validate-dbt`) and return its report", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("In a dbt project, also run the checks of the Validate dbt skill (`fyrd:validate-dbt`)", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("how it was tested, any Validate dbt report,", Section(builder, "# Build rules"), StringComparison.Ordinal);
         Assert.Contains("load Validate dbt (`fyrd:validate-dbt`) and do its Builder part", Section(builder, "# Your job"), StringComparison.Ordinal);
     }
 
@@ -131,7 +132,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     [Theory]
     [InlineData("review-data-modeling", 760)]
     [InlineData("stacked-pull-requests", 540)]
-    [InlineData("validate-dbt", 900)]
+    [InlineData("validate-dbt", 1030)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -226,7 +227,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4350;
+    private const int InstalledBudget = 4365;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
