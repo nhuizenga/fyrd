@@ -10,8 +10,8 @@ public sealed class HubPersonasTests : IDisposable
     public HubPersonasTests()
     {
         Directory.CreateDirectory(_seeds);
-        File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\nname: Builder\nmodel: claude-sonnet-5-5\nlocked: false\n---\nBuild things.");
-        File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-sonnet-5-5\nlocked: true\n---\nControl things.");
+        PersonaSeedFile.Write(_seeds, "builder", "Builder", "claude-sonnet-5-5", false, "Build things.");
+        PersonaSeedFile.Write(_seeds, "controller", "Controller", "claude-sonnet-5-5", true, "Control things.");
     }
 
     public void Dispose()
@@ -36,7 +36,7 @@ public sealed class HubPersonasTests : IDisposable
     }
 
     private void Seed(string id, string name, string body, bool locked = false) =>
-        File.WriteAllText(Path.Combine(_seeds, id + ".md"), $"---\nname: {name}\nmodel: claude-sonnet-5-5\nlocked: {(locked ? "true" : "false")}\n---\n{body}");
+        PersonaSeedFile.Write(_seeds, id, name, "claude-sonnet-5-5", locked, body);
 
     [Fact]
     public void Hash_IsSha256OfNameModelDefinition() =>
@@ -87,7 +87,7 @@ public sealed class HubPersonasTests : IDisposable
             File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, p.Id + ".json"), System.Text.Json.JsonSerializer.Serialize(p, Json.Options));
         File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, ".seeded"), "builder\ncontroller\nscout\n");
         Seed("scout", "Scout", "New scout.");
-        File.WriteAllText(Path.Combine(_seeds, "seed-history.json"), $"{{\"builder\":[\"{HubPersonas.Hash(oldBuilder)}\"]}}");
+        File.WriteAllText(Path.Combine(_seeds, "persona-seed-history.json"), $"{{\"builder\":[\"{HubPersonas.Hash(oldBuilder)}\"]}}");
         var store = Make();
         Assert.Equal("Build things.", store.Get("builder")!.Definition);
         var scout = store.Get("scout")!;
@@ -99,7 +99,7 @@ public sealed class HubPersonasTests : IDisposable
     public void CrlfSeed_HashesLikeLf()
     {
         Make().List();
-        File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\r\nname: Builder\r\nmodel: claude-sonnet-5-5\r\nlocked: false\r\n---\r\nBuild\r\nthings.");
+        File.WriteAllText(Path.Combine(_seeds, "builder", "SKILL.md"), PersonaSeedFile.Text("builder", "Builder", "claude-sonnet-5-5", false, "Build\r\nthings.", "\r\n"));
         var p = Make().Get("builder")!;
         Assert.Equal("Build\nthings.", p.Definition);
     }

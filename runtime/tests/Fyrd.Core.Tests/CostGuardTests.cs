@@ -24,7 +24,7 @@ public sealed class CostGuardTests : IDisposable
     public CostGuardTests()
     {
         Directory.CreateDirectory(_seeds);
-        File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-opus-5-5\nlocked: true\n---\nControl.");
+        PersonaSeedFile.Write(_seeds, "controller", "Controller", "claude-opus-5-5", true, "Control.");
         _config = new ConfigStore(_home.Paths);
         _config.Save(new FyrdConfig(EnvironmentId: "env_abc123", TimeZone: "UTC"));
         _controller = new ControllerManager(_cloud, _owner, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), _config, _home.Paths);

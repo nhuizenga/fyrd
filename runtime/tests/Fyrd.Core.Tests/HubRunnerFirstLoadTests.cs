@@ -32,7 +32,7 @@ public sealed class HubRunnerFirstLoadTests(ITestOutputHelper output) : IDisposa
     private Rig Build(int sessions, int events, TimeSpan latency, IGitHub? gh = null, Func<int, string>? raw = null)
     {
         Directory.CreateDirectory(_seeds);
-        File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: m\nlocked: true\n---\nx");
+        PersonaSeedFile.Write(_seeds, "controller", "Controller", "m", true, "x");
         var cloud = new FakeCloudSessions { PageSize = PageSize };
         var list = Enumerable.Range(0, sessions).Select(i =>
             new CloudSession($"s{i}", $"t{i}", "idle", "connected", null, ["fyrd-hub"],

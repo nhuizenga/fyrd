@@ -23,8 +23,8 @@ public sealed class HubRunnerTests : IDisposable
     public HubRunnerTests()
     {
         Directory.CreateDirectory(_seeds);
-        File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-opus-5-5\nlocked: true\n---\nControl things.");
-        File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\nname: Builder\nmodel: claude-sonnet-5-5\n---\nBuild things.");
+        PersonaSeedFile.Write(_seeds, "controller", "Controller", "claude-opus-5-5", true, "Control things.");
+        PersonaSeedFile.Write(_seeds, "builder", "Builder", "claude-sonnet-5-5", false, "Build things.");
         _memory = new HubMemory(_home.Paths);
         _pending = new PendingMemory(_home.Paths, _memory);
         _personas = new HubPersonas(_home.Paths, _seeds);
@@ -44,9 +44,9 @@ public sealed class HubRunnerTests : IDisposable
     private string _skillsDir = "";
     private ControllerManager WithSkills()
     {
-        _skillsDir = Path.Combine(_seeds, "skills", "fyrd-build");
+        _skillsDir = Path.Combine(_seeds, "skills", "build");
         Directory.CreateDirectory(_skillsDir);
-        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv1");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: build\ndescription: \"d\"\nkind: controller-skill\n---\n# build\nv1");
         var config = new ConfigStore(_home.Paths);
         _controller = new ControllerManager(_cloud, _owner, _personas, _memory, config, _home.Paths, null, new HubSkills(Path.Combine(_seeds, "skills")));
         _guard = new CostGuard(_ledger, config, _cloud, _owner, _controller);
@@ -423,14 +423,14 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default);
         Assert.Empty(_owner.Sent);
 
-        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: build\ndescription: \"d\"\nkind: controller-skill\n---\n# build\nv2");
         await runner.PollOnceAsync(default);
         await runner.PollOnceAsync(default);
 
         var sent = Assert.Single(_owner.Sent);
         Assert.Equal("session_ctl", sent.SessionId);
         Assert.StartsWith(ControllerManager.PromptPreamble, sent.Text);
-        Assert.Contains("<controller-skill name=\"fyrd-build\"", sent.Text);
+        Assert.Contains("<controller-skill name=\"fyrd:build\"", sent.Text);
         Assert.Contains("v2", sent.Text);
         Assert.Equal(_controller.InstructionsHash(), _controller.PostedInstructionsHash);
     }
@@ -443,7 +443,7 @@ public sealed class HubRunnerTests : IDisposable
         WithSkills();
         await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
-        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: build\ndescription: \"d\"\nkind: controller-skill\n---\n# build\nv2");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", status, "connected", null, [], FakeCloudSessions.Empty));
         var runner = Make();
         await runner.PollOnceAsync(default);
@@ -460,7 +460,7 @@ public sealed class HubRunnerTests : IDisposable
         WithSkills();
         await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
-        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: build\ndescription: \"d\"\nkind: controller-skill\n---\n# build\nv2");
         _cloud.SetSession(new CloudSession("session_ctl", "controller", "archived", "connected", null, [], FakeCloudSessions.Empty));
         await Make().PollOnceAsync(default);
         Assert.Empty(_owner.Sent);
@@ -561,7 +561,7 @@ public sealed class HubRunnerTests : IDisposable
         WithSkills();
         await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
-        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: fyrd-build\ndescription: \"d\"\n---\n# fyrd-build\nv2");
+        File.WriteAllText(Path.Combine(_skillsDir, "SKILL.md"), "---\nname: build\ndescription: \"d\"\nkind: controller-skill\n---\n# build\nv2");
         _memory.Add(HubMemory.Shared, "Ship on Fridays is fine.", "owner", _time.GetUtcNow());
         _owner.ThrowOnNextCall(new OwnerMessageException("claude timed out"));
 

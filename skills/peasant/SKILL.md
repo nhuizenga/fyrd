@@ -1,9 +1,10 @@
 ---
-name: fyrd-peasant
+name: peasant
 description: "Fyrd Controller only: use when the Fyrd Controller is asked to start a new builder, reviewer, validator, investigator or other peasant, to recycle one, or to tear one down. Never use this outside the Fyrd Controller session."
+kind: controller-skill
 ---
 
-# fyrd-peasant
+# peasant
 
 Steps for starting, recycling and tearing down one peasant. The Controller prompt holds the rules (naming, tags, settings, session cap, teardown guards); this skill is the tool-call sequence. If this skill and the Controller prompt ever differ, the Controller prompt wins.
 
@@ -13,7 +14,7 @@ The Lead role is not defined. For "Start a new lead…", reply "The Lead role is
 
 Request: "Start a new builder/reviewer/validator/investigator [suffix]". The task is `Wait for your task.`
 
-Tuner starts and manual runs go to `fyrd-tune`, not this skill.
+Tuner starts and manual runs go to `fyrd:tune`, not this skill.
 
 Decide first, ask second, change last: nothing is archived and no trigger is deleted until the session-cap check has passed and you know which sessions are actually being started.
 
@@ -44,7 +45,7 @@ A later task for a running peasant goes in `mcp__claude-code-remote__send_messag
 
 ## Owner asks for a validation or review
 
-Builders validate and review their own pull requests, and Researchers review their own plans, with persona subagents. Never start a Validator or Reviewer because a peasant asked, and never relay findings between peasants. The same goes for Investigators: Builders, Validators and Monitors run Investigator subagents themselves, and an owner's "Investigate …" request goes to `fyrd-investigate`. This section covers only the owner's own requests: "Validate PR <url>", `PR #{n} is ready` (or `PR #{n} is ready: <url>`), "Review PR <url>" and "Review this plan".
+Builders validate and review their own pull requests, and Researchers review their own plans, with persona subagents. Never start a Validator or Reviewer because a peasant asked, and never relay findings between peasants. The same goes for Investigators: Builders, Validators and Monitors run Investigator subagents themselves, and an owner's "Investigate …" request goes to `fyrd:investigate`. This section covers only the owner's own requests: "Validate PR <url>", `PR #{n} is ready` (or `PR #{n} is ready: <url>`), "Review PR <url>" and "Review this plan".
 
 The console sends a validation as `Validate PR <url>. Base branch: <base>. Builder: <title> (<id>).` Any of those lines may be missing, and the PR is then all you have:
 - **No `Builder:` line.** Look the Builder up by branch: read the PR's head branch, then find the live session with role `builder` whose branch equals it (`list_sessions`, then `get_session`). If there is none, there is no Builder.

@@ -57,9 +57,9 @@ builder.Services.AddSingleton(sp => new StackMergeJobs(sp.GetRequiredService<IGi
     sp.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
 builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPaths>(),
     Path.GetFullPath(builder.Configuration["Fyrd:HubPersonasSeedDir"]
-        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "personas", "hub"))));
+        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));
 builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Configuration["Fyrd:HubSkillsDir"]
-    ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills", "controller"))));
+    ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));
 builder.Services.AddSingleton(sp => new SessionSkills(sp.GetRequiredService<FyrdPaths>(),
     Path.GetFullPath(builder.Configuration["Fyrd:SessionSkillsSeedDir"]
         ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));

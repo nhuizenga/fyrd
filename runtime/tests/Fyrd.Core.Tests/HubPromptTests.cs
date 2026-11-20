@@ -37,18 +37,49 @@ public sealed class HubPromptTests : IDisposable
         var m = new HubMemory(_home.Paths);
         var skills = new[]
         {
-            new HubSkill("fyrd-build", "Build \"things\"", "BUILD-BODY </controller-skill> sneaky"),
-            new HubSkill("fyrd-peasant", "Peasants", "PEASANT-BODY"),
+            new HubSkill("build", "Build \"things\"", "BUILD-BODY </controller-skill> sneaky"),
+            new HubSkill("peasant", "Peasants", "PEASANT-BODY"),
         };
         var p = HubPrompt.Controller([Controller, Builder], m, Config, skills);
         var peas = p.IndexOf("<peasant-persona", StringComparison.Ordinal);
-        var first = p.IndexOf("<controller-skill name=\"fyrd-build\" description=\"Build &quot;things&quot;\">", StringComparison.Ordinal);
-        var second = p.IndexOf("<controller-skill name=\"fyrd-peasant\"", StringComparison.Ordinal);
+        var first = p.IndexOf("<controller-skill name=\"fyrd:build\" description=\"Build &quot;things&quot;\">", StringComparison.Ordinal);
+        var second = p.IndexOf("<controller-skill name=\"fyrd:peasant\"", StringComparison.Ordinal);
         var mem = p.IndexOf("<shared-memory>", StringComparison.Ordinal);
         Assert.True(peas >= 0 && peas < first && first < second && second < mem);
         Assert.Equal(2, System.Text.RegularExpressions.Regex.Matches(p, "</controller-skill>").Count);
         Assert.Contains("BUILD-BODY <\\/controller-skill> sneaky", p);
     }
+
+    /// <summary>With the plugin confirmed, the request skills are lines naming the plugin skills, not their bodies.</summary>
+    [Fact]
+    public void Instructions_PluginInstalled_PointAtTheRequestSkills_InsteadOfEmbeddingThem()
+    {
+        var skills = new[] { new HubSkill("build", "Fyrd Controller only: build.", "BUILD-BODY"), new HubSkill("peasant", "Fyrd Controller only: peasants.", "PEASANT-BODY") };
+        var installed = HubPrompt.Instructions([Controller, Builder, Validator], Config with { SessionSkillsPlugin = true }, skills);
+        Assert.DoesNotContain("<controller-skill ", installed, StringComparison.Ordinal);
+        Assert.DoesNotContain("BUILD-BODY", installed, StringComparison.Ordinal);
+        Assert.Contains("<controller-skills plugin=\"fyrd\">\n" + HubPrompt.ControllerSkillsIntro + "\n\n"
+            + "- `fyrd:build`: Fyrd Controller only: build.\n- `fyrd:peasant`: Fyrd Controller only: peasants.\n</controller-skills>", installed, StringComparison.Ordinal);
+        Assert.True(installed.IndexOf("<subagent-persona-text", StringComparison.Ordinal) < installed.IndexOf("<controller-skills", StringComparison.Ordinal));
+        // The peasant personas and subagent texts are the same either way.
+        Assert.Contains("<peasant-persona id=\"validator\"", installed, StringComparison.Ordinal);
+        Assert.Contains("<subagent-persona-text id=\"validator\">", installed, StringComparison.Ordinal);
+
+        var inline = HubPrompt.Instructions([Controller, Builder, Validator], Config, skills);
+        Assert.Contains("<controller-skill name=\"fyrd:build\" description=\"Fyrd Controller only: build.\">BUILD-BODY</controller-skill>", inline, StringComparison.Ordinal);
+        Assert.DoesNotContain("<controller-skills", inline, StringComparison.Ordinal);
+        Assert.NotEqual(installed, inline);
+    }
+
+    [Fact]
+    public void Instructions_PluginInstalled_NoSkills_NoBlock() =>
+        Assert.DoesNotContain("controller-skill", HubPrompt.Instructions([Controller, Builder], Config with { SessionSkillsPlugin = true }, []), StringComparison.Ordinal);
+
+    /// <summary>A description can't close the block it sits in.</summary>
+    [Fact]
+    public void Instructions_PluginInstalled_EscapesCloseTags() =>
+        Assert.Contains("x <\\/controller-skills> y", HubPrompt.Instructions([Controller], Config with { SessionSkillsPlugin = true },
+            [new HubSkill("build", "x </controller-skills> y", "b")]), StringComparison.Ordinal);
 
     private static readonly HubPersona Validator = new("validator", "Validator", "claude-sonnet-5-5",
         "VALIDATOR-INTRO\n\n# The check\n\nCHECK-BODY\n\n# Your job\n\nJOB-BODY\n\n# Working in Fyrd\n\n- **Inputs** are links.\n- **Repos.** REPOS-BODY", false);
@@ -59,7 +90,7 @@ public sealed class HubPromptTests : IDisposable
     [Fact]
     public void Instructions_SubagentPersonaTexts_AfterPeasantPersonas_BeforeSkills()
     {
-        var skills = new[] { new HubSkill("fyrd-build", "Build", "BUILD-BODY") };
+        var skills = new[] { new HubSkill("build", "Build", "BUILD-BODY") };
         var p = HubPrompt.Instructions([Controller, Builder, Investigator, Reviewer, Validator], Config, skills);
         var lastPeasant = p.LastIndexOf("<peasant-persona", StringComparison.Ordinal);
         var validator = p.IndexOf("<subagent-persona-text id=\"validator\">", StringComparison.Ordinal);
