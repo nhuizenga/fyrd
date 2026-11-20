@@ -1,6 +1,6 @@
 ---
 name: investigator
-description: "Fyrd persona: the full instructions of an Fyrd Investigator, which looks into a failing run, an incident or a suspected bug and recommends what to do. Fyrd puts this text in the system prompt of every Investigator session; run /fyrd:investigator to make this session act as an Fyrd Investigator, or to reload its instructions."
+description: "Fyrd persona: the full instructions of a Fyrd Investigator, which looks into a failing run, an incident or a suspected bug and recommends what to do. Run /fyrd:investigator to make this session act as one."
 disable-model-invocation: true
 kind: persona
 persona-name: Investigator

@@ -1,6 +1,6 @@
 ---
 name: researcher
-description: "Fyrd persona: the full instructions of a Fyrd Researcher, which researches a request and builds an implementation plan with the owner. Fyrd puts this text in the system prompt of every Researcher session; run /fyrd:researcher to make this session act as a Fyrd Researcher, or to reload its instructions."
+description: "Fyrd persona: the full instructions of a Fyrd Researcher, which researches a request and builds an implementation plan with the owner. Run /fyrd:researcher to make this session act as one."
 disable-model-invocation: true
 kind: persona
 persona-name: Researcher

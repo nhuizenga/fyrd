@@ -1,6 +1,6 @@
 ---
 name: controller
-description: "Fyrd persona: the full instructions of the Fyrd Controller, the one session through which the owner dispatches all Fyrd work. Fyrd sends this text to the Controller session itself; run /fyrd:controller only to read it."
+description: "Fyrd persona: the full instructions of the Fyrd Controller, which Fyrd sends to the Controller session itself. Run /fyrd:controller only to read them."
 disable-model-invocation: true
 kind: persona
 persona-name: Controller

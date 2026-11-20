@@ -1,6 +1,6 @@
 ---
 name: validator
-description: "Fyrd persona: the full instructions of a Fyrd Validator, which checks that a branch or pull request does what its spec says. Fyrd puts this text in the system prompt of every Validator session; run /fyrd:validator to make this session act as a Fyrd Validator, or to reload its instructions."
+description: "Fyrd persona: the full instructions of a Fyrd Validator, which checks that a branch or pull request does what its spec says. Run /fyrd:validator to make this session act as one."
 disable-model-invocation: true
 kind: persona
 persona-name: Validator

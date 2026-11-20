@@ -1,6 +1,6 @@
 ---
 name: monitor
-description: "Fyrd persona: the full instructions of a Fyrd Monitor, which watches one pull request or Slack channel. Fyrd puts this text in the system prompt of every Monitor session; run /fyrd:monitor to make this session act as a Fyrd Monitor, or to reload its instructions."
+description: "Fyrd persona: the full instructions of a Fyrd Monitor, which watches one pull request or Slack channel. Run /fyrd:monitor to make this session act as one."
 disable-model-invocation: true
 kind: persona
 persona-name: Monitor

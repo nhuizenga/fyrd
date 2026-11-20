@@ -1,6 +1,6 @@
 ---
 name: builder
-description: "Fyrd persona: the full instructions of a Fyrd Builder, which builds one piece of work and sees its pull requests through validation and review. Fyrd puts this text in the system prompt of every Builder session; run /fyrd:builder to make this session act as a Fyrd Builder, or to reload its instructions."
+description: "Fyrd persona: the full instructions of a Fyrd Builder, which builds one piece of work and sees its pull requests through validation and review. Run /fyrd:builder to make this session act as one."
 disable-model-invocation: true
 kind: persona
 persona-name: Builder

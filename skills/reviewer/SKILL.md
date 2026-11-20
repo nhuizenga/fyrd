@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Fyrd persona: the full instructions of a Fyrd Reviewer, which reviews a branch, pull request or implementation plan. Fyrd puts this text in the system prompt of every Reviewer session; run /fyrd:reviewer to make this session act as a Fyrd Reviewer, or to reload its instructions."
+description: "Fyrd persona: the full instructions of a Fyrd Reviewer, which reviews a branch, pull request or implementation plan. Run /fyrd:reviewer to make this session act as one."
 disable-model-invocation: true
 kind: persona
 persona-name: Reviewer
