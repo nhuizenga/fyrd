@@ -57,7 +57,7 @@ By default every session gets its session skills and the Controller its request 
 
 ### Personas
 
-**Settings › Personas** is a table of the personas where you change only each persona's model; **Reset** goes back to the default in the persona's front matter. A persona's name and text always come from `skills/<id>/SKILL.md`. Fyrd reads persona text once when it starts, so after a `git pull` that changes a persona, run `/fyrd:down` then `/fyrd:up`. Request skills are re-read on every poll, so a pull is enough for them.
+**Settings › Personas** is a table of the personas where you change only each persona's model; **Reset** goes back to the default in the persona's front matter. A persona's name and text always come from `skills/<id>/SKILL.md`. Fyrd reads persona text once when it starts, so after a `git pull` that changes a persona, run `/fyrd:down` then `/fyrd:up`. Request skills are re-read on every poll, so in inline mode a pull is enough for them. In plugin mode (the plugin installed and confirmed in Settings › Session skills), a pull changes only the names and descriptions the Controller sees: a change to a request skill's body reaches the Controller only after the plugin's version is bumped, `/plugin marketplace update fyrd` runs (or the environment snapshot is refreshed) and a new Controller session starts (see `docs/controller-skills.md`).
 
 ### Sessions and pull requests
 
