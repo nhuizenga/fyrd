@@ -26,7 +26,7 @@ Requires:
 
 Windows is the primary platform. On macOS and Linux, Fyrd gives `claude` a terminal with the `script` utility (util-linux or BSD), so that must be installed, and **Settings › Environment** can't save secrets: set the environment variables instead.
 
-Fyrd reads the login only from `~/.claude/.credentials.json`, with no other fallback. Claude Code on macOS usually keeps it in the Keychain and may not write that file, so following and creating cloud sessions on macOS is untested and may fail with "Sign in to Claude Code with `claude auth login`".
+Fyrd reads the login only from `~/.claude/.credentials.json`, with no other fallback. Claude Code on macOS usually keeps it in the Keychain and may not write that file, so following and creating cloud sessions on macOS is untested and may fail with "Signed out of Claude" and "Run `claude auth login`".
 
 ```
 /plugin marketplace add nhuizenga/fyrd
