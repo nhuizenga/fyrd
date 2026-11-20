@@ -182,16 +182,79 @@ public sealed class HubSeedTests : IDisposable
     /// whole persona still says to ask the owner (the Inputs rule) and to coordinate workers, so every brief overrides that.
     /// </summary>
     [Theory]
-    [InlineData("builder", "Load the fyrd:<validator | reviewer | investigator> skill and follow only its <The check | Reviewing code | The investigation and As a subagent> sections and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post a review or message anyone; return your findings only.")]
-    [InlineData("researcher", "Load the fyrd:reviewer skill and follow only its Reviewing a plan section and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post anything or message anyone; return your findings only.")]
-    [InlineData("validator", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post anything or message anyone; return your findings only.")]
-    [InlineData("monitor", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post anything or message anyone; return your findings only.")]
-    public void EveryCoordinator_HasItsPersonaSubagentLoadItsSkill_AndIgnoreInstructionsToAskOrPost(string id, string line)
+    [InlineData("builder", "Load the fyrd:<validator | reviewer | investigator> skill and follow only its <The check | Reviewing code | The investigation and As a subagent> sections and Working in Fyrd's Inputs bullet (and Untrusted content for an Investigator); if it won't load, return blocked. Never ask the owner, change the PR's code, commit, push, post anything or message anyone; return your findings only.")]
+    [InlineData("researcher", "Load the fyrd:reviewer skill and follow only its Reviewing a plan section and Working in Fyrd's Inputs bullet; if it won't load, return blocked. Never ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("validator", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd's Inputs and Untrusted content bullets; if it won't load, return blocked. Never ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("monitor", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd's Inputs and Untrusted content bullets; if it won't load, return blocked. Never ask the owner, post anything or message anyone; return your findings only.")]
+    public void EveryCoordinator_HasItsPersonaSubagentLoadItsSkill_AndNeverAskOrPost(string id, string line)
     {
         var d = Get(id).Definition;
-        var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
-        Assert.Contains($"`{line}`", section, StringComparison.Ordinal);
+        Assert.Contains($"`{line}`", SubagentSection(d), StringComparison.Ordinal);
         Assert.DoesNotContain("subagent-persona", d, StringComparison.Ordinal);
+    }
+
+    private static string SubagentSection(string d) =>
+        d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
+
+    /// <summary>The brief a coordinator gives its persona subagent: the backticked line that starts `Load the fyrd:`.</summary>
+    private static string SubagentBrief(string d)
+    {
+        var section = SubagentSection(d);
+        var start = section.IndexOf("`Load the fyrd:", StringComparison.Ordinal) + 1;
+        return section[start..section.IndexOf('`', start)];
+    }
+
+    /// <summary>
+    /// "Follows only its relevant section" (owner's decision): from Working in Fyrd a brief takes only the Inputs bullet,
+    /// and the Untrusted content bullet for an Investigator, never the whole section, whose Ask the owner directly, Repos
+    /// and Pull requests bullets would have a subagent ask the owner, attach a repo for push, or open or mark a PR ready.
+    /// Each bullet a brief names is one the persona it loads has.
+    /// </summary>
+    [Theory]
+    [InlineData("builder", new[] { "validator", "reviewer", "investigator" })]
+    [InlineData("researcher", new[] { "reviewer" })]
+    [InlineData("validator", new[] { "investigator" })]
+    [InlineData("monitor", new[] { "investigator" })]
+    public void EveryBrief_TakesOnlyTheInputsAndUntrustedContentBulletsOfWorkingInFyrd(string id, string[] loads)
+    {
+        var brief = SubagentBrief(Get(id).Definition);
+        var follow = brief[brief.IndexOf("follow only its ", StringComparison.Ordinal)..brief.IndexOf(';')];
+        const string from = "Working in Fyrd's ";
+        Assert.Equal(1, follow.Split("Working in Fyrd").Length - 1);
+        Assert.Contains(from, follow, StringComparison.Ordinal);
+        var bullets = follow[(follow.IndexOf(from, StringComparison.Ordinal) + from.Length)..]
+            .Replace("(and ", "and ").Replace(" for an Investigator)", "").Replace(" bullets", "").Replace(" bullet", "")
+            .Split(" and ", StringSplitOptions.TrimEntries);
+        Assert.Contains("Inputs", bullets);
+        Assert.All(bullets, b => Assert.Contains(b, new[] { "Inputs", "Untrusted content" }));
+        Assert.Equal(loads.Contains("investigator"), bullets.Contains("Untrusted content"));
+        foreach (var load in loads)
+        {
+            var persona = Get(load).Definition;
+            var wif = persona[persona.IndexOf("# Working in Fyrd", StringComparison.Ordinal)..persona.IndexOf("# Who is talking to you", StringComparison.Ordinal)];
+            foreach (var b in bullets.Where(b => b == "Inputs" || load == "investigator"))
+                Assert.Contains($"- **{b}", wif, StringComparison.Ordinal);
+        }
+        foreach (var never in new[] { "Never ask the owner,", "post anything or message anyone; return your findings only." })
+            Assert.Contains(never, brief, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The rule that whoever reviews never posts, changes code, commits, pushes or messages another session sits in the
+    /// Reviewer's Reviewing a plan, which a Builder's code-review subagent doesn't follow, so the Builder's brief carries it.
+    /// </summary>
+    [Fact]
+    public void ABuildersCodeReviewSubagent_IsBoundNotToPostChangeCodeCommitPushOrMessage()
+    {
+        var reviewer = Get("reviewer").Definition;
+        var code = reviewer[reviewer.IndexOf("# Reviewing code", StringComparison.Ordinal)..reviewer.IndexOf("# Reviewing a plan", StringComparison.Ordinal)];
+        if (code.Contains("never posts anything, changes code or the plan, commits, pushes or messages another session", StringComparison.Ordinal))
+            return;
+        var brief = SubagentBrief(Get("builder").Definition);
+        Assert.Contains("Reviewing code", brief, StringComparison.Ordinal);
+        var never = brief[brief.IndexOf("Never ", StringComparison.Ordinal)..];
+        foreach (var act in new[] { "change the PR's code", "commit", "push", "post anything", "message anyone" })
+            Assert.Contains(act, never, StringComparison.Ordinal);
     }
 
     /// <summary>The sections a brief names are headings of the persona the subagent loads; a renamed one breaks the brief.</summary>
