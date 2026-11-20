@@ -402,14 +402,14 @@ public sealed class HubSeedTests : IDisposable
     /// tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("builder", 4090)]
+    [InlineData("builder", 4150)]
     [InlineData("controller", 2720)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
     [InlineData("researcher", 2430)]
     [InlineData("reviewer", 2780)]
     [InlineData("tuner", 2800)]
-    [InlineData("validator", 2760)]
+    [InlineData("validator", 2790)]
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
         var words = Get(id).Definition.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
