@@ -10,6 +10,7 @@ namespace Fyrd.Server.Tests;
 public class SessionSkillApiTests
 {
     private const string Stacks = "stacked-pull-requests";
+    private const string Dbt = "validate-dbt";
 
     private static async Task<JsonElement> ReadJson(HttpResponseMessage r) =>
         JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
@@ -37,13 +38,17 @@ public class SessionSkillApiTests
     {
         using var f = new FyrdFactory();
         var list = await Get(f.CreateClient(), "/api/hub/session-skills");
-        Assert.Equal([Stacks], list.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
+        Assert.Equal([Stacks, Dbt], list.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
         var stacks = list[0];
         Assert.Equal(["builder"], stacks.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
         Assert.StartsWith("Stacked pull requests: ", stacks.GetProperty("description").GetString());
         Assert.StartsWith("# Stacked pull requests\n", stacks.GetProperty("body").GetString());
         Assert.False(stacks.GetProperty("updateAvailable").GetBoolean());
         Assert.True(stacks.GetProperty("inPlugin").GetBoolean());
+        var dbt = list[1];
+        Assert.Equal(["builder", "validator"], dbt.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
+        Assert.StartsWith("Validate dbt: ", dbt.GetProperty("description").GetString());
+        Assert.True(dbt.GetProperty("inPlugin").GetBoolean());
     }
 
     [Fact]
@@ -124,7 +129,7 @@ public class SessionSkillApiTests
             req.Headers.Add("Origin", "http://evil.example");
             Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
         }
-        Assert.Equal(1, (await Get(c, "/api/hub/session-skills")).GetArrayLength());
+        Assert.Equal(2, (await Get(c, "/api/hub/session-skills")).GetArrayLength());
     }
 
     [Fact]
@@ -139,8 +144,8 @@ public class SessionSkillApiTests
         Assert.False(state.GetProperty("confirmed").GetBoolean());
         Assert.Equal("env_test1", state.GetProperty("environmentId").GetString());
         Assert.Equal("nhuizenga/fyrd", state.GetProperty("repository").GetString());
-        Assert.Equal([Stacks], state.GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
-        Assert.Equal(["fyrd:" + Stacks], state.GetProperty("pluginSkills").EnumerateArray().Select(s => s.GetString()));
+        Assert.Equal([Stacks, Dbt], state.GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
+        Assert.Equal(["fyrd:" + Stacks, "fyrd:" + Dbt], state.GetProperty("pluginSkills").EnumerateArray().Select(s => s.GetString()));
         Assert.Empty(state.GetProperty("inlineSkills").EnumerateArray());
         var script = state.GetProperty("script").GetString()!;
         Assert.Equal(SessionSkillScript.Render(), script);
@@ -193,7 +198,9 @@ public class SessionSkillApiTests
         var after = (await Get(c, "/api/hub/personas/builder/prompt")).GetProperty("text").GetString()!;
         Assert.Contains("POST /repos/{owner}/{repo}/stacks", after, StringComparison.Ordinal);
         Assert.EndsWith("\n- An added rule.", after, StringComparison.Ordinal);
-        Assert.DoesNotContain("# Session skills", after, StringComparison.Ordinal);
+        // The unedited skill is still the plugin's: only it is a pointer.
+        Assert.Contains($"\n- `fyrd:{Dbt}`: Validate dbt: ", after, StringComparison.Ordinal);
+        Assert.DoesNotContain($"`fyrd:{Stacks}`:", after, StringComparison.Ordinal);
 
         // Reset to the default: it is the plugin's text again.
         await c.PostAsync($"/api/hub/session-skills/{Stacks}/reset", null);
