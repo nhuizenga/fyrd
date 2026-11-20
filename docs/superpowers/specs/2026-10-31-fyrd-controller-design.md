@@ -84,7 +84,7 @@ Slash commands such as `/clear` can't be triggered through any API (spike, 5 run
 
 ### The Controller itself
 
-> **Superseded (2026-11-17, PR #52).** Fyrd now creates the Controller itself through the owner's signed-in `claude` CLI (`claude --cloud controller` in a pseudo terminal, with the new session id read from its output, then the whole opening prompt sent with `claude -p --cloud <id>` on stdin), and the paste-an-id adopt flow below is removed. See `skills/controller/README.md`. The adoption notes are kept as history.
+> **Superseded (2026-11-17, PR #52).** Fyrd now creates the Controller itself through the owner's signed-in `claude` CLI (`claude --cloud controller` in a pseudo terminal, with the new session id read from its output, then the whole opening prompt sent with `claude -p --cloud <id>` on stdin), and the paste-an-id adopt flow below is removed. See `docs/controller-skills.md`. The adoption notes are kept as history.
 
 > **Adopted, not created (2026-10-31).** Sessions Fyrd creates through the API get no claude.ai connectors (its OAuth client's `mcp_connector_ids` are dropped), so a Fyrd-made Controller would have no `claude-code-remote` tools and couldn't create sessions. A session made by hand on claude.ai has every connector (hub spike, "Connectors"). So the owner creates the Controller and Fyrd adopts it. **To confirm in the smoke run:** that peasants the Controller creates with `create_session` inherit its connectors.
 
