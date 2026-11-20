@@ -135,7 +135,7 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         var model = fields.GetValueOrDefault("persona-model", "claude-sonnet-5-5");
         var locked = fields.GetValueOrDefault("persona-locked", "").Equals("true", StringComparison.OrdinalIgnoreCase);
         if (!AllowedModels.Contains(model)) return null;
-        // Normalised so a CRLF checkout hashes the same as the LF text seed-history.json was built from.
+        // Normalised so a CRLF checkout hashes the same as the LF text persona-seed-history.json was built from.
         return new HubPersona(id, name, model, body, locked, model);
     }
 
