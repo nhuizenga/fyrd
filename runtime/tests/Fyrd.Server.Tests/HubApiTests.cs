@@ -197,18 +197,6 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task Create_PersonaMissing_400()
-    {
-        using var f = new FyrdFactory();
-        var c = f.CreateClient();
-        await c.GetAsync("/api/hub/personas"); // seeds
-        File.WriteAllText(Path.Combine(f.Home.Paths.HubPersonasDir, "controller.json"), "{ not json");
-        var r = await CreateController(f, c);
-        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Equal("The Controller persona is missing.", (await ReadJson(r)).GetProperty("detail").GetString());
-    }
-
-    [Fact]
     public async Task Controller_Find_Live_200()
     {
         using var f = new FyrdFactory();
@@ -916,47 +904,50 @@ public class HubApiTests
     }
 
     [Fact]
-    public async Task Persona_DeleteController_409()
-    {
-        using var f = new FyrdFactory();
-        var r = await f.CreateClient().DeleteAsync("/api/hub/personas/controller");
-        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
-    }
-
-    [Fact]
-    public async Task Persona_Reset_RestoresSeed_AndUnknownIs404()
+    public async Task Persona_PutModel_KeepsTheRepoText_AndResetRestoresTheDefault()
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        var seed = (await ReadJson(await c.GetAsync("/api/hub/personas/builder"))).GetProperty("definition").GetString();
-        await c.PutAsJsonAsync("/api/hub/personas/builder",
-            new { id = "builder", name = "Builder", model = "claude-sonnet-5-5", definition = "Mine", locked = false });
-        Assert.Equal("Mine", (await ReadJson(await c.GetAsync("/api/hub/personas/builder"))).GetProperty("definition").GetString());
+        var seed = await ReadJson(await c.GetAsync("/api/hub/personas/builder"));
+        var defaultModel = seed.GetProperty("defaultModel").GetString()!;
+        Assert.Equal(defaultModel, seed.GetProperty("model").GetString());
+        var other = defaultModel == "claude-opus-5-5" ? "claude-haiku-5-5" : "claude-opus-5-5";
+
+        // A definition or name in the body is ignored: only the model changes.
+        var put = await c.PutAsJsonAsync("/api/hub/personas/builder", new { model = other, name = "Smith", definition = "Mine" });
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        var got = await ReadJson(await c.GetAsync("/api/hub/personas/builder"));
+        Assert.Equal(other, got.GetProperty("model").GetString());
+        Assert.Equal(seed.GetProperty("name").GetString(), got.GetProperty("name").GetString());
+        Assert.Equal(seed.GetProperty("definition").GetString(), got.GetProperty("definition").GetString());
+
         var reset = await c.PostAsync("/api/hub/personas/builder/reset", null);
         Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
-        var body = await ReadJson(reset);
-        Assert.Equal(seed, body.GetProperty("definition").GetString());
-        Assert.False(body.GetProperty("updateAvailable").GetBoolean());
+        Assert.Equal(defaultModel, (await ReadJson(reset)).GetProperty("model").GetString());
         Assert.Equal(HttpStatusCode.NotFound, (await c.PostAsync("/api/hub/personas/nope/reset", null)).StatusCode);
     }
 
     [Fact]
-    public async Task Persona_PutGetDelete()
+    public async Task Persona_PutModel_Rejects()
     {
         using var f = new FyrdFactory();
         var c = f.CreateClient();
-        var put = await c.PutAsJsonAsync("/api/hub/personas/scout",
-            new { id = "", name = "Scout", model = "claude-haiku-5-5", definition = "Look around.", locked = false });
-        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
-        Assert.Equal("scout", (await ReadJson(put)).GetProperty("id").GetString());
-        var got = await ReadJson(await c.GetAsync("/api/hub/personas/scout"));
-        Assert.Equal("Scout", got.GetProperty("name").GetString());
-        Assert.Contains((await ReadJson(await c.GetAsync("/api/hub/personas"))).EnumerateArray(),
-            p => p.GetProperty("id").GetString() == "scout");
-        Assert.Equal(HttpStatusCode.NoContent, (await c.DeleteAsync("/api/hub/personas/scout")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await c.GetAsync("/api/hub/personas/scout")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await c.DeleteAsync("/api/hub/personas/scout")).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await c.DeleteAsync("/api/hub/personas/Bad_Id")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/hub/personas/builder", new { model = "gpt-4" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/hub/personas/builder", new { })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await c.PutAsJsonAsync("/api/hub/personas/scout", new { model = "claude-opus-5-5" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await c.PutAsJsonAsync("/api/hub/personas/Bad_Id", new { model = "claude-opus-5-5" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Persona_AddAndDelete_AreGone()
+    {
+        using var f = new FyrdFactory();
+        var c = f.CreateClient();
+        var add = await c.PutAsJsonAsync("/api/hub/personas", new { name = "Scout", model = "claude-haiku-5-5", definition = "Look." });
+        Assert.False(add.IsSuccessStatusCode);
+        var del = await c.DeleteAsync("/api/hub/personas/builder");
+        Assert.False(del.IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/hub/personas/builder")).StatusCode);
     }
 
     [Fact]

@@ -503,7 +503,7 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
-    public async Task Poll_PersonaEdited_RefreshesInstructions_AndCarriesMemory()
+    public async Task Poll_PersonaModelChanged_RefreshesInstructions_AndCarriesMemory()
     {
         await CreateController("session_ctl", "controller");
         _cloud.SetByTag("fyrd-hub");
@@ -512,10 +512,10 @@ public sealed class HubRunnerTests : IDisposable
         await runner.PollOnceAsync(default); // posts the memory update
         _owner.Sent.Clear();
 
-        _personas.Save(_personas.Get("builder")! with { Definition = "Build differently." });
+        _personas.SetModel("builder", "claude-opus-5-5");
         await runner.PollOnceAsync(default);
         var sent = Assert.Single(_owner.Sent);
-        Assert.Contains("Build differently.", sent.Text);
+        Assert.Contains("<peasant-persona id=\"builder\" name=\"Builder\" model=\"claude-opus-5-5\">", sent.Text);
         Assert.Contains("Remember me.", sent.Text);
         await runner.PollOnceAsync(default);
         Assert.Single(_owner.Sent);
