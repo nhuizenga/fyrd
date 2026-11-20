@@ -54,6 +54,8 @@ Controller, Researcher, Builder (the owner prefers "builder" to "implementer"), 
 
 Personas are managed in the console under **Settings › Personas** (owner's decision). Each has a name, a model and a definition. They are stored by the service in `~/.fyrd/data/hub/personas/*.json` (one file per persona, so each can be edited and deleted on its own), not in a repo.
 
+*Since then (owner's decision, model only):* a persona's name and text always come from its skill in the repo (`skills/<id>/SKILL.md`); **Settings › Personas** is a table where only each persona's model changes, and `~/.fyrd/data/hub/personas/<id>.json` holds just that model override. See `docs/controller-skills.md`.
+
 - **Seeding:** this work adds the six personas to Settings: Controller, Researcher, Builder, Reviewer, Validator and Monitor. Their starting text comes from the owner's `personas/controller.md` (hardened per §11) and from new drafts. Builder is adapted from `implementer.md`. The pipeline's persona files are not used here. *(Claude's call: the seed text is checked in, for example under `personas/hub/`, and copied into `~/.fyrd` only when a persona doesn't exist there yet.)*
 - **Model:** `create_session` gets the persona's model.
 - **Deletion:** the Controller can't be deleted.
@@ -218,7 +220,7 @@ The console follows the owner's mockup: the "fyrd" Design canvas at https://clau
 3. **Settings.**
    - **Environment:** the cloud environment new sessions start in.
    - **Session cap:** the global limit (§6), default 20.
-   - **Personas:** a list with a model per persona and an editable definition. "Add persona" and "Delete" are there, but the Controller can't be deleted.
+   - **Personas:** a list with a model per persona and an editable definition. "Add persona" and "Delete" are there, but the Controller can't be deleted. *(Since replaced by a table of personas where only the model changes; see the note under Personas above.)*
    - **Session skills:** the list of session skills with an editor (description, roles, body with its word count), "Add session skill", "Delete" (after a confirmation that names the roles losing the rules), "Reset to default" and "Restore default" for a deleted default; the status (inline, installed, or out of date with a notice that sessions use the inline text until the new script is pasted); the setup script with "Copy script", "I've pasted this script" and "Stop using the script"; and the setup guide (§10).
    - **Agent memory:** entries grouped by agent (shared and per role), newest first, each showing its source and date. You can add, edit and delete entries.
 
