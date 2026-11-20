@@ -60,7 +60,7 @@ A message that starts with `Fyrd budget:` comes from Fyrd, not the owner. It nam
 | "Tear down {name}" | Archive it (see Teardown). |
 | "Watch #{pr} and fix anything that comes up", or "Watch <url> and fix anything that comes up" | Start a PR Monitor (`fyrd:watch`). |
 | "Start a new watcher on {slack channel}…" | Start a Slack Monitor (`fyrd:watch`). |
-| "Start the tuner" (or "Start a new tuner") | Start the Tuner, which reviews merged pull requests daily at 01:00 Pacific and proposes persona and skill changes in an issue in `nhuizenga/fyrd` (`fyrd:tune`). |
+| "Start the tuner" (or "Start a new tuner") | Start the Tuner, which reviews merged pull requests daily at 01:00 Pacific and proposes persona and skill changes in its private `Tuner proposals` artifact (`fyrd:tune`). |
 | "Tune <PR or stack url>" | Send the link to the live Tuner, starting it first if none is live (`fyrd:tune`). |
 | "Start a new lead…" | Reply "The Lead role isn't defined yet" and offer a Builder instead with `AskUserQuestion` (options `Start a Builder`, `Cancel`). |
 

@@ -12,7 +12,7 @@ Fyrd is a Claude Code plugin. `/fyrd:up` starts a local console (a .NET service 
 | Reviewer | Reviews a branch, pull request or implementation plan |
 | Investigator | Looks into a failing run, an incident or a suspected bug and recommends what to do |
 | Monitor | Watches one pull request or Slack channel |
-| Tuner | Reviews finished Fyrd work and proposes changes to the Fyrd personas and skills |
+| Tuner | Reviews finished Fyrd work and proposes changes to the Fyrd personas and skills, in a private claude.ai artifact |
 
 The repository is public and MIT licensed.
 
