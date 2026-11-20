@@ -165,6 +165,7 @@
     c.append(el("p", "problem", str(d.problem)));
     if (d.generic === false) c.append(el("p", "note", "Not generic: " + (str(d.genericReason) || "no reason given")));
     if (str(d.question)) c.append(el("p", "question", "Question: " + str(d.question)));
+    if (status === "accepted") c.append(el("p", "note", "Before you apply this in the public Fyrd repo, check its wording is generic: no organization's names, repos, people or systems."));
 
     const w = el("div", "wording");
     const a = el("div"); a.append(el("p", "label", "Current wording (origin/main)"), el("pre", "del", str(d.current)));
@@ -191,7 +192,10 @@
     const foot = el("div", "foot");
     const run = el("div", "run");
     const runHref = safeUrl(d.runLink);
-    if (runHref) { const link = el("a", "", str(d.run) || runHref); link.href = runHref; link.target = "_blank"; link.rel = "noopener noreferrer"; run.append(link); }
+    if (runHref) {
+      const link = el("a", "", runHref); link.href = runHref; link.target = "_blank"; link.rel = "noopener noreferrer";
+      run.append(document.createTextNode((str(d.run).replace(str(d.runLink), "").trim() || "Run") + " "), link);
+    }
     else run.textContent = str(d.run);
     if (str(d.createdAt)) run.append(document.createTextNode(" · " + str(d.createdAt).slice(0, 10)));
     const seg = el("div", "status");
@@ -257,7 +261,8 @@
     db = claude && claude.use ? await claude.use("db") : null;
     if (!db) { setNote("The proposals can't be loaded in this view. Open the artifact on claude.ai while signed in.", "error"); return; }
     const user = await claude.use("user");
-    try { canWrite = user ? await user.canEdit() : false; } catch { canWrite = false; }
+    // No user capability: keep the controls on and let the database's write rule decide (a refused write turns them off).
+    try { canWrite = user ? await user.canEdit() : true; } catch { canWrite = false; }
     const timer = setTimeout(() => setNote(rows.length ? "Showing saved proposals; they may be out of date." : "The proposals can't be reached yet."), 10000);
     db.collection("proposals").orderBy("createdAt", "desc").onSnapshot(
       (snap) => {

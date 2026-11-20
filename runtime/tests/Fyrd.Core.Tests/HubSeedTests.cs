@@ -603,6 +603,20 @@ public sealed class HubSeedTests : IDisposable
         Assert.Contains("If a ledger lookup, publish or write fails or isn't approved, put the proposals in your final reply, saying they weren't recorded.", d, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The page: controls stay on when the viewer can't be identified (a refused write turns them off), the run link shows
+    /// its own URL, and an accepted card reminds whoever applies it in the public repo to check its wording is generic.
+    /// </summary>
+    [Fact]
+    public void TunerLedgerTemplate_LetsTheWriteRuleDecide_ShowsRunUrls_AndFlagsAcceptedForAGenericCheck()
+    {
+        var html = File.ReadAllText(Path.Combine(SeedDir(), "tuner", "ledger.html"));
+        Assert.Contains("canWrite = user ? await user.canEdit() : true;", html, StringComparison.Ordinal);
+        Assert.Contains("e.code === \"invalid_argument\") { canWrite = false;", html, StringComparison.Ordinal);
+        Assert.Contains("const link = el(\"a\", \"\", runHref);", html, StringComparison.Ordinal);
+        Assert.Contains("if (status === \"accepted\") c.append(el(\"p\", \"note\", \"Before you apply this in the public Fyrd repo, check its wording is generic", html, StringComparison.Ordinal);
+    }
+
     /// <summary>The Tuner keeps to changes that apply across organizations, and flags, never drops, one that doesn't.</summary>
     [Fact]
     public void Tuner_ProposesGenericChanges_AndFlagsTheOthers()
