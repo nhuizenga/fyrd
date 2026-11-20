@@ -171,14 +171,16 @@ Why: the console can then render the question's options as buttons.
 
 ## 10. Skills
 
-The skills are delivered **inline**: the service reads `skills/controller/*/SKILL.md` and embeds each one in the Controller message as a `<controller-skill>` block. Nothing is uploaded to claude.ai. Each skill is still named with a `fyrd-` prefix and says it is for the Fyrd Controller only. (Earlier versions shipped them as claude.ai account skills; inline delivery replaced that.)
+The request skills are skills of the fyrd plugin: `skills/<name>/SKILL.md` with `kind: controller-skill` in the front matter, loaded as `fyrd:<name>`, and each description says it is for the Fyrd Controller only, because the plugin is installed environment-wide. The service reads them and puts them in the Controller message: when the owner confirmed that the environment installs the plugin (§10, Session skills), as one `<controller-skills>` block with a line per skill that the Controller loads with the Skill tool; otherwise **inline**, each one a `<controller-skill name="fyrd:<name>">` block with its whole body. Nothing is uploaded to claude.ai. (Earlier versions shipped them as claude.ai account skills, then inline from `skills/controller/fyrd-<name>/`; the plugin replaced that.)
 
-1. `fyrd-research`: start or recycle a Researcher for a uri.
-2. `fyrd-build`: one Builder per uri, in parallel.
-3. `fyrd-peasant`: create, recycle and tear down sessions, plus the naming, tags and settings rules from §6.
-4. `fyrd-watch`: PR Monitor or Slack Monitor.
+1. `fyrd:research`: start or recycle a Researcher for a uri.
+2. `fyrd:build`: one Builder per uri, in parallel.
+3. `fyrd:peasant`: create, recycle and tear down sessions, plus the naming, tags and settings rules from §6.
+4. `fyrd:watch`: PR Monitor or Slack Monitor.
+5. `fyrd:investigate`: an Investigator for a failing run, an incident, a suspected bug or a finding.
+6. `fyrd:tune`: start the Tuner, or have it review a pull request or stack.
 
-The source lives in this repo under `skills/controller/`. The service reads the files on every poll pass. When the Controller's instructions (definition, settings, personas or skills) change, it re-sends the full Controller message while the Controller is idle; the message says the latest instructions replace earlier ones. Hashing of the instructions part (`PostedInstructionsHash`) works like the memory hash. Inline delivery is now the primary path, not a fallback.
+The source lives in this repo under `skills/<name>/`; the personas live there too, as plugin skills with `kind: persona` (`skills/controller/SKILL.md` is the Controller persona), and seed Settings from there instead of `personas/hub/`. The service reads the files on every poll pass. When the Controller's instructions (definition, settings, personas or skills) change, it re-sends the full Controller message while the Controller is idle; the message says the latest instructions replace earlier ones. Hashing of the instructions part (`PostedInstructionsHash`) works like the memory hash. Inline delivery is now the primary path, not a fallback.
 
 ### Session skills
 
