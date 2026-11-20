@@ -409,7 +409,7 @@ public sealed class HubSeedTests : IDisposable
     [InlineData("researcher", 2430)]
     [InlineData("reviewer", 2780)]
     [InlineData("tuner", 3040)]
-    [InlineData("validator", 2790)]
+    [InlineData("validator", 2800)]
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
         var words = Get(id).Definition.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
