@@ -2,14 +2,15 @@
 
 A session skill is a part of a role's instructions that only some tasks need. The Builder's rules for stacked pull requests are one: most builds are a single pull request and never use them. Fyrd keeps such a part out of the role's persona and gives it to the session as a skill, which the session loads with the Skill tool when the situation comes up. Every session of that role then starts with shorter instructions.
 
-Fyrd ships two session skills:
+Fyrd ships three session skills:
 
 | Skill | Roles | Holds | A session loads it |
 | --- | --- | --- | --- |
-| `stacked-pull-requests` (`fyrd:stacked-pull-requests` in a session) | Builder | How to build, open, fix, validate and move work in a native GitHub stack | when the work is, or may be, split into more than one pull request |
+| `review-data-modeling` (`fyrd:review-data-modeling` in a session) | Builder | The checks a second Reviewer runs on a dbt or warehouse diff beside the general review (grain and uniqueness, rules that drop rows, relationships liveness, cost and schedule, deploy-only checks, removed names), within read-only limits, and the questions only someone with warehouse access can settle | in step 7, when a PR's diff touches a dbt project or other warehouse SQL: the Builder loads it and copies its text into that Reviewer's unit |
+| `stacked-pull-requests` (`fyrd:stacked-pull-requests`) | Builder | How to build, open, fix, validate and move work in a native GitHub stack | when the work is, or may be, split into more than one pull request |
 | `validate-dbt` (`fyrd:validate-dbt`) | Builder, Validator | The checks a dbt change needs before merge that its PR checks may skip (compile and build downstream on real rows, selector hygiene, incremental boundaries, grain, cross-env columns, the repo's own checklists), within the limits on targets and live tables, and a report per test class | when a diff touches a dbt project's `models/`, `macros/`, `tests/`, `seeds/` or `dbt_project.yml`, and before a warehouse build is started or requested |
 
-A Builder's worker gets no session skills of its own: the Build rules it is given tell it to load `fyrd:validate-dbt` in a dbt project, which it can only from the plugin, so without the plugin it reports those checks as not run. The same holds for a Validator run as a Builder's subagent (see Limits).
+A Builder's worker gets no session skills of its own: the Build rules it is given tell it to load `fyrd:validate-dbt` in a dbt project, which it can only from the plugin, so without the plugin it reports those checks as not run. The same holds for a Validator run as a Builder's subagent (see Limits). A Reviewer subagent doesn't load `fyrd:review-data-modeling` itself: the Builder copies the skill's text into its unit, and a unit without that text reports the checks as not run. Only the Builder has the skill; a Reviewer session of its own doesn't run these checks.
 
 Only rules that some tasks never need belong in a session skill. Rules every task reaches, such as the Builder's rules for pull request events, stay in the persona: a skill that is always loaded saves nothing.
 

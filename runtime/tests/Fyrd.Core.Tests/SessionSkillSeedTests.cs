@@ -7,11 +7,15 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in session skill seeds (the plugin skills under <c>skills/</c> that name <c>roles</c>), and the Builder persona they were cut from.</summary>
 public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposable
 {
-    private static readonly string[] Names = ["stacked-pull-requests", "validate-dbt"];
+    private static readonly string[] Names = ["review-data-modeling", "stacked-pull-requests", "validate-dbt"];
 
-    /// <summary>The roles each seed belongs to: every one is the Builder's; Validate dbt is the Validator's too.</summary>
+    /// <summary>
+    /// The roles each seed belongs to: every one is the Builder's; Validate dbt is the Validator's too. Review data modeling
+    /// is the Builder's only: the Builder loads it and copies it into a Reviewer subagent's unit.
+    /// </summary>
     private static readonly Dictionary<string, string[]> RolesOf = new()
     {
+        ["review-data-modeling"] = ["builder"],
         ["stacked-pull-requests"] = ["builder"],
         ["validate-dbt"] = ["builder", "validator"],
     };
@@ -66,6 +70,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
 
     /// <summary>A description opens with the name of the section the skill holds (the persona refers to it by that name) and says when to load it.</summary>
     [Theory]
+    [InlineData("review-data-modeling", "Review data modeling", "step 7 review of a PR whose diff touches a dbt project or other warehouse SQL")]
     [InlineData("stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
     [InlineData("validate-dbt", "Validate dbt", "before you start or request a warehouse build")]
     public void EachDescription_NamesItsSection_AndSaysWhenToLoadIt(string name, string section, string when)
@@ -101,10 +106,30 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     }
 
     /// <summary>
+    /// Review data modeling is run by a Reviewer subagent, which gets no session skills and only the Reviewer persona's cut,
+    /// so the Builder's step 7 loads the skill and copies its text into that subagent's unit; the skill says what to report
+    /// when its text is missing.
+    /// </summary>
+    [Fact]
+    public void ReviewDataModeling_IsCopiedIntoTheReviewerUnit_ByTheBuilder()
+    {
+        var builder = Builder().Definition;
+        var job = builder[builder.IndexOf("# Your job\n", StringComparison.Ordinal)..builder.IndexOf("\n# Build rules\n", StringComparison.Ordinal)];
+        Assert.Contains("for a dbt or warehouse diff another whose unit is the Review data modeling skill (`fyrd:review-data-modeling`: load it and copy its text in)", job, StringComparison.Ordinal);
+        var body = Skills().Single(s => s.Name == "review-data-modeling").Body;
+        Assert.Contains("report these checks as not run", body, StringComparison.Ordinal);
+        Assert.Contains("Never write", body, StringComparison.Ordinal);
+        // Deploy-only checks is the Reviewer persona's; the skill refers to it by that name.
+        Assert.Contains("Apply the Reviewer's Deploy-only checks", body, StringComparison.Ordinal);
+        Assert.Contains("- **Deploy-only checks.**", RepoSeeds.Personas(_home.Paths).Single(p => p.Id == "reviewer").Definition, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A word budget per skill, a little above its size, well under <see cref="SessionSkills.MaxWords"/>. A skill that
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
+    [InlineData("review-data-modeling", 760)]
     [InlineData("stacked-pull-requests", 540)]
     [InlineData("validate-dbt", 900)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
@@ -201,7 +226,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4280;
+    private const int InstalledBudget = 4350;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
