@@ -61,7 +61,8 @@ export function personaIds(repoRoot) {
 }
 
 export function buildHistory(repoRoot) {
-  const git = (...args) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  // stderr is piped, not inherited: `git show` on a path a commit doesn't hold fails (caught below) and would print "fatal: …".
+  const git = (...args) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
   const file = path.join(repoRoot, HISTORY_FILE);
   const existing = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
   const out = {};
