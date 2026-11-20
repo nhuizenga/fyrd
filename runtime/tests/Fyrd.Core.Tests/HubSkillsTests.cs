@@ -189,6 +189,9 @@ public sealed class HubSkillsTests
         Assert.Contains("Monitor or the Tuner", Read("peasant"), StringComparison.Ordinal);
         Assert.Contains("A bare stack link (`…/stacks/<number>`) means that stack", text, StringComparison.Ordinal);
         Assert.Contains("Tuner starts and manual runs go to `fyrd:tune`, not this skill.", Read("peasant"), StringComparison.Ordinal);
+        Assert.Contains("records its proposals in a private claude.ai artifact, `Tuner proposals`, never in a public issue", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("issue link", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("opens its issues", text, StringComparison.Ordinal);
     }
 
     [Fact]

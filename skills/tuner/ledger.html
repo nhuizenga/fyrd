@@ -1,0 +1,277 @@
+<title>Tuner proposals</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<!--
+  Fyrd Tuner ledger: the page template for the private "Tuner proposals" artifact.
+  The Tuner publishes it once, with the Artifact tool, when no artifact with that title exists:
+    capabilities: {"db": {"rules": [{"path": "", "read": "view", "write": "admin"}]}, "user": {}}
+  Only the owner (and Editors the owner adds) can change rows; nobody else is given the link.
+
+  Rows live in the collection "proposals", one document per proposal, doc id "<run start in UTC as YYYYMMDD-HHMM>-<n>".
+  Fields (the Tuner writes them all; the page changes only status and statusChangedAt):
+    status          "open" | "accepted" | "declined" (the Tuner writes "open"; the owner sets the others here)
+    run             the run, "Scheduled run <YYYY-MM-DD>" or "Manual run <pull request or stack link>"
+    runLink         the pull request or stack link of a manual run, else ""
+    file            the persona or skill file, e.g. "skills/builder/SKILL.md"
+    section         the section of that file
+    problem         what went wrong, in one or two sentences
+    howOften        how many times it was seen (a number)
+    evidence        links: pull requests, review comments, commits, check runs, or "<session id> <event uuid>"
+    current         the exact current wording at origin/main
+    replacement     the proposed replacement wording
+    confidence      "high" | "medium" | "low"
+    generic         true when the change applies to any organization that uses Fyrd
+    genericReason   why it is not generic (empty when generic is true)
+    question        an open question for the owner, else ""
+    createdAt       when the Tuner wrote the row (ISO 8601)
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one reading column; a status filter bar, then one card per proposal with its wording change set as a before/after pair. */
+  :root {
+    --bg: #f5f6f4;
+    --surface: #ffffff;
+    --fg: #1d2421;
+    --muted: #5d6963;
+    --line: #d9dfdb;
+    --accent: #2f6f5e;
+    --accent-ink: #ffffff;
+    --open: #8a5a00;
+    --open-bg: #fbefd6;
+    --accepted: #1f6b3a;
+    --accepted-bg: #dcf1e2;
+    --declined: #7a2f2f;
+    --declined-bg: #f6dfdf;
+    --del-bg: #fbe9e7;
+    --ins-bg: #e5f3ea;
+    --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141917; --surface: #1c2220; --fg: #e3e8e5; --muted: #9aa6a0; --line: #2f3834;
+      --accent: #6cc3a8; --accent-ink: #0f1513;
+      --open: #f0c46c; --open-bg: #3a2e14; --accepted: #8fd8a6; --accepted-bg: #1b3324;
+      --declined: #f0a3a3; --declined-bg: #3a1f1f; --del-bg: #3a2220; --ins-bg: #1c3326;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141917; --surface: #1c2220; --fg: #e3e8e5; --muted: #9aa6a0; --line: #2f3834;
+    --accent: #6cc3a8; --accent-ink: #0f1513;
+    --open: #f0c46c; --open-bg: #3a2e14; --accepted: #8fd8a6; --accepted-bg: #1b3324;
+    --declined: #f0a3a3; --declined-bg: #3a1f1f; --del-bg: #3a2220; --ins-bg: #1c3326;
+    color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+  .wrap { max-width: 880px; margin: 0 auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 20px; }
+  header { display: grid; gap: 6px; }
+  h1 { font-size: 1.6rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+  .lede { margin: 0; color: var(--muted); max-width: 65ch; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .filter { font: inherit; font-size: 0.9rem; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  .filter[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .filter:focus-visible, .status button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .note { color: var(--muted); font-size: 0.9rem; margin: 0; }
+  .note[data-kind="error"] { color: var(--declined); }
+  #list { display: grid; gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+  .head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; justify-content: space-between; }
+  .where { font-family: var(--font-mono); font-size: 0.88rem; overflow-wrap: anywhere; min-width: 0; }
+  .where .section { color: var(--muted); }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.8rem; }
+  .chip { border-radius: 4px; padding: 1px 8px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .chip.org { color: var(--open); background: var(--open-bg); border-color: transparent; }
+  .chip.st-open { color: var(--open); background: var(--open-bg); border-color: transparent; }
+  .chip.st-accepted { color: var(--accepted); background: var(--accepted-bg); border-color: transparent; }
+  .chip.st-declined { color: var(--declined); background: var(--declined-bg); border-color: transparent; }
+  .problem { margin: 0; max-width: 70ch; }
+  .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 2px; }
+  .wording { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 640px) { .wording { grid-template-columns: 1fr; } }
+  .wording > div { min-width: 0; }
+  pre { margin: 0; font-family: var(--font-mono); font-size: 0.82rem; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 10px; border-radius: 6px; max-height: 18rem; overflow: auto; }
+  pre.del { background: var(--del-bg); }
+  pre.ins { background: var(--ins-bg); }
+  .evidence { margin: 0; padding-left: 1.2em; font-size: 0.88rem; overflow-wrap: anywhere; }
+  a { color: var(--accent); }
+  .foot { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 10px; }
+  .run { font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; min-width: 0; }
+  .status { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .status button { font: inherit; font-size: 0.85rem; border: 0; background: transparent; color: var(--fg); padding: 4px 12px; cursor: pointer; }
+  .status button + button { border-left: 1px solid var(--line); }
+  .status button[aria-pressed="true"][data-status="open"] { background: var(--open-bg); color: var(--open); }
+  .status button[aria-pressed="true"][data-status="accepted"] { background: var(--accepted-bg); color: var(--accepted); }
+  .status button[aria-pressed="true"][data-status="declined"] { background: var(--declined-bg); color: var(--declined); }
+  .status button:disabled { cursor: default; opacity: 0.7; }
+  .question { margin: 0; font-size: 0.9rem; border-left: 3px solid var(--open); padding-left: 8px; }
+  .empty { background: var(--surface); border: 1px dashed var(--line); border-radius: 8px; padding: 24px 16px; color: var(--muted); }
+  @media (prefers-reduced-motion: no-preference) { .filter, .status button { transition: background-color 120ms ease; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Tuner proposals</h1>
+    <p class="lede">Changes the Fyrd Tuner proposes to the Fyrd personas and skills. Mark each one accepted or declined: the Tuner won't propose an open or declined one again. This page is private until you share it.</p>
+  </header>
+  <div class="bar" role="group" aria-label="Show proposals by status">
+    <button class="filter" id="f-open" data-filter="open" aria-pressed="true">Open <span data-count="open">0</span></button>
+    <button class="filter" id="f-accepted" data-filter="accepted" aria-pressed="false">Accepted <span data-count="accepted">0</span></button>
+    <button class="filter" id="f-declined" data-filter="declined" aria-pressed="false">Declined <span data-count="declined">0</span></button>
+    <button class="filter" id="f-all" data-filter="all" aria-pressed="false">All <span data-count="all">0</span></button>
+  </div>
+  <p class="note" id="note" aria-live="polite">Loading proposals…</p>
+  <div id="list">
+    <div class="empty" id="empty">No proposals yet. The Tuner adds a row here for each change it proposes after a run.</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const STATUSES = ["open", "accepted", "declined"];
+  const list = document.getElementById("list");
+  const empty = document.getElementById("empty");
+  const note = document.getElementById("note");
+  let filter = "open";
+  let rows = [];
+  let canWrite = false;
+  const pending = new Set();
+
+  try { const saved = localStorage.getItem("tuner-filter"); if (saved && (saved === "all" || STATUSES.includes(saved))) filter = saved; } catch {}
+
+  function setNote(text, kind) { note.textContent = text; note.hidden = !text; if (kind) note.dataset.kind = kind; else delete note.dataset.kind; }
+  function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; }
+  function str(v) { return typeof v === "string" ? v : v == null ? "" : String(v); }
+  function safeUrl(v) { try { const u = new URL(str(v)); return u.protocol === "https:" ? u.href : null; } catch { return null; } }
+  function statusOf(d) { return STATUSES.includes(d.status) ? d.status : "open"; }
+
+  function card(id, d) {
+    const status = statusOf(d);
+    const c = el("article", "card");
+    c.dataset.id = id;
+
+    const head = el("div", "head");
+    const where = el("div", "where");
+    where.append(el("span", "", str(d.file) || "(no file)"));
+    if (str(d.section)) where.append(el("span", "section", " › " + str(d.section)));
+    const meta = el("div", "meta");
+    meta.append(el("span", "chip st-" + status, status));
+    if (str(d.confidence)) meta.append(el("span", "chip", str(d.confidence) + " confidence"));
+    if (d.howOften != null && str(d.howOften)) meta.append(el("span", "chip", "seen " + str(d.howOften) + "×"));
+    if (d.generic === false) meta.append(el("span", "chip org", "org-specific"));
+    head.append(where, meta);
+    c.append(head);
+
+    c.append(el("p", "problem", str(d.problem)));
+    if (d.generic === false) c.append(el("p", "note", "Not generic: " + (str(d.genericReason) || "no reason given")));
+    if (str(d.question)) c.append(el("p", "question", "Question: " + str(d.question)));
+    if (status === "accepted") c.append(el("p", "note", "Before you apply this in the public Fyrd repo, check its wording is generic: no organization's names, repos, people or systems."));
+
+    const w = el("div", "wording");
+    const a = el("div"); a.append(el("p", "label", "Current wording (origin/main)"), el("pre", "del", str(d.current)));
+    const b = el("div"); b.append(el("p", "label", "Proposed wording"), el("pre", "ins", str(d.replacement)));
+    w.append(a, b);
+    c.append(w);
+
+    const ev = Array.isArray(d.evidence) ? d.evidence : str(d.evidence) ? [d.evidence] : [];
+    if (ev.length) {
+      const box = el("div");
+      box.append(el("p", "label", "Evidence"));
+      const ul = el("ul", "evidence");
+      for (const item of ev) {
+        const li = el("li");
+        const href = safeUrl(item);
+        if (href) { const link = el("a", "", str(item)); link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; li.append(link); }
+        else li.textContent = str(item);
+        ul.append(li);
+      }
+      box.append(ul);
+      c.append(box);
+    }
+
+    const foot = el("div", "foot");
+    const run = el("div", "run");
+    const runHref = safeUrl(d.runLink);
+    if (runHref) {
+      const link = el("a", "", runHref); link.href = runHref; link.target = "_blank"; link.rel = "noopener noreferrer";
+      run.append(document.createTextNode((str(d.run).replace(str(d.runLink), "").trim() || "Run") + " "), link);
+    }
+    else run.textContent = str(d.run);
+    if (str(d.createdAt)) run.append(document.createTextNode(" · " + str(d.createdAt).slice(0, 10)));
+    const seg = el("div", "status");
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", "Status");
+    for (const s of STATUSES) {
+      const btn = el("button", "", s[0].toUpperCase() + s.slice(1));
+      btn.type = "button";
+      btn.id = "status-" + id + "-" + s;
+      btn.dataset.status = s;
+      btn.setAttribute("aria-pressed", String(s === status));
+      btn.disabled = !canWrite || pending.has(id);
+      btn.addEventListener("click", () => setStatus(id, s));
+      seg.append(btn);
+    }
+    foot.append(run, seg);
+    c.append(foot);
+    return c;
+  }
+
+  function render() {
+    const counts = { open: 0, accepted: 0, declined: 0, all: rows.length };
+    for (const r of rows) counts[statusOf(r.data)]++;
+    for (const span of document.querySelectorAll("[data-count]")) span.textContent = String(counts[span.dataset.count]);
+    for (const btn of document.querySelectorAll("[data-filter]")) btn.setAttribute("aria-pressed", String(btn.dataset.filter === filter));
+    const shown = rows.filter((r) => filter === "all" || statusOf(r.data) === filter);
+    for (const node of [...list.children]) if (node !== empty) node.remove();
+    empty.hidden = shown.length > 0;
+    if (!shown.length && rows.length) empty.textContent = "No " + (filter === "all" ? "" : filter + " ") + "proposals.";
+    for (const r of shown) list.append(card(r.id, r.data));
+  }
+
+  for (const btn of document.querySelectorAll("[data-filter]")) {
+    btn.addEventListener("click", () => {
+      filter = btn.dataset.filter;
+      try { localStorage.setItem("tuner-filter", filter); } catch {}
+      render();
+    });
+  }
+
+  let db = null;
+  async function setStatus(id, status) {
+    const row = rows.find((r) => r.id === id);
+    if (!db || !row || statusOf(row.data) === status || pending.has(id)) return;
+    pending.add(id);
+    render();
+    try {
+      await db.collection("proposals").doc(id).update({ status, statusChangedAt: new Date().toISOString() });
+      setNote("");
+    } catch (e) {
+      if (e && e.code === "invalid_argument") { canWrite = false; setNote("You can read these proposals but not change their status.", "error"); }
+      else setNote("Couldn't save the status. Try again in a moment.", "error");
+    } finally {
+      pending.delete(id);
+      render();
+    }
+  }
+
+  render();
+
+  (async () => {
+    const claude = window.claude;
+    db = claude && claude.use ? await claude.use("db") : null;
+    if (!db) { setNote("The proposals can't be loaded in this view. Open the artifact on claude.ai while signed in.", "error"); return; }
+    const user = await claude.use("user");
+    // No user capability: keep the controls on and let the database's write rule decide (a refused write turns them off).
+    try { canWrite = user ? await user.canEdit() : true; } catch { canWrite = false; }
+    const timer = setTimeout(() => setNote(rows.length ? "Showing saved proposals; they may be out of date." : "The proposals can't be reached yet."), 10000);
+    db.collection("proposals").orderBy("createdAt", "desc").onSnapshot(
+      (snap) => {
+        rows = snap.docs.filter((d) => d.exists).map((d) => ({ id: d.id, data: d.data() || {} }));
+        if (!snap.metadata.fromCache) { clearTimeout(timer); setNote(canWrite ? "" : "You can read these proposals but not change their status."); }
+        render();
+      },
+      (e) => { clearTimeout(timer); setNote("The proposals stopped loading (" + (e && e.code ? e.code : "error") + "). Reload the page to try again.", "error"); }
+    );
+  })();
+})();
+</script>
