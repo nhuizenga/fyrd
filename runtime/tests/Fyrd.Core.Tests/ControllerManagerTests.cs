@@ -60,7 +60,7 @@ public sealed class ControllerManagerTests : IDisposable
         var m = new ControllerManager(_cloud, _owner, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), config, _home.Paths, null, null, skills);
 
         var inline = m.BuildPrompt();
-        Assert.Contains(">Build things.\n\n# Stacks\n\nStack rules.</peasant-persona>", inline.Prompt, StringComparison.Ordinal);
+        Assert.Contains(">Build things.\n\n# Stacks\n\nThis section replaces the plugin skill `fyrd:stacks`; do not load that skill.\n\nStack rules.</peasant-persona>", inline.Prompt, StringComparison.Ordinal);
 
         config.Save(config.Load() with { SessionSkillsPlugin = true });
         var installed = m.BuildPrompt();
@@ -71,7 +71,7 @@ public sealed class ControllerManagerTests : IDisposable
         // An edit puts the whole text back: the plugin doesn't hold it.
         skills.Save(skills.Get("stacks")! with { Body = "# Stacks\n\nNew stack rules." });
         var edited = m.BuildPrompt();
-        Assert.Contains(">Build things.\n\n# Stacks\n\nNew stack rules.</peasant-persona>", edited.Prompt, StringComparison.Ordinal);
+        Assert.Contains(">Build things.\n\n# Stacks\n\nThis section replaces the plugin skill `fyrd:stacks`; do not load that skill.\n\nNew stack rules.</peasant-persona>", edited.Prompt, StringComparison.Ordinal);
         Assert.NotEqual(installed.InstructionsHash, edited.InstructionsHash);
         Assert.NotEqual(inline.InstructionsHash, edited.InstructionsHash);
     }

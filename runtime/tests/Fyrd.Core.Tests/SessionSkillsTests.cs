@@ -496,6 +496,49 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.Equal("BUILDER-DEF\n\n# First\n\nOne.\n\n# Mine\n\nMy rules.", SessionSkills.Compose(Builder, skills, installed: false));
     }
 
+    /// <summary>
+    /// A default edited in the console is sent inline, while the plugin's unedited text may still be in the session's
+    /// skill list under the same name: the section says it replaces that skill, installed or not.
+    /// </summary>
+    [Fact]
+    public void Compose_ADefaultsSection_SaysItReplacesThePluginSkill_InstalledOrNot()
+    {
+        var edited = Skill("fyrd-a", "First: use for one.", "# First\n\nMy edit.") with { IsDefault = true };
+        var noHeading = Skill("fyrd-b", "Second.", "Edited, no heading.") with { IsDefault = true };
+        foreach (var installed in new[] { true, false })
+        {
+            Assert.Equal(
+                "BUILDER-DEF\n\n# First\n\nThis section replaces the plugin skill `fyrd:fyrd-a`; do not load that skill.\n\nMy edit.\n\n"
+                + "# fyrd-b\n\nThis section replaces the plugin skill `fyrd:fyrd-b`; do not load that skill.\n\nEdited, no heading.",
+                SessionSkills.Compose(Builder, [edited, noHeading], installed));
+        }
+    }
+
+    [Fact]
+    public void Compose_ASkillAddedInTheConsole_SaysNothingAboutThePlugin()
+    {
+        var mine = Skill("mine", "Mine.", "# Mine\n\nMy rules.");
+        foreach (var installed in new[] { true, false })
+        {
+            var text = SessionSkills.Compose(Builder, [mine], installed);
+            Assert.Equal("BUILDER-DEF\n\n# Mine\n\nMy rules.", text);
+            Assert.DoesNotContain("replaces the plugin skill", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void List_FlagsEveryDefault_EditedOrNot_AndNoSkillOfTheOwners()
+    {
+        var store = Make();
+        var seeded = store.List();
+        Assert.NotEmpty(seeded);
+        Assert.All(seeded, s => Assert.True(s.IsDefault));
+        var first = seeded[0];
+        Assert.True(store.Save(first with { Body = "Edited." }).IsDefault);
+        Assert.False(store.Save(Skill()).IsDefault);
+        Assert.False(store.Get("fyrd-mine")!.IsDefault);
+    }
+
     [Fact]
     public void Compose_LeavesAPersonaWithoutSessionSkillsAlone()
     {
