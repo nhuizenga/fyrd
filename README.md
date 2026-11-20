@@ -42,7 +42,7 @@ In the console, open Sessions and choose **Create Controller** to start the Cont
 All of Fyrd's prompts are skills of this plugin, at `skills/<name>/SKILL.md`, loaded as `fyrd:<name>`.
 
 - **Request skills** (`kind: controller-skill`), used by the Controller only, one per request type: `/fyrd:build`, `/fyrd:research`, `/fyrd:investigate`, `/fyrd:watch`, `/fyrd:tune` and `/fyrd:peasant` (start, recycle or tear down a peasant). See [docs/controller-skills.md](docs/controller-skills.md).
-- **Persona skills** (`kind: persona`), the full instructions of each role: `/fyrd:builder`, `/fyrd:controller`, `/fyrd:investigator`, `/fyrd:monitor`, `/fyrd:researcher`, `/fyrd:reviewer`, `/fyrd:tuner`, `/fyrd:validator`. Fyrd gives each session its persona in its system prompt; no session loads one by itself, but you can run one in any session to make it act in that role, or to read it.
+- **Persona skills** (`kind: persona`), the full instructions of each role: `/fyrd:builder`, `/fyrd:controller`, `/fyrd:investigator`, `/fyrd:monitor`, `/fyrd:researcher`, `/fyrd:reviewer`, `/fyrd:tuner`, `/fyrd:validator`. Fyrd gives each session its persona in its system prompt; no session loads one by itself, but you can run one in any session to make it act in that role, or to read it; `/fyrd:controller` is only for reading, since Fyrd sends the Controller persona to the Controller session itself.
 - **Session skills**, parts of a role's instructions that only some tasks need: `fyrd:stacked-pull-requests`, which a Builder loads when its work is split into more than one pull request. You edit them under **Settings › Session skills**.
 
 ### Cloud environment setup
