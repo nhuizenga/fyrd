@@ -31,4 +31,4 @@ In the Fyrd console open Sessions and choose **Create Controller**. Fyrd runs yo
 
 ## After edits
 
-Skill and persona edits reach a live Controller by themselves, except a request skill body change once the plugin is confirmed (see [Delivery](#delivery-automatic)). Replace the Controller after you confirm the plugin in Settings › Session skills, too: a Controller that started before the plugin was installed has no `fyrd:` skills in its list. Choose **Replace Controller** next to Open Controller only if you want a fresh conversation: that archives the current Controller. Then choose **Create Controller** as above.
+Skill and persona edits reach a live Controller by themselves, except a request skill body change once the plugin is confirmed (see [Delivery](#delivery-automatic)). Replace the Controller after you confirm the plugin in Settings › Session skills, too: a Controller that started before the plugin was installed has no `fyrd:` skills in its list. Otherwise, choose **Replace Controller** next to Open Controller only if you want a fresh conversation. Replace Controller archives the current Controller. Then choose **Create Controller** as above.
