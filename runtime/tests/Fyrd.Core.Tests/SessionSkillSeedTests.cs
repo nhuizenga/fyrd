@@ -181,7 +181,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var inline = SessionSkills.Compose(builder, skills, installed: false);
         var installed = SessionSkills.Compose(builder, skills, installed: true);
         output.WriteLine($"builder persona {Words(builder.Definition)} words; with session skills inline {Words(inline)}, installed {Words(installed)}");
-        Assert.Equal(Words(builder.Definition) + skills.Sum(s => Words(s.Body)), Words(inline));
+        Assert.Equal(Words(builder.Definition) + skills.Sum(s => Words(s.Body) + Words(SessionSkills.Replaces(s))), Words(inline));
         Assert.True(Words(installed) <= InstalledBudget, $"The Builder's prompt with installed session skills is {Words(installed)} words, over the budget of {InstalledBudget}.");
         Assert.True(Words(installed) < Words(inline));
         Assert.Contains("load its skill with the Skill tool. ", installed, StringComparison.Ordinal);
@@ -191,7 +191,9 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
             Assert.True(s.InPlugin);
             Assert.Contains($"\n- `fyrd:{s.Name}`: {s.Description}", installed, StringComparison.Ordinal);
             Assert.DoesNotContain(s.Body, installed, StringComparison.Ordinal);
-            Assert.Contains(s.Body, inline, StringComparison.Ordinal);
+            Assert.Contains(s.Body.Split('\n', 2)[^1].TrimStart('\n'), inline, StringComparison.Ordinal);
+            Assert.Contains(SessionSkills.Replaces(s), inline, StringComparison.Ordinal);
+            Assert.DoesNotContain(SessionSkills.Replaces(s), installed, StringComparison.Ordinal);
         }
     }
 

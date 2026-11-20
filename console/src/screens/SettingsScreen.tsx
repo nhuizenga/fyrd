@@ -10,8 +10,18 @@ import type { HubBudgetView, SecretName, SecretsView, HubMemory, MemoryEntry, Me
 import type { ScreenProps } from "./ScreenProps";
 import SessionSkillsCard from "./SessionSkillsCard";
 
-// The persona table is Anvil's DataTable, which is large: it loads when the Personas section first opens.
-const PersonasTable = lazy(() => import("./PersonasCard"));
+/** Shown when the persona table's chunk fails to load (a network blip, or asset names changed by a rebuild). */
+export function PersonasLoadFailed() {
+  return (
+    <Alert status="danger" title="Couldn't load the persona table" role="alert">
+      <Button onClick={() => window.location.reload()}>Reload</Button>
+    </Alert>
+  );
+}
+
+// The persona table is Anvil's DataTable, which is large: it loads when the Personas section first opens. A chunk that
+// fails to load shows an alert in its place instead of blanking the console.
+const PersonasTable = lazy(() => import("./PersonasCard").catch(() => ({ default: PersonasLoadFailed })));
 function PersonasCard() {
   return <Suspense fallback={<Text subdued>Loading personas…</Text>}><PersonasTable /></Suspense>;
 }
