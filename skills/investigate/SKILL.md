@@ -1,10 +1,12 @@
 ---
 name: investigate
-description: "Fyrd Controller only: use when the Fyrd Controller is asked to investigate a failing GitHub workflow run, an incident, a suspected bug or an ad hoc finding and recommend a response. Never use this outside the Fyrd Controller session."
+description: "Start Fyrd Investigators: use when asked to investigate a failing GitHub workflow run, an incident, a suspected bug or an ad hoc finding by starting an Investigator session that recommends a response. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
 kind: controller-skill
 ---
 
 # investigate
+
+**Needs:** the instructions Fyrd sends the Controller, with their `<hub-settings>`, `<peasant-persona>` and `<shared-memory>` blocks, and the `mcp__claude-code-remote__*` session tools. Without them, start and change nothing: say which is missing and carry on without this skill.
 
 Request: "Investigate {input}", where each input is a failing workflow run, an incident (for example an `#oc-incidents` Slack thread), an issue or suspected bug, or a plain description of a finding. Start one Investigator per input, all at once. You investigate nothing yourself, and you never read the incident thread or the logs. The naming, tag, recycle and session-cap rules are the Controller prompt's; `fyrd:peasant` has the full step list.
 

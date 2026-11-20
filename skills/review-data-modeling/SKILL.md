@@ -1,6 +1,6 @@
 ---
 name: review-data-modeling
-description: "Review data modeling: the checks a second Reviewer runs on a dbt or warehouse diff, beside the general review, and the questions only someone with warehouse access can settle. Use when you start the step 7 review of a PR whose diff touches a dbt project or other warehouse SQL."
+description: "Review data modeling: the checks a second Reviewer runs on a dbt or warehouse diff, and the questions only someone with warehouse access can settle. Use when your brief asks for them, as a Builder's step 7 does for a dbt or warehouse diff."
 roles: builder
 ---
 # Review data modeling
@@ -26,4 +26,4 @@ Checks for the second Reviewer that the Builder starts in step 7 on a PR whose d
 
 ## Report
 
-Return the findings in the format Reviewing code gives (by severity, each with its file and line, what is wrong, why it matters and a fix), then the questions of check 7. For each check, say how it was settled: from the code, by a read-only query (which, and when), or left as a question. Without this skill's text (not in your unit and not in your skill list), report these checks as not run.
+Return the findings in the format Reviewing code gives (by severity, each with its file and line, what is wrong, why it matters and a fix), then the questions of check 7. For each check, say how it was settled: from the code, by a read-only query (which, and when), or left as a question. A Reviewer whose brief names this skill but can't load it reports these checks as not run.

@@ -51,7 +51,7 @@ public class SessionSkillApiTests
         Assert.False(stacks.GetProperty("updateAvailable").GetBoolean());
         Assert.True(stacks.GetProperty("inPlugin").GetBoolean());
         var dbt = list[2];
-        Assert.Equal(["builder", "validator"], dbt.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal(["builder"], dbt.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
         Assert.StartsWith("Validate dbt: ", dbt.GetProperty("description").GetString());
         Assert.True(dbt.GetProperty("inPlugin").GetBoolean());
     }

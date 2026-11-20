@@ -9,7 +9,7 @@ public static partial class HubPrompt
 {
     private const string ControllerId = "controller";
 
-    [GeneratedRegex("</(?=(?:hub-settings|peasant-persona|subagent-persona|controller-skill|shared-memory|role-memory))", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("</(?=(?:hub-settings|peasant-persona|controller-skill|shared-memory|role-memory))", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ClosingTagRegex();
 
     /// <summary>The full Controller message: <see cref="Instructions"/> followed by the memory blocks.</summary>
@@ -18,14 +18,14 @@ public static partial class HubPrompt
         string.Join("\n\n", new[] { Instructions(personas, config, skills, sessionSkills) }.Concat(MemoryBlocks(memory, personas)));
 
     /// <summary>
-    /// Everything but memory: the Controller definition, settings, peasant personas, subagent persona texts and skills.
-    /// A <c>subagent-persona-text</c> block holds what <see cref="SubagentPersonas"/> cuts from a persona; the Controller
-    /// copies it, not the whole persona, into the <c>subagent-persona</c> blocks of the sessions that run that persona as a subagent.
+    /// Everything but memory: the Controller definition, settings, peasant personas and skills. A session that runs a
+    /// persona as a subagent gets none of that persona's text here: its brief tells the subagent to load the persona's
+    /// plugin skill (<c>fyrd:&lt;id&gt;</c>) itself and follow only the sections it names.
     /// <para>
     /// A <c>peasant-persona</c> block holds what <see cref="SessionSkills.Compose"/> makes of the persona and its role's
     /// session skills, so whatever the Controller copies from the block into a session's system prompt carries them: a
     /// line per skill the fyrd plugin ships when the owner confirmed the environment installs it, else (and for a skill
-    /// edited or added in the console) the skill's whole body. The subagent texts are cut from the stored personas and carry no session skills.
+    /// edited or added in the console) the skill's whole body.
     /// </para>
     /// <para>
     /// The Controller request skills (<see cref="HubSkills"/>) are, the same way, one <c>controller-skills</c> block of
@@ -46,11 +46,6 @@ public static partial class HubPrompt
         };
         foreach (var p in personas.Where(p => p.Id != ControllerId))
             sections.Add($"<peasant-persona id=\"{AttrEscape(p.Id)}\" name=\"{AttrEscape(p.Name)}\" model=\"{AttrEscape(p.Model)}\">{Safe(SessionSkills.Compose(p, sessionSkills, installed))}</peasant-persona>");
-        foreach (var t in SubagentPersonas.All(personas))
-        {
-            var target = t.For is null ? "" : $" for=\"{AttrEscape(t.For)}\"";
-            sections.Add($"<subagent-persona-text id=\"{AttrEscape(t.Id)}\"{target}>{Safe(t.Text)}</subagent-persona-text>");
-        }
         if (installed && skills is { Count: > 0 })
             sections.Add(ControllerSkillPointers(skills));
         else

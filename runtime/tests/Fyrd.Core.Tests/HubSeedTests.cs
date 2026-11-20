@@ -152,35 +152,49 @@ public sealed class HubSeedTests : IDisposable
     {
         var d = Get("controller").Definition;
         Assert.Contains("You dispatch; you don't coordinate.", d, StringComparison.Ordinal);
-        Assert.Contains("`subagent-persona` element with `id=\"validator\"`", d, StringComparison.Ordinal);
+        Assert.Contains("You add no persona text for them to its `append_system_prompt`.", d, StringComparison.Ordinal);
         foreach (var relay in new[] { "Controller session:", "Validation request:", "Validation failed:", "Review request:" })
             Assert.DoesNotContain(relay, d, StringComparison.Ordinal);
     }
 
+    /// <summary>A session gets its own persona and memory only; its persona subagents load their persona skills themselves.</summary>
     [Fact]
-    public void Controller_CopiesTheSubagentPersonaTexts_NotWholePersonas_IntoSubagentBlocks()
+    public void Controller_CopiesTheWholePersona_AndNoSubagentText()
     {
         var d = Get("controller").Definition;
-        Assert.Contains("- `<subagent-persona-text id=\"…\">`:", d, StringComparison.Ordinal);
-        Assert.Contains("the reviewer subagent text marked `for=\"builder\"`", d, StringComparison.Ordinal);
-        Assert.Contains("only the reviewer one marked `for=\"researcher\"`", d, StringComparison.Ordinal);
-        Assert.Contains("exactly as inside its `<subagent-persona-text>` block, never the whole persona from a `<peasant-persona>` block", d, StringComparison.Ordinal);
+        Assert.DoesNotContain("subagent-persona", d, StringComparison.Ordinal);
         Assert.Contains("the persona's text exactly as it appears inside its `<peasant-persona>` block", d, StringComparison.Ordinal);
         // The close tags of the skills' examples reach the Controller escaped, so the persona says what a close tag looks like.
         Assert.Contains("A close tag starts with `</`; `<\\/` in what you received is only Fyrd's escaping, never write it in a tag of your own.", d, StringComparison.Ordinal);
     }
 
-    /// <summary>A subagent's persona text can still say to ask the owner (the Inputs rule, or a whole-persona fallback), so every brief overrides it.</summary>
+    /// <summary>
+    /// A persona subagent loads its persona's plugin skill itself and follows only the sections its brief names. The
+    /// whole persona still says to ask the owner (the Inputs rule) and to coordinate workers, so every brief overrides that.
+    /// </summary>
     [Theory]
-    [InlineData("builder", "Ignore any instruction above to ask the owner, post a review or message anyone; return your findings only.")]
-    [InlineData("researcher", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
-    [InlineData("validator", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
-    [InlineData("monitor", "Ignore any instruction above to ask the owner, post anything or message anyone; return your findings only.")]
-    public void EveryCoordinator_TellsItsPersonaSubagentToIgnoreInstructionsToAskOrPost(string id, string line)
+    [InlineData("builder", "Load the fyrd:<validator | reviewer | investigator> skill and follow only its <The check | Reviewing code | The investigation and As a subagent> sections and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post a review or message anyone; return your findings only.")]
+    [InlineData("researcher", "Load the fyrd:reviewer skill and follow only its Reviewing a plan section and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("validator", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("monitor", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd rules; if it won't load, return blocked. Ignore any instruction to ask the owner, post anything or message anyone; return your findings only.")]
+    public void EveryCoordinator_HasItsPersonaSubagentLoadItsSkill_AndIgnoreInstructionsToAskOrPost(string id, string line)
     {
         var d = Get(id).Definition;
         var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
         Assert.Contains($"`{line}`", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("subagent-persona", d, StringComparison.Ordinal);
+    }
+
+    /// <summary>The sections a brief names are headings of the persona the subagent loads; a renamed one breaks the brief.</summary>
+    [Theory]
+    [InlineData("validator", new[] { "The check", "Working in Fyrd" })]
+    [InlineData("reviewer", new[] { "Reviewing code", "Reviewing a plan", "Working in Fyrd" })]
+    [InlineData("investigator", new[] { "The investigation", "As a subagent", "Working in Fyrd" })]
+    public void TheSectionsABriefNames_AreHeadingsOfThePersona(string id, string[] headings)
+    {
+        var lines = Get(id).Definition.ReplaceLineEndings("\n").Split('\n');
+        foreach (var h in headings)
+            Assert.Equal(1, lines.Count(l => l == "# " + h));
     }
 
     /// <summary>The Builder is told outright what its persona subagents don't do; asking the owner is the Builder's.</summary>
@@ -206,8 +220,7 @@ public sealed class HubSeedTests : IDisposable
     public void Builder_ValidatesAndReviewsItsOwnPrsWithSubagents()
     {
         var d = Get("builder").Definition;
-        Assert.Contains("<subagent-persona id=\"validator\">", d, StringComparison.Ordinal);
-        Assert.Contains("<subagent-persona id=\"reviewer\">", d, StringComparison.Ordinal);
+        Assert.Contains("Load the fyrd:<validator | reviewer | investigator> skill", d, StringComparison.Ordinal);
         Assert.Contains("subagent_type: \"general-purpose\"", d, StringComparison.Ordinal);
         Assert.Contains("markPullRequestReadyForReview", d, StringComparison.Ordinal);
         Assert.Contains("event: COMMENT", d, StringComparison.Ordinal);
@@ -260,7 +273,7 @@ public sealed class HubSeedTests : IDisposable
     public void Researcher_AsksDeeply_AndReviewsThePlanBeforePublishing()
     {
         var d = Get("researcher").Definition;
-        Assert.Contains("<subagent-persona id=\"reviewer\">", d, StringComparison.Ordinal);
+        Assert.Contains("Load the fyrd:reviewer skill", d, StringComparison.Ordinal);
         Assert.Contains("Go deep on each work item", d, StringComparison.Ordinal);
         Assert.True(d.IndexOf("**Review the plan.**", StringComparison.Ordinal) < d.IndexOf("**Publish.**", StringComparison.Ordinal),
             "the plan must be reviewed before it is published");
@@ -374,26 +387,25 @@ public sealed class HubSeedTests : IDisposable
     }
 
     [Theory]
-    [InlineData("builder")]
-    [InlineData("validator")]
-    [InlineData("monitor")]
-    public void BuilderValidatorAndMonitor_RunAnInvestigatorSubagent(string id)
+    [InlineData("builder", "Load the fyrd:<validator | reviewer | investigator> skill")]
+    [InlineData("validator", "Load the fyrd:investigator skill")]
+    [InlineData("monitor", "Load the fyrd:investigator skill")]
+    public void BuilderValidatorAndMonitor_RunAnInvestigatorSubagent(string id, string load)
     {
         var d = Get(id).Definition;
-        Assert.Contains("<subagent-persona id=\"investigator\">", d, StringComparison.Ordinal);
+        Assert.Contains(load, d, StringComparison.Ordinal);
         Assert.Contains("Investigator subagent", d, StringComparison.Ordinal);
         Assert.Contains("subagent_type: \"general-purpose\"", d, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Controller_RoutesInvestigations_AndHandsOutTheInvestigatorPersona()
+    public void Controller_RoutesInvestigations_AndSaysSubagentsLoadTheInvestigatorSkill()
     {
         var d = Get("controller").Definition;
         Assert.Contains("\"Investigate {input}\"", d, StringComparison.Ordinal);
         Assert.Contains("`fyrd:investigate`", d, StringComparison.Ordinal);
         Assert.Contains("`monitor`, `investigator` and `tuner`", d, StringComparison.Ordinal);
-        Assert.Contains("with `id=\"investigator\"`", d, StringComparison.Ordinal);
-        Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
+        Assert.Contains("load that persona's plugin skill (`fyrd:validator`, `fyrd:reviewer`, `fyrd:investigator`) itself", d, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -403,7 +415,7 @@ public sealed class HubSeedTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData("builder", 4180)]
-    [InlineData("controller", 2720)]
+    [InlineData("controller", 2600)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
     [InlineData("researcher", 2430)]

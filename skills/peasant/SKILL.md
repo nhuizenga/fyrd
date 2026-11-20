@@ -1,10 +1,12 @@
 ---
 name: peasant
-description: "Fyrd Controller only: use when the Fyrd Controller is asked to start a new builder, reviewer, validator, investigator or other peasant, to recycle one, or to tear one down. Never use this outside the Fyrd Controller session."
+description: "Start, recycle or tear down Fyrd peasants: use when asked to start a new builder, reviewer, validator, investigator or other peasant session, to recycle one, or to tear one down. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
 kind: controller-skill
 ---
 
 # peasant
+
+**Needs:** the instructions Fyrd sends the Controller, with their `<hub-settings>`, `<peasant-persona>` and `<shared-memory>` blocks, and the `mcp__claude-code-remote__*` session tools. Without them, start and change nothing: say which is missing and carry on without this skill.
 
 Steps for starting, recycling and tearing down one peasant. The Controller prompt holds the rules (naming, tags, settings, session cap, teardown guards); this skill is the tool-call sequence. If this skill and the Controller prompt ever differ, the Controller prompt wins.
 
@@ -36,7 +38,7 @@ Decide first, ask second, change last: nothing is archived and no trigger is del
    - `environment_id`: from `<hub-settings>` (omit when empty).
    - `permission_mode`: `"auto"`.
    - `model`: the `model` attribute of that role's `<peasant-persona>`.
-   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`; then for a Builder a blank line, `<subagent-persona id="validator">…</subagent-persona>`, `<subagent-persona id="reviewer">…</subagent-persona>` and `<subagent-persona id="investigator">…</subagent-persona>`, each holding the text inside the `<subagent-persona-text>` block with that `id` (for the reviewer, the one marked `for="builder"`), for a Researcher only the reviewer one (marked `for="researcher"`), and for a Validator or a Monitor only the investigator one. Never put a whole persona from a `<peasant-persona>` block in a `<subagent-persona>` block.
+   - `append_system_prompt`: the persona text exactly as inside its `<peasant-persona>` block; a blank line; your current shared memory wrapped in `<shared-memory>…</shared-memory>`; then, if the role has memory, a blank line and it wrapped in `<role-memory role="<role>">…</role-memory>`. Nothing else: a peasant that runs persona subagents has them load the persona skills themselves.
    - `prompt`: `Wait for your task.`
    - `source_url`: from step 4 (omit only for `No repo`).
 8. Reply with the title and session id, and stop.
