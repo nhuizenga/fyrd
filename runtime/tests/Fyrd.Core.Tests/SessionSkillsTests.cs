@@ -71,6 +71,9 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.True(edited.UpdateAvailable);
         var reset = again.Reset("fyrd-stacks");
         Assert.Equal("# Stacks\n\nBetter stack rules.", reset.Body);
+        Assert.True(reset.InPlugin); // the reset response is flagged like a read
+        Assert.True(reset.IsDefault);
+        Assert.False(reset.UpdateAvailable);
         Assert.False(again.Get("fyrd-stacks")!.UpdateAvailable);
     }
 
@@ -194,15 +197,14 @@ public sealed class SessionSkillsTests : IDisposable
 
     private static readonly IEqualityComparer<SessionSkill> SkillComparer = EqualityComparer<SessionSkill>.Create((a, b) =>
         a!.Name == b!.Name && a.Description == b.Description && a.Roles.SequenceEqual(b.Roles) && a.Body == b.Body
-        && a.SeedHash == b.SeedHash && a.UpdateAvailable == b.UpdateAvailable);
+        && a.SeedHash == b.SeedHash && a.UpdateAvailable == b.UpdateAvailable && a.InPlugin == b.InPlugin);
 
     /// <summary>
-    /// A skill's seed hash is its text and nothing else, pinned here: were the script's template version (or anything
-    /// else that changes between releases) part of it, the next change would turn every unedited skill into an edited
-    /// one that no longer follows its seed. The hash of the script does hold the version.
+    /// A skill's seed hash is its text and nothing else, pinned here: were anything that changes between releases part
+    /// of it, the next change would turn every unedited skill into an edited one that no longer follows its seed.
     /// </summary>
     [Fact]
-    public void ASkillsSeedHash_IsItsTextOnly_NotTheScriptTemplateVersion()
+    public void ASkillsSeedHash_IsItsTextOnly()
     {
         var skill = Skill("fyrd-a", "A: use it.", "Body a.", "monitor", "builder");
         const string pinned = "82aa0cd1115609a689981e0101e4bfcf582f9fd4c0ed4f7646d27ccd76430b9f";
@@ -213,17 +215,8 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.NotEqual(pinned, SessionSkills.ContentHash(skill with { Roles = ["builder"] }));
         Assert.NotEqual(pinned, SessionSkills.ContentHash(skill with { Name = "fyrd-b" }));
 
-        Assert.Equal(LegacySeedHash(skill, SessionSkillScript.TemplateVersion), SessionSkills.Hash([skill]));
-        Assert.NotEqual(pinned, SessionSkills.Hash([skill]));
-        for (var version = 0; version <= SessionSkillScript.TemplateVersion + 1; version++)
+        for (var version = 0; version <= 3; version++)
             Assert.NotEqual(pinned, LegacySeedHash(skill, version));
-
-        // A store seeded today, read when the script's hash has moved on: its skills are unedited whatever that hash is.
-        Make().List();
-        Seed("fyrd-stacks", "Stacks: use for a stack.", "builder", "# Stacks\n\nBetter stack rules.");
-        var after = Make().Get("fyrd-stacks")!;
-        Assert.Equal("# Stacks\n\nBetter stack rules.", after.Body);
-        Assert.NotEqual(SessionSkills.Hash([after]), after.SeedHash);
     }
 
     /// <summary>
@@ -274,10 +267,6 @@ public sealed class SessionSkillsTests : IDisposable
         Assert.Equal("Stacks: say \"when\" and C:\\dir.", quoted.Description);
         Assert.Equal(["builder", "monitor"], quoted.Roles);
         Assert.Equal("# Q\n\nBody.", quoted.Body);
-        // What the script writes for a session reads back as the same description.
-        Assert.True(FrontMatter.TryParse(SessionSkillScript.SkillFile(quoted), out var fields, out var body));
-        Assert.Equal(quoted.Description, fields["description"]);
-        Assert.Equal(quoted.Body, body);
         var plain = SessionSkills.ParseSeed("fyrd-q", "---\ndescription: Stacks: plain \"inner\" quotes.\nroles: builder\n---\nBody.")!;
         Assert.Equal("Stacks: plain \"inner\" quotes.", plain.Description);
         Assert.Null(SessionSkills.ParseSeed("fyrd-q", "no front matter"));
@@ -312,7 +301,7 @@ public sealed class SessionSkillsTests : IDisposable
     {
         Seed("fyrd-nameless", "Other name.", "builder", "Body.", nameInFile: "fyrd-other");
         Seed("fyrd-roleless", "No roles.", "", "Body.");
-        Seed("not-fyrd", "Wrong prefix.", "builder", "Body.");
+        Seed("Not_A_Name", "Not a skill name.", "builder", "Body.");
         Directory.CreateDirectory(Path.Combine(_seeds, "fyrd-empty"));
         Assert.Equal(["fyrd-events", "fyrd-stacks"], Make().List().Select(s => s.Name));
     }
@@ -327,15 +316,16 @@ public sealed class SessionSkillsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("stacks")]
     [InlineData("fyrd-")]
+    [InlineData("-stacks")]
+    [InlineData("Stacks")]
     [InlineData("fyrd-Stacks")]
     [InlineData("fyrd-a--b")]
     [InlineData("fyrd-a-")]
     [InlineData("fyrd-a b")]
     [InlineData("fyrd-a/../b")]
     [InlineData("")]
-    public void Save_RejectsANameThatIsNotFyrdAndHyphenatedLowerCase(string name)
+    public void Save_RejectsANameThatIsNotHyphenatedLowerCase(string name)
     {
         Assert.Throws<ArgumentException>(() => Make().Save(Skill(name)));
         Assert.Null(Make().Get(name));
@@ -346,6 +336,14 @@ public sealed class SessionSkillsTests : IDisposable
     {
         Make().Save(Skill("fyrd-" + new string('a', 59)));
         Assert.Throws<ArgumentException>(() => Make().Save(Skill("fyrd-" + new string('a', 60))));
+    }
+
+    /// <summary>The plugin names its skills <c>fyrd:</c> itself, so a name needs no <c>fyrd-</c> of its own.</summary>
+    [Fact]
+    public void Save_TakesANameWithoutTheFyrdPrefix()
+    {
+        Assert.Equal("release-notes", Make().Save(Skill("release-notes")).Name);
+        Assert.NotNull(Make().Get("release-notes"));
     }
 
     [Theory]
@@ -391,34 +389,77 @@ public sealed class SessionSkillsTests : IDisposable
     }
 
     [Fact]
-    public void Hash_IsTheSameInAnyOrder_AndChangesWithEveryField()
+    public void Mode_IsInstalledOnlyWhenTheOwnerConfirmedThePluginScript()
     {
-        var a = Skill("fyrd-a", "A.", "Body a.", "builder", "monitor");
-        var b = Skill("fyrd-b", "B.", "Body b.");
-        var hash = SessionSkills.Hash([a, b]);
-        Assert.Matches("^[0-9a-f]{64}$", hash);
-        Assert.Equal(hash, SessionSkills.Hash([b, a]));
-        Assert.Equal(hash, SessionSkills.Hash([b, a with { Roles = ["monitor", "builder"], SeedHash = "x", UpdateAvailable = true }]));
-        Assert.NotEqual(hash, SessionSkills.Hash([a]));
-        Assert.NotEqual(hash, SessionSkills.Hash([a with { Name = "fyrd-c" }, b]));
-        Assert.NotEqual(hash, SessionSkills.Hash([a with { Description = "A!" }, b]));
-        Assert.NotEqual(hash, SessionSkills.Hash([a with { Roles = ["builder"] }, b]));
-        Assert.NotEqual(hash, SessionSkills.Hash([a with { Body = "Body a!" }, b]));
-        // Text can't move between fields or skills without changing the hash.
-        Assert.NotEqual(SessionSkills.Hash([Skill("fyrd-a", "A.", "x\ny")]), SessionSkills.Hash([Skill("fyrd-a", "A.\nx", "y")]));
-        Assert.NotEqual(SessionSkills.Hash([]), SessionSkills.Hash([a]));
+        Assert.Equal(SessionSkillMode.Inline, SessionSkills.Mode(new FyrdConfig()));
+        Assert.Equal(SessionSkillMode.Installed, SessionSkills.Mode(new FyrdConfig(SessionSkillsPlugin: true)));
     }
 
+    /// <summary>A skill is in the plugin while its description and body are its default's; its roles are Fyrd's own.</summary>
     [Fact]
-    public void Mode_IsInstalledOnlyWhileTheConfirmedHashIsTheHashOfTheSkills()
+    public void InPlugin_IsTrueForADefault_AsTheRepoShipsIt()
     {
-        var skills = Make().List();
-        Assert.Equal(SessionSkillMode.Inline, SessionSkills.Mode(new FyrdConfig(), skills));
-        var confirmed = new FyrdConfig(SessionSkillsHash: SessionSkills.Hash(skills));
-        Assert.Equal(SessionSkillMode.Installed, SessionSkills.Mode(confirmed, skills));
-        var edited = skills.Select(s => s.Name == "fyrd-stacks" ? s with { Body = s.Body + " More." } : s).ToList();
-        Assert.Equal(SessionSkillMode.OutOfDate, SessionSkills.Mode(confirmed, edited));
-        Assert.Equal(SessionSkillMode.OutOfDate, SessionSkills.Mode(confirmed, [.. skills.Skip(1)]));
+        var store = Make();
+        Assert.All(store.List(), s => Assert.True(s.InPlugin));
+        store.Save(store.Get("fyrd-events")! with { Roles = ["builder"] });
+        Assert.True(store.Get("fyrd-events")!.InPlugin);
+        store.Save(store.Get("fyrd-events")! with { Body = "Mine." });
+        Assert.False(store.Get("fyrd-events")!.InPlugin);
+        store.Save(store.Get("fyrd-stacks")! with { Description = "Stacks: mine." });
+        Assert.False(store.Get("fyrd-stacks")!.InPlugin);
+        store.Save(Skill());
+        Assert.False(store.Get("fyrd-mine")!.InPlugin);
+        // Computed on read: a stored file that claims it is not taken at its word.
+        File.WriteAllText(StoreFile("fyrd-mine"), File.ReadAllText(StoreFile("fyrd-mine")).Replace("\"inPlugin\": false", "\"inPlugin\": true", StringComparison.Ordinal));
+        Assert.False(Make().Get("fyrd-mine")!.InPlugin);
+        store.Reset("fyrd-events");
+        Assert.True(Make().Get("fyrd-events")!.InPlugin);
+    }
+
+    /// <summary>
+    /// The default that moved to another name: an unedited copy under the old name gives way to the new default, an
+    /// edited one is kept under the new name (flagged, as the default differs), and a deleted one stays deleted.
+    /// </summary>
+    [Theory]
+    [InlineData("unedited")]
+    [InlineData("edited")]
+    [InlineData("deleted")]
+    public void TheRenamedDefault_CarriesTheStoreOverToItsNewName(string state)
+    {
+        Directory.Delete(Path.Combine(_seeds, "fyrd-stacks"), true);
+        Seed("fyrd-stacked-pull-requests", "Stacks: use for a stack.", "builder", "# Stacks\n\nStack rules.");
+        var old = Make();
+        old.List();
+        if (state == "edited") old.Save(old.Get("fyrd-stacked-pull-requests")! with { Body = "My stack rules." });
+        if (state == "deleted") old.Delete("fyrd-stacked-pull-requests");
+
+        Directory.Delete(Path.Combine(_seeds, "fyrd-stacked-pull-requests"), true);
+        Seed("stacked-pull-requests", "Stacks: use for a stack.", "builder", "# Stacks\n\nBetter stack rules.");
+        var store = Make();
+        var names = store.List().Select(s => s.Name).ToList();
+        Assert.DoesNotContain("fyrd-stacked-pull-requests", names);
+        Assert.False(File.Exists(StoreFile("fyrd-stacked-pull-requests")));
+        var renamed = store.Get("stacked-pull-requests");
+        switch (state)
+        {
+            case "unedited":
+                Assert.Equal("# Stacks\n\nBetter stack rules.", renamed!.Body);
+                Assert.False(renamed.UpdateAvailable);
+                Assert.True(renamed.InPlugin);
+                break;
+            case "edited":
+                Assert.Equal("My stack rules.", renamed!.Body);
+                Assert.True(renamed.UpdateAvailable);
+                Assert.False(renamed.InPlugin);
+                break;
+            default:
+                Assert.Null(renamed);
+                Assert.Equal(["stacked-pull-requests"], store.MissingSeeds());
+                break;
+        }
+        Assert.DoesNotContain("fyrd-stacked-pull-requests", File.ReadAllText(Path.Combine(_home.Paths.HubSessionSkillsDir, ".seeded")), StringComparison.Ordinal);
+        // And it stays so on the next start.
+        Assert.Equal(store.List(), Make().List(), SkillComparer);
     }
 
     private static readonly HubPersona Builder = new("builder", "Builder", "claude-sonnet-5-5", "BUILDER-DEF", false);
@@ -431,36 +472,74 @@ public sealed class SessionSkillsTests : IDisposable
     }
 
     [Fact]
-    public void Compose_Installed_AppendsOneLinePerSkill_UnderTheRuleToLoadItOrAskTheOwner()
+    public void Compose_Installed_AppendsOneLinePerPluginSkill_UnderTheRuleToLoadItOrAskTheOwner()
     {
-        var skills = new[] { Skill("fyrd-b", "Second: use for two.", "# Second\n\nTwo."), Skill("fyrd-a", "First: use for one.", "# First\n\nOne.") };
+        var skills = new[] { Skill("fyrd-b", "Second: use for two.", "# Second\n\nTwo.") with { InPlugin = true }, Skill("fyrd-a", "First: use for one.", "# First\n\nOne.") with { InPlugin = true } };
         var text = SessionSkills.Compose(Builder, skills, installed: true);
         Assert.Equal(
             "BUILDER-DEF\n\n# Session skills\n\n"
-            + "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
-            + $"Before the first load, check once that the file `/root/.claude/fyrd-session-skills/hash` holds one line, exactly `{SessionSkills.Hash(skills)}`. "
-            + "If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.\n\n"
-            + "- `fyrd-a`: First: use for one.\n"
-            + "- `fyrd-b`: Second: use for two.",
+            + "Some sections of your instructions are skills of the fyrd plugin in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
+            + "If the skill is not in your skill list, stop and ask the owner.\n\n"
+            + "- `fyrd:fyrd-a`: First: use for one.\n"
+            + "- `fyrd:fyrd-b`: Second: use for two.",
             text);
         Assert.DoesNotContain("Two.", text, StringComparison.Ordinal);
     }
 
+    /// <summary>The plugin holds only the defaults' text: a skill edited or added in the console stays inline, installed or not.</summary>
+    [Fact]
+    public void Compose_Installed_KeepsASkillThePluginDoesNotHold_Inline()
+    {
+        var skills = new[] { Skill("fyrd-a", "First: use for one.", "# First\n\nOne.") with { InPlugin = true }, Skill("mine", "Mine.", "# Mine\n\nMy rules.") };
+        Assert.Equal(
+            "BUILDER-DEF\n\n# Session skills\n\n" + SessionSkills.PointerIntro + "\n\n- `fyrd:fyrd-a`: First: use for one.\n\n# Mine\n\nMy rules.",
+            SessionSkills.Compose(Builder, skills, installed: true));
+        // With none of the role's skills in the plugin, there is no pointer section at all.
+        Assert.Equal("BUILDER-DEF\n\n# Mine\n\nMy rules.", SessionSkills.Compose(Builder, [skills[1]], installed: true));
+        Assert.Equal("BUILDER-DEF\n\n# First\n\nOne.\n\n# Mine\n\nMy rules.", SessionSkills.Compose(Builder, skills, installed: false));
+    }
+
     /// <summary>
-    /// The hash a session checks is the hash of every skill, not only its role's: it is what the setup script writes
-    /// to its hash file, and what the owner confirmed.
+    /// A default edited in the console is sent inline, while the plugin's unedited text may still be in the session's
+    /// skill list under the same name: the section says it replaces that skill, installed or not.
     /// </summary>
     [Fact]
-    public void Compose_Installed_NamesTheHashOfAllSkills_WhichIsTheOneTheScriptWrites()
+    public void Compose_ADefaultsSection_SaysItReplacesThePluginSkill_InstalledOrNot()
     {
-        var skills = new[] { Skill("fyrd-a", "First: use for one.", "One."), Skill("fyrd-m", "M.", "Monitor only.", "monitor") };
-        var hash = SessionSkills.Hash(skills);
-        var text = SessionSkills.Compose(Builder, skills, installed: true);
-        Assert.Contains($"check once that the file `{SessionSkillScript.HashFile}` holds one line, exactly `{hash}`.", text, StringComparison.Ordinal);
-        Assert.Contains($"[ \"$fyrd_ok\" = 1 ] && printf '%s\\n' {hash} > \"$fyrd_state/hash\"", SessionSkillScript.Render(skills), StringComparison.Ordinal);
-        Assert.DoesNotContain("fyrd-m", text, StringComparison.Ordinal);
-        // Inline text names no hash: nothing in the environment is relied on.
-        Assert.DoesNotContain(hash, SessionSkills.Compose(Builder, skills, installed: false), StringComparison.Ordinal);
+        var edited = Skill("fyrd-a", "First: use for one.", "# First\n\nMy edit.") with { IsDefault = true };
+        var noHeading = Skill("fyrd-b", "Second.", "Edited, no heading.") with { IsDefault = true };
+        foreach (var installed in new[] { true, false })
+        {
+            Assert.Equal(
+                "BUILDER-DEF\n\n# First\n\nThis section replaces the plugin skill `fyrd:fyrd-a`; do not load that skill.\n\nMy edit.\n\n"
+                + "# fyrd-b\n\nThis section replaces the plugin skill `fyrd:fyrd-b`; do not load that skill.\n\nEdited, no heading.",
+                SessionSkills.Compose(Builder, [edited, noHeading], installed));
+        }
+    }
+
+    [Fact]
+    public void Compose_ASkillAddedInTheConsole_SaysNothingAboutThePlugin()
+    {
+        var mine = Skill("mine", "Mine.", "# Mine\n\nMy rules.");
+        foreach (var installed in new[] { true, false })
+        {
+            var text = SessionSkills.Compose(Builder, [mine], installed);
+            Assert.Equal("BUILDER-DEF\n\n# Mine\n\nMy rules.", text);
+            Assert.DoesNotContain("replaces the plugin skill", text, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void List_FlagsEveryDefault_EditedOrNot_AndNoSkillOfTheOwners()
+    {
+        var store = Make();
+        var seeded = store.List();
+        Assert.NotEmpty(seeded);
+        Assert.All(seeded, s => Assert.True(s.IsDefault));
+        var first = seeded[0];
+        Assert.True(store.Save(first with { Body = "Edited." }).IsDefault);
+        Assert.False(store.Save(Skill()).IsDefault);
+        Assert.False(store.Get("fyrd-mine")!.IsDefault);
     }
 
     [Fact]

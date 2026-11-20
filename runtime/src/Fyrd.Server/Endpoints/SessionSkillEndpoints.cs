@@ -4,13 +4,11 @@ using Fyrd.Core.Hub;
 namespace Fyrd.Server.Endpoints;
 
 /// <summary>
-/// The console's session skill API: the skills themselves, the setup script generated from them, and the owner's
-/// confirmation that the script is pasted into the environment Fyrd uses.
+/// The console's session skill API: the skills themselves, the setup script that installs the fyrd plugin, and the
+/// owner's confirmation that the script is pasted into the environment Fyrd uses.
 /// </summary>
 internal static class SessionSkillEndpoints
 {
-    private sealed record ConfirmBody(string? Hash);
-
     private const string GuideFile = "session-skills.md";
 
     private static string DocsDir(IConfiguration configuration, IWebHostEnvironment environment) =>
@@ -24,21 +22,12 @@ internal static class SessionSkillEndpoints
 
         group.MapGet("/setup-script", (SessionSkills skills, ConfigStore config) => ApiErrors.Run(() => Results.Ok(State(skills, config.Load()))));
 
-        // The owner says the script is pasted. The hash they send is the hash of the script they copied: when the
-        // skills changed since (in another tab, say), that script is not the current one and nothing is recorded.
-        group.MapPost("/setup-script/confirm", (ConfirmBody? body, SessionSkills skills, ConfigStore config) => ApiErrors.Run(() =>
-        {
-            if (!FyrdConfig.IsValidSessionSkillsHash(body?.Hash)) return Bad("Body { hash } is required: the hash of the script you pasted.");
-            var current = SessionSkills.Hash(skills.List());
-            if (body!.Hash != current)
-                return Results.Problem("The session skills changed after this script was made. Copy the current script, paste it, then confirm.", statusCode: StatusCodes.Status409Conflict);
-            return Results.Ok(State(skills, config.Update(c => c with { SessionSkillsHash = current })));
-        }));
+        // The owner says the script is pasted. The script is the same for any skills, so there is nothing to compare.
+        group.MapPost("/setup-script/confirm", (SessionSkills skills, ConfigStore config) => ApiErrors.Run(() =>
+            Results.Ok(State(skills, config.Update(c => c with { SessionSkillsPlugin = true })))));
 
         group.MapDelete("/setup-script/confirm", (SessionSkills skills, ConfigStore config) => ApiErrors.Run(() =>
-        {
-            return Results.Ok(State(skills, config.Update(c => c with { SessionSkillsHash = null })));
-        }));
+            Results.Ok(State(skills, config.Update(c => c with { SessionSkillsPlugin = false })))));
 
         // The onboarding guide, read from the repo's docs so the console shows the text that ships with this version.
         group.MapGet("/guide", (IConfiguration configuration, IWebHostEnvironment environment) =>
@@ -66,7 +55,7 @@ internal static class SessionSkillEndpoints
         {
             if (personas.Get(id) is not { } persona) return Results.Problem($"Persona '{id}' not found.", statusCode: StatusCodes.Status404NotFound);
             var list = skills.List();
-            var mode = SessionSkills.Mode(config.Load(), list);
+            var mode = SessionSkills.Mode(config.Load());
             var text = SessionSkills.Compose(persona, list, mode == SessionSkillMode.Installed);
             return Results.Ok(new { id = persona.Id, mode = Name(mode), words = SessionSkills.WordCount(text), text });
         }));
@@ -79,23 +68,24 @@ internal static class SessionSkillEndpoints
         var list = skills.List();
         return new
         {
-            mode = Name(SessionSkills.Mode(config, list)),
-            hash = SessionSkills.Hash(list),
-            confirmedHash = config.SessionSkillsHash,
+            mode = Name(SessionSkills.Mode(config)),
+            confirmed = config.SessionSkillsPlugin,
             environmentId = config.EnvironmentId,
             skills = list.Select(s => s.Name),
+            // The skills the plugin ships as they are here; a session with the plugin loads these by their plugin name.
+            pluginSkills = list.Where(s => s.InPlugin).Select(s => SessionSkillScript.PluginSkillName(s.Name)),
+            // Skills edited or added in the console: the plugin doesn't hold this text, so sessions always get it inline.
+            inlineSkills = list.Where(s => !s.InPlugin).Select(s => s.Name),
             // Defaults the owner deleted: POST /{name}/reset brings one back.
             missingDefaults = skills.MissingSeeds(),
-            script = SessionSkillScript.Render(list),
-            skillsDir = SessionSkillScript.SkillsDir,
-            hashFile = SessionSkillScript.HashFile,
+            script = SessionSkillScript.Render(),
+            repository = SessionSkillScript.Repository,
         };
     }
 
     private static string Name(SessionSkillMode mode) => mode switch
     {
         SessionSkillMode.Installed => "installed",
-        SessionSkillMode.OutOfDate => "out-of-date",
         _ => "inline",
     };
 

@@ -70,7 +70,7 @@ it("settings sections are a left nav showing one section at a time", async () =>
 it("session skills are a settings section next to the personas", async () => {
   vi.mocked(api.getSessionSkills).mockResolvedValue([]);
   vi.mocked(api.getSessionSkillSetup).mockResolvedValue({
-    mode: "inline", hash: "h", confirmedHash: null, environmentId: null, skills: [], script: "SCRIPT", skillsDir: "/root/.claude/skills", hashFile: "f",
+    mode: "inline", confirmed: false, environmentId: null, skills: [], script: "SCRIPT", repository: "nhuizenga/fyrd",
   });
   render(<Routed state={hubState()} onChanged={vi.fn()} />);
   await userEvent.click(screen.getByRole("button", { name: "Session skills" }));

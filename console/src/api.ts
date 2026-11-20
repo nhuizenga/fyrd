@@ -95,11 +95,10 @@ export const getSessionSkills = () => call<SessionSkill[]>("GET", "/api/hub/sess
 export const saveSessionSkill = (s: SessionSkill) => call<SessionSkill>("PUT", `/api/hub/session-skills/${enc(s.name)}`, s);
 export const resetSessionSkill = (name: string) => call<SessionSkill>("POST", `/api/hub/session-skills/${enc(name)}/reset`);
 export const deleteSessionSkill = (name: string) => call<void>("DELETE", `/api/hub/session-skills/${enc(name)}`);
-/** The setup script for the current skills, and whether the owner confirmed pasting it. */
+/** The setup script that installs the fyrd plugin, and whether the owner confirmed pasting it. */
 export const getSessionSkillSetup = () => call<SessionSkillSetup>("GET", "/api/hub/session-skills/setup-script");
-/** Records that the script with this hash is pasted; rejects with status 409 when the skills changed since. */
-export const confirmSessionSkillSetup = (hash: string) =>
-  call<SessionSkillSetup>("POST", "/api/hub/session-skills/setup-script/confirm", { hash });
+/** Records that the script is pasted into the environment's setup script. */
+export const confirmSessionSkillSetup = () => call<SessionSkillSetup>("POST", "/api/hub/session-skills/setup-script/confirm");
 export const clearSessionSkillSetup = () => call<SessionSkillSetup>("DELETE", "/api/hub/session-skills/setup-script/confirm");
 /** The onboarding guide (docs/session-skills.md) as markdown. */
 export const getSessionSkillGuide = () => call<{ text: string }>("GET", "/api/hub/session-skills/guide");

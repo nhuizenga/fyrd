@@ -45,7 +45,7 @@ public sealed class ControllerManagerTests : IDisposable
 
     /// <summary>
     /// The prompt carries a role's session skills, and its instructions hash follows them: an edit to a skill, or
-    /// confirming its setup script, changes the hash, which is what makes the runner refresh the live Controller.
+    /// confirming the plugin setup script, changes the hash, which is what makes the runner refresh the live Controller.
     /// </summary>
     [Fact]
     public void BuildPrompt_CarriesSessionSkills_AndItsHashFollowsTheirTextAndMode()
@@ -53,23 +53,25 @@ public sealed class ControllerManagerTests : IDisposable
         File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\nname: Builder\nmodel: claude-sonnet-5-5\nlocked: false\n---\nBuild things.");
         var config = new ConfigStore(_home.Paths);
         config.Save(new FyrdConfig(EnvironmentId: "env_abc123"));
-        var skills = new SessionSkills(_home.Paths, Path.Combine(_seeds, "no-skill-seeds"));
-        skills.Save(new SessionSkill("fyrd-stacks", "Stacks: use for a stack.", ["builder"], "# Stacks\n\nStack rules."));
+        var skillSeeds = Path.Combine(_seeds, "skill-seeds");
+        Directory.CreateDirectory(Path.Combine(skillSeeds, "stacks"));
+        File.WriteAllText(Path.Combine(skillSeeds, "stacks", "SKILL.md"), "---\nname: stacks\ndescription: \"Stacks: use for a stack.\"\nroles: builder\n---\n# Stacks\n\nStack rules.\n");
+        var skills = new SessionSkills(_home.Paths, skillSeeds);
         var m = new ControllerManager(_cloud, _owner, new HubPersonas(_home.Paths, _seeds), new HubMemory(_home.Paths), config, _home.Paths, null, null, skills);
 
         var inline = m.BuildPrompt();
-        Assert.Contains(">Build things.\n\n# Stacks\n\nStack rules.</peasant-persona>", inline.Prompt, StringComparison.Ordinal);
+        Assert.Contains(">Build things.\n\n# Stacks\n\nThis section replaces the plugin skill `fyrd:stacks`; do not load that skill.\n\nStack rules.</peasant-persona>", inline.Prompt, StringComparison.Ordinal);
 
-        config.Save(config.Load() with { SessionSkillsHash = SessionSkills.Hash(skills.List()) });
+        config.Save(config.Load() with { SessionSkillsPlugin = true });
         var installed = m.BuildPrompt();
-        Assert.Contains("\n- `fyrd-stacks`: Stacks: use for a stack.</peasant-persona>", installed.Prompt, StringComparison.Ordinal);
+        Assert.Contains("\n- `fyrd:stacks`: Stacks: use for a stack.</peasant-persona>", installed.Prompt, StringComparison.Ordinal);
         Assert.DoesNotContain("Stack rules.", installed.Prompt, StringComparison.Ordinal);
         Assert.NotEqual(inline.InstructionsHash, installed.InstructionsHash);
 
-        // An edit after the confirmation puts the whole text back.
-        skills.Save(skills.Get("fyrd-stacks")! with { Body = "# Stacks\n\nNew stack rules." });
+        // An edit puts the whole text back: the plugin doesn't hold it.
+        skills.Save(skills.Get("stacks")! with { Body = "# Stacks\n\nNew stack rules." });
         var edited = m.BuildPrompt();
-        Assert.Contains(">Build things.\n\n# Stacks\n\nNew stack rules.</peasant-persona>", edited.Prompt, StringComparison.Ordinal);
+        Assert.Contains(">Build things.\n\n# Stacks\n\nThis section replaces the plugin skill `fyrd:stacks`; do not load that skill.\n\nNew stack rules.</peasant-persona>", edited.Prompt, StringComparison.Ordinal);
         Assert.NotEqual(installed.InstructionsHash, edited.InstructionsHash);
         Assert.NotEqual(inline.InstructionsHash, edited.InstructionsHash);
     }

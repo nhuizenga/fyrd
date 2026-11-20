@@ -10,26 +10,30 @@ namespace Fyrd.Core.Hub;
 /// A skill a cloud session loads on demand with the Skill tool: part of a role's instructions that is needed only in
 /// some situations. <c>Description</c> is one line saying what the skill holds and when to load it, <c>Roles</c> are the
 /// persona ids it belongs to, and <c>Body</c> is the markdown. <c>SeedHash</c> is the <see cref="SessionSkills.ContentHash"/> of the seed this skill was
-/// last synced from (null for one the owner added); <c>UpdateAvailable</c> is computed on read and never stored.
+/// last synced from (null for one the owner added). <c>UpdateAvailable</c>, <c>InPlugin</c> and <c>IsDefault</c> are
+/// computed on read and never stored: <c>InPlugin</c> says the skill's description and body are its default's, the text
+/// the fyrd plugin ships, so a session with the plugin installed can load it as <c>fyrd:&lt;name&gt;</c>; <c>IsDefault</c>
+/// says the skill has a default under its name, so the plugin ships a <c>fyrd:&lt;name&gt;</c>, edited here or not.
 /// </summary>
-public sealed record SessionSkill(string Name, string Description, IReadOnlyList<string> Roles, string Body, string? SeedHash = null, bool UpdateAvailable = false);
+public sealed record SessionSkill(string Name, string Description, IReadOnlyList<string> Roles, string Body, string? SeedHash = null, bool UpdateAvailable = false,
+    bool InPlugin = false, bool IsDefault = false);
 
 /// <summary>How the sessions of a role get their session skills.</summary>
 public enum SessionSkillMode
 {
-    /// <summary>No setup script is confirmed: each skill's whole body is part of the persona text.</summary>
+    /// <summary>The owner has not confirmed the plugin setup script: each skill's whole body is part of the persona text.</summary>
     Inline,
 
-    /// <summary>The confirmed setup script matches the store: the persona text points at each skill.</summary>
+    /// <summary>
+    /// The owner confirmed that the environment's setup script installs the fyrd plugin: the persona text points at each
+    /// skill the plugin ships unchanged, and holds the whole body of the others (edited or added in the console).
+    /// </summary>
     Installed,
-
-    /// <summary>A setup script was confirmed, but the skills changed since: bodies are inline until the new script is confirmed.</summary>
-    OutOfDate,
 }
 
 /// <summary>
 /// Session skill store: one JSON file per skill under <see cref="FyrdPaths.HubSessionSkillsDir"/>, seeded from
-/// <c>skills/session/&lt;name&gt;/SKILL.md</c> the way <see cref="HubPersonas"/> seeds personas: a seed is written once, an
+/// <c>skills/&lt;name&gt;/SKILL.md</c> (a plugin skill whose front matter names <c>roles</c>) the way <see cref="HubPersonas"/> seeds personas: a seed is written once, an
 /// unedited skill follows its seed (and is removed when its seed is), an edited one is left alone and flagged, and a
 /// deleted one stays deleted.
 /// </summary>
@@ -47,7 +51,14 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     private bool _seeded;
     private Dictionary<string, SessionSkill> _seeds = new();
 
-    [GeneratedRegex(@"^fyrd-[a-z0-9]+(?:-[a-z0-9]+)*\z", RegexOptions.CultureInvariant)]
+    /// <summary>
+    /// Defaults that moved to another name, old name first: <c>fyrd-stacked-pull-requests</c> became
+    /// <c>stacked-pull-requests</c> when the session skills moved into the plugin, whose skills Claude Code already
+    /// names <c>fyrd:</c>. <see cref="SeedIfNeeded"/> carries a store's skill over to the new name.
+    /// </summary>
+    private static readonly (string Old, string New)[] RenamedSeeds = [("fyrd-stacked-pull-requests", "stacked-pull-requests")];
+
+    [GeneratedRegex(@"^[a-z0-9]+(?:-[a-z0-9]+)*\z", RegexOptions.CultureInvariant)]
     private static partial Regex NameRegex();
 
     [GeneratedRegex(@"^[a-z0-9-]{1,40}\z", RegexOptions.CultureInvariant)]
@@ -105,7 +116,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             if (!_seeds.TryGetValue(name, out var seed)) throw new KeyNotFoundException($"Session skill '{name}' has no default to reset to.");
             var reset = seed with { SeedHash = ContentHash(seed) };
             Write(reset);
-            return reset;
+            return Flag(reset);
         }
     }
 
@@ -138,14 +149,13 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
 
     /// <summary>
     /// The skill as it is stored: description and body trimmed, line ends as <c>\n</c>, roles distinct in the order
-    /// given. Throws <see cref="ArgumentException"/> when the name is not <c>fyrd-</c> followed by lower-case words joined
-    /// by hyphens, the description is empty or not one line, no role is given or one is not a peasant persona id, or the
+    /// given. Throws <see cref="ArgumentException"/> when the name is not lower-case words joined by hyphens, the description is empty or not one line, no role is given or one is not a peasant persona id, or the
     /// body is empty, has more than <see cref="MaxWords"/> words or holds a control character.
     /// </summary>
     public static SessionSkill Normalize(SessionSkill skill)
     {
         if (!IsValidName(skill.Name))
-            throw new ArgumentException($"A session skill's name is 'fyrd-' followed by lower-case letters, digits and single hyphens, at most {MaxNameLength} characters.", nameof(skill));
+            throw new ArgumentException($"A session skill's name is lower-case letters and digits joined by single hyphens, at most {MaxNameLength} characters.", nameof(skill));
         var description = (skill.Description ?? "").Trim();
         if (description.Length == 0) throw new ArgumentException("Description is required: one line saying what the skill holds and when to load it.", nameof(skill));
         // U+2028 and U+2029 end a line too, though they are no control characters (U+0085 is one).
@@ -167,7 +177,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// <summary>
     /// SHA-256 (lowercase hex) of one skill's name, description, roles and body, and of nothing else. It is what a
     /// stored skill's <c>SeedHash</c> holds, and what tells an unedited skill from an edited one, so it must stay the
-    /// same for the same text for good: <see cref="SessionSkillScript.TemplateVersion"/> is no part of it.
+    /// same for the same text for good.
     /// </summary>
     public static string ContentHash(SessionSkill skill) => Hash("fyrd-session-skill", [skill]);
 
@@ -181,14 +191,6 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     private static bool IsSeedHashOf(string? seedHash, SessionSkill text) =>
         seedHash is not null
         && (seedHash == ContentHash(text) || LegacySeedHashVersions.Any(v => seedHash == Hash($"fyrd-session-skills-{v}", [text])));
-
-    /// <summary>
-    /// SHA-256 (lowercase hex) of a set of skills: the same for the same skills in any order, and different when a name,
-    /// description, role or body differs. It names the setup script generated from them. The roles are part of it
-    /// although the script doesn't hold them: a role change moves which personas point at the skill. So is
-    /// <see cref="SessionSkillScript.TemplateVersion"/>: a block with other shell text is another script.
-    /// </summary>
-    public static string Hash(IEnumerable<SessionSkill> skills) => Hash($"fyrd-session-skills-{SessionSkillScript.TemplateVersion}", skills);
 
     private static string Hash(string prefix, IEnumerable<SessionSkill> skills)
     {
@@ -213,62 +215,73 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
         return Convert.ToHexString(SHA256.HashData(stream.ToArray())).ToLowerInvariant();
     }
 
-    /// <summary>
-    /// Installed only when the owner confirmed a setup script and its hash is the hash of these skills; any change to a
-    /// skill since then is <see cref="SessionSkillMode.OutOfDate"/>, which sessions get as inline text.
-    /// </summary>
-    public static SessionSkillMode Mode(FyrdConfig config, IReadOnlyList<SessionSkill> skills) =>
-        string.IsNullOrEmpty(config.SessionSkillsHash) ? SessionSkillMode.Inline
-        : string.Equals(config.SessionSkillsHash, Hash(skills), StringComparison.Ordinal) ? SessionSkillMode.Installed
-        : SessionSkillMode.OutOfDate;
+    /// <summary>Installed when the owner confirmed that the environment's setup script installs the fyrd plugin.</summary>
+    public static SessionSkillMode Mode(FyrdConfig config) =>
+        config.SessionSkillsPlugin ? SessionSkillMode.Installed : SessionSkillMode.Inline;
 
     /// <summary>
     /// The persona text a session of this persona's role gets: the stored definition, then its role's session skills.
-    /// Installed, each skill is one line that says when to load it, under an intro that carries the hash of
-    /// <paramref name="skills"/> (all of them, as the setup script has it) for the session to check; otherwise each skill's whole body is a section, so
-    /// the session has every rule whether or not the setup script ran. A persona without session skills is unchanged.
+    /// Installed, each skill the plugin ships unchanged (<see cref="SessionSkill.InPlugin"/>) is one line that says when
+    /// to load it, under an intro; every other skill, and every skill when not installed, is its whole body as a section,
+    /// so the session has every rule whether or not the plugin is there. A section of a default (<see cref="SessionSkill.IsDefault"/>)
+    /// says it replaces the plugin's skill of that name, which a session may still have (unedited, or from the plugin
+    /// installed before the owner confirmed it). A persona without session skills is unchanged.
     /// </summary>
     public static string Compose(HubPersona persona, IReadOnlyList<SessionSkill>? skills, bool installed)
     {
         var own = (skills ?? []).Where(s => s.Roles.Contains(persona.Id)).OrderBy(s => s.Name, StringComparer.Ordinal).ToList();
         if (own.Count == 0) return persona.Definition;
         var parts = new List<string> { persona.Definition };
-        if (installed)
-            parts.Add(PointerHeading + "\n\n" + PointerIntro(Hash(skills!)) + "\n\n" + string.Join("\n", own.Select(Pointer)));
-        else
-            parts.AddRange(own.Select(Section));
+        var pointed = installed ? own.Where(s => s.InPlugin).ToList() : [];
+        if (pointed.Count > 0)
+            parts.Add(PointerHeading + "\n\n" + PointerIntro + "\n\n" + string.Join("\n", pointed.Select(Pointer)));
+        parts.AddRange(own.Except(pointed).Select(Section));
         return string.Join("\n\n", parts.Where(p => p.Length > 0));
     }
 
     public const string PointerHeading = "# Session skills";
 
+    /// <summary>Said once for every line under it: load the skill first, and never go on without it.</summary>
+    public const string PointerIntro =
+        "Some sections of your instructions are skills of the fyrd plugin in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
+        + "If the skill is not in your skill list, stop and ask the owner.";
+
+    /// <summary>The line that stands for a plugin skill in a persona: the name a session loads it by, and its description (what it holds and when to load it).</summary>
+    public static string Pointer(SessionSkill skill) => $"- `{SessionSkillScript.PluginSkillName(skill.Name)}`: {skill.Description}";
+
+    /// <summary>The line under a default's section heading: the session has the section, so it must not load the plugin's text as well.</summary>
+    public static string Replaces(SessionSkill skill) =>
+        $"This section replaces the plugin skill `{SessionSkillScript.PluginSkillName(skill.Name)}`; do not load that skill.";
+
     /// <summary>
-    /// Said once for every line under it: load the skill first, check once that the environment holds the skills this
-    /// text was made for (the setup script writes their hash last, and only after a complete run), and never go on
-    /// without them. <paramref name="hash"/> is the hash of all the skills, which is the confirmed one in installed mode.
+    /// A skill's body as a section of a persona; a body that doesn't open with a heading gets its name as one. A default's
+    /// section has <see cref="Replaces"/> under its heading.
     /// </summary>
-    public static string PointerIntro(string hash) =>
-        "Some sections of your instructions are skills in your session, not text here. Before you act on what a line below covers, load its skill with the Skill tool. "
-        + $"Before the first load, check once that the file `{SessionSkillScript.HashFile}` holds one line, exactly `{hash}`. "
-        + "If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.";
-
-    /// <summary>The line that stands for an installed skill in a persona: its name and its description (what it holds and when to load it).</summary>
-    public static string Pointer(SessionSkill skill) => $"- `{skill.Name}`: {skill.Description}";
-
-    /// <summary>A skill's body as a section of a persona; a body that doesn't open with a heading gets its name as one.</summary>
-    private static string Section(SessionSkill skill) =>
-        skill.Body.StartsWith("# ", StringComparison.Ordinal) ? skill.Body : $"# {skill.Name}\n\n{skill.Body}";
+    private static string Section(SessionSkill skill)
+    {
+        var body = skill.Body.StartsWith("# ", StringComparison.Ordinal) ? skill.Body : $"# {skill.Name}\n\n{skill.Body}";
+        if (!skill.IsDefault) return body;
+        var lines = body.Split('\n', 2);
+        var rest = lines.Length == 2 ? lines[1].TrimStart('\n') : "";
+        return lines[0] + "\n\n" + Replaces(skill) + (rest.Length > 0 ? "\n\n" + rest : "");
+    }
 
     private SessionSkill Flag(SessionSkill s)
     {
-        if (!_seeds.TryGetValue(s.Name, out var seed)) return s with { UpdateAvailable = false };
-        return s with { UpdateAvailable = ContentHash(s) != ContentHash(seed) && !IsSeedHashOf(s.SeedHash, seed) };
+        if (!_seeds.TryGetValue(s.Name, out var seed)) return s with { UpdateAvailable = false, InPlugin = false, IsDefault = false };
+        return s with
+        {
+            UpdateAvailable = ContentHash(s) != ContentHash(seed) && !IsSeedHashOf(s.SeedHash, seed),
+            // The plugin's SKILL.md holds the description and body; the roles are Fyrd's alone.
+            InPlugin = s.Description == seed.Description && s.Body == seed.Body,
+            IsDefault = true,
+        };
     }
 
     private string FileFor(string name) => Path.Combine(paths.HubSessionSkillsDir, name + ".json");
 
     private void Write(SessionSkill s) =>
-        AtomicFile.Write(FileFor(s.Name), JsonSerializer.Serialize(s with { UpdateAvailable = false }, Json.Options));
+        AtomicFile.Write(FileFor(s.Name), JsonSerializer.Serialize(s with { UpdateAvailable = false, InPlugin = false, IsDefault = false }, Json.Options));
 
     private static SessionSkill? Read(string file)
     {
@@ -314,6 +327,8 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             ? File.ReadAllLines(marker).Select(l => l.Trim()).Where(l => l.Length > 0).ToHashSet()
             : new HashSet<string>();
         var markerChanged = false;
+        foreach (var (oldName, newName) in RenamedSeeds)
+            markerChanged |= CarryOver(oldName, newName, seededNames);
         foreach (var dir in Directory.EnumerateDirectories(seedDir))
         {
             var name = Path.GetFileName(dir);
@@ -355,5 +370,26 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             markerChanged = true;
         }
         if (markerChanged) AtomicFile.Write(marker, string.Join("\n", seededNames.Order(StringComparer.Ordinal)) + "\n");
+    }
+
+    /// <summary>
+    /// Moves what the store holds of a default that was renamed to its new name, once: an unedited skill goes (the new
+    /// default is seeded in its place), an edited one is kept under the new name with no seed hash (so it shows "Update
+    /// available"), and a deleted one stays deleted. True when the seeded list changed.
+    /// </summary>
+    private bool CarryOver(string oldName, string newName, HashSet<string> seededNames)
+    {
+        if (!seededNames.Contains(oldName) || seededNames.Contains(newName)) return false;
+        var stored = Read(FileFor(oldName));
+        if (stored is not null)
+        {
+            if (!IsSeedHashOf(stored.SeedHash, stored) && Read(FileFor(newName)) is null)
+                Write(stored with { Name = newName, SeedHash = null });
+            File.Delete(FileFor(oldName));
+        }
+        seededNames.Remove(oldName);
+        // Seeded already: an unedited skill gets the new default below, as a skill that follows its seed does.
+        if (stored is null || !IsSeedHashOf(stored.SeedHash, stored)) seededNames.Add(newName);
+        return true;
     }
 }

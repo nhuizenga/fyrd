@@ -4,10 +4,10 @@ using Xunit.Abstractions;
 
 namespace Fyrd.Core.Tests;
 
-/// <summary>Checks the checked-in session skill seeds under <c>skills/session</c>, and the Builder persona they were cut from.</summary>
+/// <summary>Checks the checked-in session skill seeds (the plugin skills under <c>skills/</c> that name <c>roles</c>), and the Builder persona they were cut from.</summary>
 public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposable
 {
-    private static readonly string[] Names = ["fyrd-stacked-pull-requests"];
+    private static readonly string[] Names = ["stacked-pull-requests"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -23,7 +23,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     {
         var skills = Skills();
         Assert.Equal(Names, skills.Select(s => s.Name));
-        Assert.Equal(Names, Directory.GetDirectories(RepoSeeds.Dir("skills", "session")).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.Equal(Names, SeedDirs().Select(Path.GetFileName).Order(StringComparer.Ordinal));
         Assert.All(skills, s =>
         {
             Assert.Equal(["builder"], s.Roles);
@@ -32,9 +32,34 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         });
     }
 
+    /// <summary>The plugin skills that are session skills: those whose front matter names the roles they belong to.</summary>
+    private static IEnumerable<string> SeedDirs() =>
+        Directory.GetDirectories(RepoSeeds.Dir("skills")).Where(d =>
+            File.Exists(Path.Combine(d, "SKILL.md"))
+            && FrontMatter.TryParse(File.ReadAllText(Path.Combine(d, "SKILL.md")), out var fields, out _) && fields.ContainsKey("roles"));
+
+    /// <summary>
+    /// Claude Code finds a plugin's skills at <c>skills/&lt;name&gt;/SKILL.md</c>, one level down only, and names each
+    /// <c>fyrd:&lt;name&gt;</c>: a seed lives there, under its own name, or a session with the plugin can't load it.
+    /// </summary>
+    [Fact]
+    public void EverySeed_IsAPluginSkill_WhereThePluginLoaderLooks()
+    {
+        var root = Path.GetDirectoryName(RepoSeeds.Dir("skills"))!;
+        Assert.True(File.Exists(Path.Combine(root, ".claude-plugin", "plugin.json")));
+        foreach (var name in Names)
+        {
+            var file = Path.Combine(root, "skills", name, "SKILL.md");
+            Assert.True(FrontMatter.TryParse(File.ReadAllText(file), out var fields, out _));
+            Assert.Equal(name, fields["name"]);
+        }
+        // Nothing is left where the loader doesn't look.
+        Assert.False(Directory.Exists(Path.Combine(root, "skills", "session")));
+    }
+
     /// <summary>A description opens with the name of the section the skill holds (the persona refers to it by that name) and says when to load it.</summary>
     [Theory]
-    [InlineData("fyrd-stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
+    [InlineData("stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
     public void EachDescription_NamesItsSection_AndSaysWhenToLoadIt(string name, string section, string when)
     {
         var skill = Skills().Single(s => s.Name == name);
@@ -51,7 +76,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("fyrd-stacked-pull-requests", 540)]
+    [InlineData("stacked-pull-requests", 540)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -100,7 +125,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     [Fact]
     public void TheSkills_HoldEveryRuleThatLeftThePersona()
     {
-        var stacks = Skills().Single(s => s.Name == "fyrd-stacked-pull-requests").Body;
+        var stacks = Skills().Single(s => s.Name == "stacked-pull-requests").Body;
         foreach (var rule in new[]
         {
             "Several PRs that build on each other are one native GitHub stack, not just branches based on each other. Make and keep it with GitHub's APIs only (the GitHub tools you have, or the REST and GraphQL endpoints below with the `X-GitHub-Api-Version: 2026-03-10` header); never shell out to the `gh` CLI.",
@@ -124,7 +149,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     {
         foreach (var name in Names)
         {
-            var line = File.ReadAllLines(Path.Combine(RepoSeeds.Dir("skills", "session"), name, "SKILL.md")).Single(l => l.StartsWith("description:", StringComparison.Ordinal));
+            var line = File.ReadAllLines(Path.Combine(RepoSeeds.Dir("skills"), name, "SKILL.md")).Single(l => l.StartsWith("description:", StringComparison.Ordinal));
             var value = line["description:".Length..].Trim();
             Assert.True(!value.Contains(": ", StringComparison.Ordinal) || (value.StartsWith('"') && value.EndsWith('"')), $"{name}: quote the description, it holds \": \".");
             Assert.DoesNotContain("\"", Skills().Single(s => s.Name == name).Description, StringComparison.Ordinal);
@@ -143,8 +168,8 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     }
 
     /// <summary>
-    /// What a Builder session is given, in words: without a confirmed setup script every rule is inline; with one, the
-    /// skills are a line each. The installed prompt has a budget so the saving is kept.
+    /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
+    /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
     private const int InstalledBudget = 4020;
 
@@ -156,16 +181,19 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var inline = SessionSkills.Compose(builder, skills, installed: false);
         var installed = SessionSkills.Compose(builder, skills, installed: true);
         output.WriteLine($"builder persona {Words(builder.Definition)} words; with session skills inline {Words(inline)}, installed {Words(installed)}");
-        Assert.Equal(Words(builder.Definition) + skills.Sum(s => Words(s.Body)), Words(inline));
+        Assert.Equal(Words(builder.Definition) + skills.Sum(s => Words(s.Body) + Words(SessionSkills.Replaces(s))), Words(inline));
         Assert.True(Words(installed) <= InstalledBudget, $"The Builder's prompt with installed session skills is {Words(installed)} words, over the budget of {InstalledBudget}.");
         Assert.True(Words(installed) < Words(inline));
         Assert.Contains("load its skill with the Skill tool. ", installed, StringComparison.Ordinal);
-        Assert.Contains($"check once that the file `/root/.claude/fyrd-session-skills/hash` holds one line, exactly `{SessionSkills.Hash(skills)}`. If the file is missing or holds anything else, or the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
+        Assert.Contains("If the skill is not in your skill list, stop and ask the owner.", installed, StringComparison.Ordinal);
         foreach (var s in skills)
         {
-            Assert.Contains($"\n- `{s.Name}`: {s.Description}", installed, StringComparison.Ordinal);
+            Assert.True(s.InPlugin);
+            Assert.Contains($"\n- `fyrd:{s.Name}`: {s.Description}", installed, StringComparison.Ordinal);
             Assert.DoesNotContain(s.Body, installed, StringComparison.Ordinal);
-            Assert.Contains(s.Body, inline, StringComparison.Ordinal);
+            Assert.Contains(s.Body.Split('\n', 2)[^1].TrimStart('\n'), inline, StringComparison.Ordinal);
+            Assert.Contains(SessionSkills.Replaces(s), inline, StringComparison.Ordinal);
+            Assert.DoesNotContain(SessionSkills.Replaces(s), installed, StringComparison.Ordinal);
         }
     }
 
@@ -184,10 +212,9 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var inline = Block(new FyrdConfig("env_abc"));
         Assert.EndsWith(">" + SessionSkills.Compose(builder, skills, installed: false), inline, StringComparison.Ordinal);
         Assert.Contains("# Stacked pull requests", inline, StringComparison.Ordinal);
-        var installed = Block(new FyrdConfig("env_abc", SessionSkillsHash: SessionSkills.Hash(skills)));
+        var installed = Block(new FyrdConfig("env_abc", SessionSkillsPlugin: true));
         Assert.EndsWith(">" + SessionSkills.Compose(builder, skills, installed: true), installed, StringComparison.Ordinal);
         Assert.DoesNotContain("# Stacked pull requests", installed, StringComparison.Ordinal);
-        // A hash confirmed for other text is no installation.
-        Assert.Equal(inline, Block(new FyrdConfig("env_abc", SessionSkillsHash: new string('0', 64))));
+        Assert.Contains("`fyrd:stacked-pull-requests`", installed, StringComparison.Ordinal);
     }
 }

@@ -3,26 +3,22 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import * as api from "../api";
 import type { SessionSkill, SessionSkillSetup } from "../types";
-import SessionSkillsCard, { MAX_SKILL_WORDS, shortHash, wordCount } from "./SessionSkillsCard";
+import SessionSkillsCard, { MAX_SKILL_WORDS, wordCount } from "./SessionSkillsCard";
 
 vi.mock("../api");
 
 const skills: SessionSkill[] = [
-  { name: "fyrd-check-rules", description: "Check rules: use when a check fails.", roles: ["builder", "monitor"], body: "# Check rules\n\nEvent rules.", seedHash: "s1" },
-  { name: "fyrd-stacked-pull-requests", description: "Stacked pull requests: use for a stack.", roles: ["builder"], body: "# Stacked pull requests\n\nStack rules.", seedHash: "s2" },
+  { name: "fyrd-check-rules", description: "Check rules: use when a check fails.", roles: ["builder", "monitor"], body: "# Check rules\n\nEvent rules.", seedHash: "s1", inPlugin: true },
+  { name: "stacked-pull-requests", description: "Stacked pull requests: use for a stack.", roles: ["builder"], body: "# Stacked pull requests\n\nStack rules.", seedHash: "s2", inPlugin: true },
 ];
+const SCRIPT = "# >>> fyrd plugin >>>\nSCRIPT\n# <<< fyrd plugin <<<\n";
 const setup = (o: Partial<SessionSkillSetup> = {}): SessionSkillSetup => ({
-  mode: "inline", hash: "aaaaaaaaaaaa1111-current", confirmedHash: null, environmentId: "env_abc", skills: skills.map((s) => s.name),
-  script: "# >>> fyrd session skills aaaaaaaaaaaa1111-current >>>\nSCRIPT\n# <<< fyrd session skills <<<\n",
-  skillsDir: "/root/.claude/skills", hashFile: "/root/.claude/fyrd-session-skills/hash", ...o,
+  mode: "inline", confirmed: false, environmentId: "env_abc", skills: skills.map((s) => s.name),
+  pluginSkills: skills.map((s) => `fyrd:${s.name}`), inlineSkills: [], script: SCRIPT, repository: "nhuizenga/fyrd", ...o,
 });
+const installed = (o: Partial<SessionSkillSetup> = {}) => setup({ mode: "installed", confirmed: true, ...o });
 
-const H = "aaaaaaaaaaaa1111-current", H2 = "bbbbbbbbbbbb2222-new";
 const confirmButton = () => screen.getByRole("button", { name: "I've pasted this script" });
-const copyScript = async () => {
-  await userEvent.click(screen.getByRole("button", { name: "Copy script" }));
-  await screen.findByText("Copied.");
-};
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -34,21 +30,24 @@ beforeEach(() => {
 
 const renderCard = async () => {
   render(<SessionSkillsCard />);
-  await screen.findByRole("button", { name: /^fyrd-stacked-pull-requests/ });
+  await screen.findByRole("button", { name: /^stacked-pull-requests/ });
   await screen.findByLabelText("Setup script");
 };
 
-it("lists the skills and shows inline mode with the script for the configured environment", async () => {
+it("lists the skills and shows inline mode with the plugin script for the configured environment", async () => {
   await renderCard();
   expect(screen.getByRole("heading", { name: "Session skills" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^fyrd-check-rules/ })).toBeInTheDocument();
   const status = screen.getByRole("status", { name: "Session skills status" });
   expect(status).toHaveTextContent("Inline");
-  expect(status).toHaveTextContent("Sessions get the whole text of every skill in their instructions.");
-  expect(screen.getByLabelText("Setup script")).toHaveValue(setup().script);
+  expect(status).toHaveTextContent("Sessions get the whole text of every skill in their instructions. To load the defaults on demand from the fyrd plugin instead, paste the setup script and confirm.");
+  expect(screen.getByLabelText("Setup script")).toHaveValue(SCRIPT);
   expect(screen.getByLabelText("Setup script")).toHaveAttribute("readonly");
   expect(screen.getByText(/setup script of environment env_abc at claude\.ai\/code/)).toBeInTheDocument();
-  expect(screen.getByText(/It writes the skills to \/root\/\.claude\/skills/)).toBeInTheDocument();
+  expect(screen.getByText(/It installs the fyrd plugin from github\.com\/nhuizenga\/fyrd for sessions created afterwards\./)).toBeInTheDocument();
+  // The owner learns how to replace a block from before the plugin.
+  expect(screen.getByText(/If the script has an older Fyrd block/)).toHaveTextContent("# >>> fyrd session skills to # <<< fyrd session skills <<<), replace it with this one.");
+  expect(screen.getByText("Confirm only after you saved the environment with the block in its setup script.")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Stop using the script" })).not.toBeInTheDocument();
 });
 
@@ -66,7 +65,7 @@ it("copies the script, and says so in a live region that is always there", async
   const live = screen.getAllByRole("status").find((e) => e.textContent === "");
   expect(live).toBeDefined();
   await user.click(screen.getByRole("button", { name: "Copy script" }));
-  expect(writeText).toHaveBeenCalledWith(setup().script);
+  expect(writeText).toHaveBeenCalledWith(SCRIPT);
   expect(await screen.findByText("Copied.")).toBe(live);
 });
 
@@ -78,116 +77,49 @@ it("says to copy by hand when the browser has no clipboard", async () => {
     await userEvent.click(screen.getByRole("button", { name: "Copy script" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not copy. Select the script and copy it by hand.");
     expect(screen.queryByText("Copied.")).not.toBeInTheDocument();
-    expect(confirmButton()).toBeDisabled();
   } finally {
     if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
     else delete (navigator as { clipboard?: unknown }).clipboard;
   }
 });
 
-it("shows the start of the script's hash to compare with the block's first line", async () => {
+it("confirming switches to installed; the block is the same for any skills, so there is nothing to copy first", async () => {
+  vi.mocked(api.confirmSessionSkillSetup).mockResolvedValue(installed());
   await renderCard();
-  expect(shortHash(H)).toBe("aaaaaaaaaaaa");
-  expect(screen.getByText(/This script's first line holds the hash that starts with/)).toHaveTextContent("aaaaaaaaaaaa.");
-});
-
-it("confirming after a copy records the hash of the script that was copied and switches to installed", async () => {
-  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-  vi.mocked(api.confirmSessionSkillSetup).mockResolvedValue(setup({ mode: "installed", confirmedHash: H }));
-  await renderCard();
-  // Nothing was copied in this tab yet: there is nothing to confirm.
-  expect(confirmButton()).toBeDisabled();
-  await copyScript();
-  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(confirmButton()).toBeEnabled();
   await userEvent.click(confirmButton());
-  expect(api.confirmSessionSkillSetup).toHaveBeenCalledWith(H);
+  expect(api.confirmSessionSkillSetup).toHaveBeenCalledWith();
   const status = await screen.findByRole("status", { name: "Session skills status" });
   expect(status).toHaveTextContent("Installed");
-  expect(status).toHaveTextContent("New sessions load these skills on demand from the environment's setup script.");
+  expect(status).toHaveTextContent("New sessions load the default skills on demand from the fyrd plugin.");
   expect(confirmButton()).toBeDisabled();
   expect(screen.getByRole("button", { name: "Stop using the script" })).toBeInTheDocument();
+  expect(screen.getByText(/"Stop using the script" puts the whole text back into the instructions of the sessions the Controller creates after it has taken its new instructions, which it gets the next time it is idle\. Remove the block from the environment yourself, after that\./)).toBeInTheDocument();
 });
 
-it("a script that changed after it was copied can't be confirmed until it is copied again", async () => {
-  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+it("a refused confirmation shows the error and stays inline", async () => {
+  vi.mocked(api.confirmSessionSkillSetup).mockRejectedValue(new Error("Could not save."));
   await renderCard();
-  await copyScript();
-  // The owner pastes the copied block, then edits a skill in this same tab: the script on screen is a new one.
-  await userEvent.click(screen.getByRole("button", { name: /^fyrd-stacked-pull-requests/ }));
-  await userEvent.type(screen.getByLabelText("Body"), " More.");
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ hash: H2, script: "NEW SCRIPT" }));
-  await userEvent.click(screen.getByRole("button", { name: "Save session skill" }));
-  expect(await screen.findByDisplayValue("NEW SCRIPT")).toBeInTheDocument();
-  const notice = screen.getByText("The script changed since you copied it").closest("[role=status]");
-  expect(notice).toHaveTextContent("The block you copied starts with aaaaaaaaaaaa and is no longer the current one. Copy the script again, paste it over the old block, then confirm.");
-  expect(confirmButton()).toBeDisabled();
   await userEvent.click(confirmButton());
-  expect(api.confirmSessionSkillSetup).not.toHaveBeenCalled();
-
-  await copyScript();
-  expect(screen.queryByText("The script changed since you copied it")).not.toBeInTheDocument();
-  vi.mocked(api.confirmSessionSkillSetup).mockResolvedValue(setup({ mode: "installed", confirmedHash: H2, hash: H2 }));
-  await userEvent.click(confirmButton());
-  expect(api.confirmSessionSkillSetup).toHaveBeenCalledWith(H2);
-});
-
-it("a script pasted in an earlier visit is confirmed only after the owner vouches for the hash on its first line", async () => {
-  vi.mocked(api.confirmSessionSkillSetup).mockResolvedValue(setup({ mode: "installed", confirmedHash: H }));
-  await renderCard();
-  expect(screen.getByText(/To confirm, copy the script here and paste it, or tick the box above/)).toBeInTheDocument();
-  const vouch = screen.getByRole("checkbox", {
-    name: "I pasted this script without copying it here just now, and the first line of the block in the environment holds the hash that starts with aaaaaaaaaaaa",
-  });
-  expect(confirmButton()).toBeDisabled();
-  await userEvent.click(vouch);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Could not save.");
+  expect(screen.getByRole("status", { name: "Session skills status" })).toHaveTextContent("Inline");
   expect(confirmButton()).toBeEnabled();
-  await userEvent.click(confirmButton());
-  expect(api.confirmSessionSkillSetup).toHaveBeenCalledWith(H);
-});
-
-it("vouching holds for one script only: a new script asks again", async () => {
-  await renderCard();
-  await userEvent.click(screen.getByRole("checkbox"));
-  expect(confirmButton()).toBeEnabled();
-  await userEvent.click(screen.getByRole("button", { name: /^fyrd-stacked-pull-requests/ }));
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ hash: H2, script: "NEW SCRIPT" }));
-  await userEvent.click(screen.getByRole("button", { name: "Save session skill" }));
-  expect(await screen.findByDisplayValue("NEW SCRIPT")).toBeInTheDocument();
-  expect(screen.getByRole("checkbox", { name: /starts with bbbbbbbbbbbb$/ })).not.toBeChecked();
-  expect(confirmButton()).toBeDisabled();
-});
-
-it("a refused confirmation shows the error and the current script, which must be copied again", async () => {
-  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-  vi.mocked(api.confirmSessionSkillSetup).mockRejectedValue(new Error("The session skills changed after this script was made."));
-  await renderCard();
-  await copyScript();
-  // The skills changed in another tab: this tab still shows the script it copied.
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ hash: H2, script: "NEW SCRIPT" }));
-  await userEvent.click(confirmButton());
-  expect(api.confirmSessionSkillSetup).toHaveBeenCalledWith(H);
-  expect(await screen.findByRole("alert")).toHaveTextContent("The session skills changed after this script was made.");
-  expect(await screen.findByDisplayValue("NEW SCRIPT")).toBeInTheDocument();
-  expect(screen.getByText("The script changed since you copied it")).toBeInTheDocument();
-  expect(confirmButton()).toBeDisabled();
 });
 
 it("confirm can't be sent twice while the first request is under way", async () => {
-  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
   let finish!: (s: SessionSkillSetup) => void;
   vi.mocked(api.confirmSessionSkillSetup).mockReturnValue(new Promise((r) => { finish = r; }));
   await renderCard();
-  await copyScript();
   await userEvent.click(confirmButton());
   expect(confirmButton()).toBeDisabled();
   await userEvent.click(confirmButton());
   expect(api.confirmSessionSkillSetup).toHaveBeenCalledTimes(1);
-  finish(setup({ mode: "installed", confirmedHash: H }));
+  finish(installed());
   expect(await screen.findByRole("status", { name: "Session skills status" })).toHaveTextContent("Installed");
 });
 
 it("clearing goes back to inline", async () => {
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ mode: "installed", confirmedHash: "aaaaaaaaaaaa1111-current" }));
+  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(installed());
   vi.mocked(api.clearSessionSkillSetup).mockResolvedValue(setup());
   await renderCard();
   await userEvent.click(screen.getByRole("button", { name: "Stop using the script" }));
@@ -195,25 +127,24 @@ it("clearing goes back to inline", async () => {
   expect(await screen.findByRole("status", { name: "Session skills status" })).toHaveTextContent("Inline");
 });
 
-it("an edit after the paste shows that sessions use the inline text until the new script is pasted", async () => {
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ mode: "installed", confirmedHash: "aaaaaaaaaaaa1111-current" }));
+it("installed, an edited skill is named as one sessions get whole, and the script stays as it is", async () => {
+  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(installed());
   await renderCard();
-  await userEvent.click(screen.getByRole("button", { name: /^fyrd-stacked-pull-requests/ }));
-  // Sessions get the change only once the Controller has its new instructions.
-  expect(screen.getByText(/Saving a change makes the pasted setup script out of date: sessions the Controller creates after it has taken its new instructions, which it gets the next time it is idle, get the inline text until you paste the new script and confirm\./)).toBeInTheDocument();
-  expect(screen.getByText(/"Stop using the script" puts the whole text back into the instructions of the sessions the Controller creates after it has taken its new instructions, which it gets the next time it is idle\. Remove the block from the environment yourself, after that\./)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^stacked-pull-requests/ }));
+  expect(screen.getByText(/The fyrd plugin holds only the defaults: once you change a skill's description or body, sessions get its whole text instead of loading it from the plugin, until you reset it\./)).toBeInTheDocument();
   expect(screen.getByLabelText("Name")).toBeDisabled();
   const body = screen.getByLabelText("Body");
   await userEvent.clear(body);
   await userEvent.type(body, "New rules.");
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ mode: "out-of-date", confirmedHash: "aaaaaaaaaaaa1111-current", hash: "bbbbbbbbbbbb2222-new", script: "NEW SCRIPT" }));
+  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(installed({ pluginSkills: ["fyrd:fyrd-check-rules"], inlineSkills: ["stacked-pull-requests"] }));
   await userEvent.click(screen.getByRole("button", { name: "Save session skill" }));
   expect(api.saveSessionSkill).toHaveBeenCalledWith({
-    name: "fyrd-stacked-pull-requests", description: "Stacked pull requests: use for a stack.", roles: ["builder"], body: "New rules.",
+    name: "stacked-pull-requests", description: "Stacked pull requests: use for a stack.", roles: ["builder"], body: "New rules.",
   });
-  const notice = await screen.findByText("The setup script is out of date");
-  expect(notice.closest("[role=status]")).toHaveTextContent("Sessions use the inline text until you paste the new script and confirm.");
-  expect(screen.getByLabelText("Setup script")).toHaveValue("NEW SCRIPT");
+  const status = await screen.findByText(/The plugin doesn't hold skills you edited or added here/);
+  expect(status.closest("[role=status]")).toHaveTextContent("Installed");
+  expect(status).toHaveTextContent("so sessions get their whole text: stacked-pull-requests.");
+  expect(screen.getByLabelText("Setup script")).toHaveValue(SCRIPT);
 });
 
 it("adds a skill, checking its name, description, roles, body and word budget first", async () => {
@@ -222,18 +153,18 @@ it("adds a skill, checking its name, description, roles, body and word budget fi
   const save = () => userEvent.click(screen.getByRole("button", { name: "Save session skill" }));
   const alert = async () => (await screen.findByRole("alert")).textContent;
   const name = screen.getByLabelText("Name");
-  expect(name).toHaveValue("fyrd-");
+  expect(name).toHaveValue("");
   await save();
-  expect(await alert()).toContain("Name the skill fyrd- followed by lower-case words joined by hyphens");
+  expect(await alert()).toContain("Name the skill with lower-case words joined by hyphens, such as release-notes.");
   await userEvent.type(name, "Release Notes");
   await save();
-  expect(await alert()).toContain("Name the skill fyrd-");
+  expect(await alert()).toContain("Name the skill with lower-case words");
   await userEvent.clear(name);
-  await userEvent.type(name, "fyrd-stacked-pull-requests");
+  await userEvent.type(name, "stacked-pull-requests");
   await save();
   expect(await alert()).toContain("A session skill with this name already exists.");
   await userEvent.clear(name);
-  await userEvent.type(name, "fyrd-release-notes");
+  await userEvent.type(name, "release-notes");
   await save();
   expect(await alert()).toContain("Give the skill a description");
   await userEvent.type(screen.getByLabelText("Description"), "Release notes: use when you write them.");
@@ -256,7 +187,7 @@ it("adds a skill, checking its name, description, roles, body and word budget fi
   await userEvent.type(body, "Write them.");
   await save();
   expect(api.saveSessionSkill).toHaveBeenCalledWith({
-    name: "fyrd-release-notes", description: "Release notes: use when you write them.", roles: ["builder", "reviewer"], body: "Write them.",
+    name: "release-notes", description: "Release notes: use when you write them.", roles: ["builder", "reviewer"], body: "Write them.",
   });
 });
 
@@ -288,7 +219,7 @@ it("a skill with a newer default shows a chip; a seeded skill can be reset, one 
 
 it("says that a change reaches sessions only after the Controller has taken its new instructions", async () => {
   await renderCard();
-  await userEvent.click(screen.getByRole("button", { name: /^fyrd-stacked-pull-requests/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^stacked-pull-requests/ }));
   expect(screen.getByText("Changes apply to sessions the Controller creates after it has taken its new instructions, which it gets the next time it is idle.")).toBeInTheDocument();
 });
 
@@ -327,17 +258,17 @@ it("a skill the owner made is deleted for good, and the confirmation says so", a
 
 it("lists the defaults that were deleted and restores one", async () => {
   vi.mocked(api.getSessionSkills).mockResolvedValue([skills[0]]);
-  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ missingDefaults: ["fyrd-stacked-pull-requests"] }));
+  vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ missingDefaults: ["stacked-pull-requests"] }));
   vi.mocked(api.resetSessionSkill).mockResolvedValue(skills[1]);
   render(<SessionSkillsCard />);
   const deleted = await screen.findByRole("region", { name: "Deleted defaults" });
   expect(deleted).toHaveTextContent("Defaults you deleted. The roles they belong to are without these rules until you restore them.");
-  expect(deleted).toHaveTextContent("fyrd-stacked-pull-requests");
+  expect(deleted).toHaveTextContent("stacked-pull-requests");
   vi.mocked(api.getSessionSkills).mockResolvedValue(skills);
   vi.mocked(api.getSessionSkillSetup).mockResolvedValue(setup({ missingDefaults: [] }));
-  await userEvent.click(within(deleted).getByRole("button", { name: "Restore default fyrd-stacked-pull-requests" }));
-  expect(api.resetSessionSkill).toHaveBeenCalledWith("fyrd-stacked-pull-requests");
-  expect(await screen.findByRole("button", { name: /^fyrd-stacked-pull-requests/ })).toBeInTheDocument();
+  await userEvent.click(within(deleted).getByRole("button", { name: "Restore default stacked-pull-requests" }));
+  expect(api.resetSessionSkill).toHaveBeenCalledWith("stacked-pull-requests");
+  expect(await screen.findByRole("button", { name: /^stacked-pull-requests/ })).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Deleted defaults" })).not.toBeInTheDocument();
 });
 
@@ -348,14 +279,14 @@ it("shows no deleted defaults when there are none", async () => {
 
 it("asks before another skill replaces a draft with changes that are not saved", async () => {
   await renderCard();
-  await userEvent.click(screen.getByRole("button", { name: /^fyrd-stacked-pull-requests/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^stacked-pull-requests/ }));
   // Without changes, another skill opens at once.
   await userEvent.click(screen.getByRole("button", { name: /^fyrd-check-rules/ }));
   expect(screen.getByLabelText("Name")).toHaveValue("fyrd-check-rules");
   expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
   await userEvent.type(screen.getByLabelText("Body"), " Unsaved.");
-  await userEvent.click(screen.getByRole("button", { name: /^fyrd-stacked-pull-requests/ }));
+  await userEvent.click(screen.getByRole("button", { name: /^stacked-pull-requests/ }));
   const ask = screen.getByRole("alertdialog", { name: "Unsaved changes" });
   expect(ask).toHaveTextContent("Your changes to fyrd-check-rules are not saved");
   expect(screen.getByLabelText("Name")).toHaveValue("fyrd-check-rules");
@@ -365,7 +296,7 @@ it("asks before another skill replaces a draft with changes that are not saved",
   // "Add session skill" asks too; discarding opens what was asked for.
   await userEvent.click(screen.getByRole("button", { name: "Add session skill" }));
   await userEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard changes" }));
-  expect(screen.getByLabelText("Name")).toHaveValue("fyrd-");
+  expect(screen.getByLabelText("Name")).toHaveValue("");
   expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 });
 

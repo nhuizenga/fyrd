@@ -118,22 +118,13 @@ export async function readSessionSkills(url, fetchImpl = fetch) {
   }
 }
 
-/** The `status` line for session skills: which mode sessions get them in, and what to do when the pasted script is stale. */
+/** The `status` line for session skills: which mode sessions get them in, and which skills stay inline because they were edited. */
 export function sessionSkillsLine(setup) {
   if (!setup) return "Session skills: unknown (could not read them)";
-  if (setup.mode === "installed") return "Session skills: installed (sessions load them from the environment's setup script)";
-  if (setup.mode === "out-of-date") {
-    return "Session skills: out of date, so sessions get the inline text. Paste the new setup script (Settings, Session skills) and confirm.";
+  if (setup.mode === "installed") {
+    const inline = setup.inlineSkills ?? [];
+    return "Session skills: installed (sessions load the defaults from the fyrd plugin)"
+      + (inline.length ? `; inline because edited or added in the console: ${inline.join(", ")}` : "");
   }
-  return "Session skills: inline (no setup script confirmed)";
-}
-
-/** The one-line warning for `up` when the pasted setup script is stale, else null. */
-export function sessionSkillsWarning(setup) {
-  return setup?.mode === "out-of-date" ? sessionSkillsLine(setup) : null;
-}
-
-/** What `up` prints about session skills for the server at `url`: the out-of-date line, or null (also when it can't be read). */
-export async function staleSessionSkillsWarning(url, fetchImpl = fetch) {
-  return sessionSkillsWarning(await readSessionSkills(url, fetchImpl));
+  return "Session skills: inline (the plugin setup script is not confirmed)";
 }

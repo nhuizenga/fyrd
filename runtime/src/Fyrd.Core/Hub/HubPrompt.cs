@@ -24,14 +24,14 @@ public static partial class HubPrompt
     /// <para>
     /// A <c>peasant-persona</c> block holds what <see cref="SessionSkills.Compose"/> makes of the persona and its role's
     /// session skills, so whatever the Controller copies from the block into a session's system prompt carries them: a
-    /// line per skill when the setup script the owner confirmed is the one for the current skills, else every skill's
-    /// whole body. The subagent texts are cut from the stored personas and carry no session skills.
+    /// line per skill the fyrd plugin ships when the owner confirmed the environment installs it, else (and for a skill
+    /// edited or added in the console) the skill's whole body. The subagent texts are cut from the stored personas and carry no session skills.
     /// </para>
     /// </summary>
     public static string Instructions(IReadOnlyList<HubPersona> personas, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null,
         IReadOnlyList<SessionSkill>? sessionSkills = null)
     {
-        var installed = sessionSkills is not null && SessionSkills.Mode(config, sessionSkills) == SessionSkillMode.Installed;
+        var installed = SessionSkills.Mode(config) == SessionSkillMode.Installed;
         var controller = personas.FirstOrDefault(p => p.Id == ControllerId)
             ?? throw new HubConfigException("The Controller persona is missing.");
         var sections = new List<string>

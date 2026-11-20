@@ -1,5 +1,5 @@
 ---
-name: fyrd-stacked-pull-requests
+name: stacked-pull-requests
 description: "Stacked pull requests: building, opening, fixing, validating and moving work in a native GitHub stack. Use when your work is, or may be, split into more than one pull request."
 roles: builder
 ---
