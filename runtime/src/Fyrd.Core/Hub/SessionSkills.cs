@@ -10,12 +10,13 @@ namespace Fyrd.Core.Hub;
 /// A skill a cloud session loads on demand with the Skill tool: part of a role's instructions that is needed only in
 /// some situations. <c>Description</c> is one line saying what the skill holds and when to load it, <c>Roles</c> are the
 /// persona ids it belongs to, and <c>Body</c> is the markdown. <c>SeedHash</c> is the <see cref="SessionSkills.ContentHash"/> of the seed this skill was
-/// last synced from (null for one the owner added). <c>UpdateAvailable</c> and <c>InPlugin</c> are computed on read and
-/// never stored: <c>InPlugin</c> says the skill's description and body are its default's, the text the fyrd plugin ships,
-/// so a session with the plugin installed can load it as <c>fyrd:&lt;name&gt;</c>.
+/// last synced from (null for one the owner added). <c>UpdateAvailable</c>, <c>InPlugin</c> and <c>IsDefault</c> are
+/// computed on read and never stored: <c>InPlugin</c> says the skill's description and body are its default's, the text
+/// the fyrd plugin ships, so a session with the plugin installed can load it as <c>fyrd:&lt;name&gt;</c>; <c>IsDefault</c>
+/// says the skill has a default under its name, so the plugin ships a <c>fyrd:&lt;name&gt;</c>, edited here or not.
 /// </summary>
 public sealed record SessionSkill(string Name, string Description, IReadOnlyList<string> Roles, string Body, string? SeedHash = null, bool UpdateAvailable = false,
-    bool InPlugin = false);
+    bool InPlugin = false, bool IsDefault = false);
 
 /// <summary>How the sessions of a role get their session skills.</summary>
 public enum SessionSkillMode
@@ -222,7 +223,9 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// The persona text a session of this persona's role gets: the stored definition, then its role's session skills.
     /// Installed, each skill the plugin ships unchanged (<see cref="SessionSkill.InPlugin"/>) is one line that says when
     /// to load it, under an intro; every other skill, and every skill when not installed, is its whole body as a section,
-    /// so the session has every rule whether or not the plugin is there. A persona without session skills is unchanged.
+    /// so the session has every rule whether or not the plugin is there. A section of a default (<see cref="SessionSkill.IsDefault"/>)
+    /// says it replaces the plugin's skill of that name, which a session may still have (unedited, or from the plugin
+    /// installed before the owner confirmed it). A persona without session skills is unchanged.
     /// </summary>
     public static string Compose(HubPersona persona, IReadOnlyList<SessionSkill>? skills, bool installed)
     {
@@ -246,25 +249,39 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
     /// <summary>The line that stands for a plugin skill in a persona: the name a session loads it by, and its description (what it holds and when to load it).</summary>
     public static string Pointer(SessionSkill skill) => $"- `{SessionSkillScript.PluginSkillName(skill.Name)}`: {skill.Description}";
 
-    /// <summary>A skill's body as a section of a persona; a body that doesn't open with a heading gets its name as one.</summary>
-    private static string Section(SessionSkill skill) =>
-        skill.Body.StartsWith("# ", StringComparison.Ordinal) ? skill.Body : $"# {skill.Name}\n\n{skill.Body}";
+    /// <summary>The line under a default's section heading: the session has the section, so it must not load the plugin's text as well.</summary>
+    public static string Replaces(SessionSkill skill) =>
+        $"This section replaces the plugin skill `{SessionSkillScript.PluginSkillName(skill.Name)}`; do not load that skill.";
+
+    /// <summary>
+    /// A skill's body as a section of a persona; a body that doesn't open with a heading gets its name as one. A default's
+    /// section has <see cref="Replaces"/> under its heading.
+    /// </summary>
+    private static string Section(SessionSkill skill)
+    {
+        var body = skill.Body.StartsWith("# ", StringComparison.Ordinal) ? skill.Body : $"# {skill.Name}\n\n{skill.Body}";
+        if (!skill.IsDefault) return body;
+        var lines = body.Split('\n', 2);
+        var rest = lines.Length == 2 ? lines[1].TrimStart('\n') : "";
+        return lines[0] + "\n\n" + Replaces(skill) + (rest.Length > 0 ? "\n\n" + rest : "");
+    }
 
     private SessionSkill Flag(SessionSkill s)
     {
-        if (!_seeds.TryGetValue(s.Name, out var seed)) return s with { UpdateAvailable = false, InPlugin = false };
+        if (!_seeds.TryGetValue(s.Name, out var seed)) return s with { UpdateAvailable = false, InPlugin = false, IsDefault = false };
         return s with
         {
             UpdateAvailable = ContentHash(s) != ContentHash(seed) && !IsSeedHashOf(s.SeedHash, seed),
             // The plugin's SKILL.md holds the description and body; the roles are Fyrd's alone.
             InPlugin = s.Description == seed.Description && s.Body == seed.Body,
+            IsDefault = true,
         };
     }
 
     private string FileFor(string name) => Path.Combine(paths.HubSessionSkillsDir, name + ".json");
 
     private void Write(SessionSkill s) =>
-        AtomicFile.Write(FileFor(s.Name), JsonSerializer.Serialize(s with { UpdateAvailable = false, InPlugin = false }, Json.Options));
+        AtomicFile.Write(FileFor(s.Name), JsonSerializer.Serialize(s with { UpdateAvailable = false, InPlugin = false, IsDefault = false }, Json.Options));
 
     private static SessionSkill? Read(string file)
     {
