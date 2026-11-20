@@ -116,7 +116,7 @@ public sealed partial class SessionSkills(FyrdPaths paths, string seedDir)
             if (!_seeds.TryGetValue(name, out var seed)) throw new KeyNotFoundException($"Session skill '{name}' has no default to reset to.");
             var reset = seed with { SeedHash = ContentHash(seed) };
             Write(reset);
-            return reset;
+            return Flag(reset);
         }
     }
 
