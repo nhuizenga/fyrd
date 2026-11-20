@@ -6,6 +6,7 @@ namespace Fyrd.Core.Tests;
 public sealed class HubSeedTests : IDisposable
 {
     private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "tuner", "validator"];
+    private static readonly string[] SubagentIds = ["investigator", "reviewer", "validator"];
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -85,7 +86,9 @@ public sealed class HubSeedTests : IDisposable
 
     /// <summary>
     /// Each persona is a skill of the fyrd plugin, <c>fyrd:&lt;id&gt;</c>, at the one depth the plugin loader scans. The
-    /// plugin is installed environment-wide, so a session never loads a persona on its own: only a person runs it.
+    /// plugin is installed environment-wide, so a session never loads a persona on its own: only a person runs it. The
+    /// exceptions are the subagent personas (owner's decision): a coordinator's brief tells its subagent to load one with
+    /// the Skill tool, which refuses a skill that sets <c>disable-model-invocation</c>.
     /// </summary>
     [Fact]
     public void EveryPersona_IsAPluginSkill_OnlyAPersonRuns()
@@ -98,7 +101,13 @@ public sealed class HubSeedTests : IDisposable
             Assert.True(FrontMatter.TryParse(File.ReadAllText(Path.Combine(SeedDir(), id, "SKILL.md")), out var fields, out _), id);
             Assert.Equal(id, fields["name"]);
             Assert.Equal(HubPersonas.Kind, fields["kind"]);
-            Assert.Equal("true", fields["disable-model-invocation"]);
+            if (SubagentIds.Contains(id))
+            {
+                Assert.False(fields.ContainsKey("disable-model-invocation"), $"{id}: a subagent loads it with the Skill tool");
+                Assert.Contains("when a brief tells you to act as", fields["description"], StringComparison.Ordinal);
+            }
+            else
+                Assert.Equal("true", fields["disable-model-invocation"]);
             Assert.StartsWith("Fyrd persona: ", fields["description"], StringComparison.Ordinal);
             Assert.Contains($"/fyrd:{id}", fields["description"], StringComparison.Ordinal);
             Assert.InRange(fields["description"].Length, 1, SessionSkills.MaxDescriptionLength);

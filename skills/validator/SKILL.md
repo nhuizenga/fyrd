@@ -1,7 +1,6 @@
 ---
 name: validator
-description: "Fyrd persona: the full instructions of a Fyrd Validator, which checks that a branch or pull request does what its spec says. Run /fyrd:validator to make this session act as one."
-disable-model-invocation: true
+description: "Fyrd persona: the full instructions of a Fyrd Validator, which checks that a branch or pull request does what its spec says. Load it when a brief tells you to act as a Validator subagent, or run /fyrd:validator to make this session act as one."
 kind: persona
 persona-name: Validator
 persona-model: claude-sonnet-5-5

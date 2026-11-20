@@ -188,6 +188,8 @@ The request skills are skills of the fyrd plugin: `skills/<name>/SKILL.md` with 
 
 The source lives in this repo under `skills/<name>/`; the personas live there too, as plugin skills with `kind: persona` (`skills/controller/SKILL.md` is the Controller persona), and seed Settings from there instead of `personas/hub/`. The service reads the files on every poll pass. When the Controller's instructions (definition, settings, personas or skills) change, it re-sends the full Controller message while the Controller is idle; the message says the latest instructions replace earlier ones. Hashing of the instructions part (`PostedInstructionsHash`) works like the memory hash. Inline delivery is now the primary path, not a fallback.
 
+*Since then (owner's decision, subagent personas load themselves):* the persona skills set `disable-model-invocation: true`, so that no session loads one by itself, except the Validator, Reviewer and Investigator. Those three don't set it, because the Skill tool refuses such a skill and a coordinator's brief tells its subagent to load the persona skill itself (§8). Their descriptions say to load one only when a brief tells you to act as that persona's subagent; the Builder, Controller, Monitor, Researcher and Tuner personas keep the flag. See `docs/controller-skills.md`.
+
 ### Session skills
 
 A session skill is part of a role's instructions that only some tasks need. It is kept out of the role's persona, and a session of that role loads it with the Skill tool when its situation comes up, so every session starts with shorter instructions. The guide for the owner is `docs/session-skills.md`.
