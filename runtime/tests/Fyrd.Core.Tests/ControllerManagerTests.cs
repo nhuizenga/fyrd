@@ -299,7 +299,7 @@ public sealed class ControllerManagerTests : IDisposable
     public async Task Create_PersonaMissing_ThrowsBeforeAnySideEffect()
     {
         await Created("session_old");
-        File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, "controller.json"), "{ not json");
+        Directory.Delete(Path.Combine(_seeds, "controller"), true);
 
         var ex = await Assert.ThrowsAsync<HubConfigException>(() => Make().CreateAsync(default));
 

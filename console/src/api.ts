@@ -87,9 +87,10 @@ export const answerQuestion = (id: string, body: AnswerBody) =>
   call<{ waitingFor: number } | undefined>("POST", `/api/hub/questions/${enc(id)}/answer`, body);
 
 export const getPersonas = () => call<HubPersona[]>("GET", "/api/hub/personas");
-export const savePersona = (p: HubPersona) => call<HubPersona>("PUT", `/api/hub/personas/${enc(p.id)}`, p);
+/** Only the model changes: a persona's name and text come from the fyrd repo. */
+export const setPersonaModel = (id: string, model: string) => call<HubPersona>("PUT", `/api/hub/personas/${enc(id)}`, { model });
+/** Back to the model the repo gives the persona. */
 export const resetPersona = (id: string) => call<HubPersona>("POST", `/api/hub/personas/${enc(id)}/reset`);
-export const deletePersona = (id: string) => call<void>("DELETE", `/api/hub/personas/${enc(id)}`);
 
 export const getSessionSkills = () => call<SessionSkill[]>("GET", "/api/hub/session-skills");
 export const saveSessionSkill = (s: SessionSkill) => call<SessionSkill>("PUT", `/api/hub/session-skills/${enc(s.name)}`, s);

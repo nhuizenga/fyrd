@@ -26,6 +26,7 @@ internal static partial class HubEndpoints
     private sealed record TextBody(string? Text, string[]? FileIds = null);
     private sealed record BudgetBody(JsonElement? AmountUsd);
     private sealed record RenameBody(string? Title);
+    private sealed record PersonaModelBody(string? Model);
     private sealed record PrBody(string? Url, bool? Force = null);
     private sealed record AnswerBody(string? Choice, string? Text, string[]? FileIds = null);
 
@@ -399,25 +400,16 @@ internal static partial class HubEndpoints
                 ? Results.Ok(p)
                 : Results.Problem($"Persona '{id}' not found.", statusCode: StatusCodes.Status404NotFound)));
 
-        group.MapPut("/personas", (HubPersona? body, HubPersonas personas) => SavePersona(null, body, personas));
-        group.MapPut("/personas/{id}", (string id, HubPersona? body, HubPersonas personas) => SavePersona(id, body, personas));
-
-        group.MapPost("/personas/{id}/reset", (string id, HubPersonas personas) => ApiErrors.Run(() =>
+        // The owner changes only a persona's model; its name and text come from the repo.
+        group.MapPut("/personas/{id}", (string id, PersonaModelBody? body, HubPersonas personas) => ApiErrors.Run(() =>
         {
-            try { return Results.Ok(personas.Reset(id)); }
-            catch (KeyNotFoundException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status404NotFound); }
+            if (string.IsNullOrWhiteSpace(body?.Model)) return Bad("Body { model } is required.");
+            return Results.Ok(personas.SetModel(id, body.Model));
         }));
 
-        group.MapDelete("/personas/{id}", (string id, HubPersonas personas) => ApiErrors.Run(() =>
-        {
-            try
-            {
-                return personas.Delete(id)
-                    ? Results.NoContent()
-                    : Results.Problem($"Persona '{id}' not found.", statusCode: StatusCodes.Status404NotFound);
-            }
-            catch (InvalidOperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict); }
-        }));
+        // Back to the repo's model.
+        group.MapPost("/personas/{id}/reset", (string id, HubPersonas personas) =>
+            ApiErrors.Run(() => Results.Ok(personas.Reset(id))));
 
         group.MapGet("/memory", (HubMemory memory, HubPersonas personas) => ApiErrors.Run(() =>
         {
@@ -426,7 +418,7 @@ internal static partial class HubEndpoints
             var list = personas.List();
             var scopes = new List<object> { new { scope = HubMemory.Shared, label = "Shared", entries = Entries(HubMemory.Shared) } };
             scopes.AddRange(list.Select(p => new { scope = p.Id, label = string.IsNullOrWhiteSpace(p.Name) ? p.Id : p.Name, entries = Entries(p.Id) }));
-            // Scopes left behind by deleted personas stay visible so their entries can still be edited or removed.
+            // Scopes left behind by personas that are gone (a custom persona of an older install, or a seed removed from the repo) stay visible so their entries can still be edited or removed.
             var known = list.Select(p => p.Id).Append(HubMemory.Shared).ToHashSet(StringComparer.Ordinal);
             scopes.AddRange(all.Keys.Where(k => !known.Contains(k)).Order(StringComparer.Ordinal)
                 .Select(k => new { scope = k, label = k, entries = all[k] }));
@@ -644,15 +636,6 @@ internal static partial class HubEndpoints
             }
         }
     }
-
-    private static IResult SavePersona(string? id, HubPersona? body, HubPersonas personas) => ApiErrors.Run(() =>
-    {
-        if (body is null) return Bad("Body is required.");
-        // Locked is set only by seeding; the console cannot lock or unlock a persona.
-        var p = body with { Id = id ?? body.Id ?? "", Locked = false };
-        try { return Results.Ok(personas.Save(p)); }
-        catch (InvalidOperationException e) { return Results.Problem(e.Message, statusCode: StatusCodes.Status409Conflict); }
-    });
 
     private static IResult? TextError(string? text) =>
         string.IsNullOrWhiteSpace(text) ? Bad("Body { text } is required.")

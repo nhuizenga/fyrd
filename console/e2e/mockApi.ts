@@ -69,8 +69,9 @@ export const docsTranscript = (): TranscriptItem[] => [
 ];
 
 const PERSONAS: HubPersona[] = [
-  { id: "controller", name: "Controller", model: "claude-opus-5-5", definition: "Control.", locked: true },
-  { id: "builder", name: "Builder", model: "claude-sonnet-5-5", definition: "Build.", locked: false },
+  { id: "controller", name: "Controller", model: "claude-opus-5-5", defaultModel: "claude-opus-5-5", definition: "Control.", locked: true },
+  { id: "builder", name: "Builder", model: "claude-sonnet-5-5", defaultModel: "claude-sonnet-5-5", definition: "Build.", locked: false },
+  { id: "reviewer", name: "Reviewer", model: "claude-opus-5-5", defaultModel: "claude-sonnet-5-5", definition: "Review.", locked: false },
 ];
 
 const sse = (items: TranscriptItem[]) =>
@@ -151,6 +152,11 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
       return route.fulfill({ json: { costToday: 47.5, limitUsd: 75, ratio: 0.63, estimated: true, blocked: null, canExtend: false, exempt: false } });
     }
     if (path === "/api/hub/personas") return route.fulfill({ json: PERSONAS });
+    const persona = /^\/api\/hub\/personas\/([^/]+)(\/reset)?$/.exec(path);
+    if (persona && req.method() !== "GET") {
+      const p = PERSONAS.find((x) => x.id === persona[1])!;
+      return route.fulfill({ json: { ...p, model: persona[2] ? p.defaultModel : (req.postDataJSON() as { model: string }).model } });
+    }
     if (path === "/api/hub/session-skills") return route.fulfill({ json: [] });
     if (path === "/api/hub/session-skills/setup-script") {
       return route.fulfill({ json: {

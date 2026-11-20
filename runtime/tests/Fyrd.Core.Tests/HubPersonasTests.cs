@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Fyrd.Core.Hub;
 
 namespace Fyrd.Core.Tests;
@@ -22,209 +23,146 @@ public sealed class HubPersonasTests : IDisposable
 
     private HubPersonas Make() => new(_home.Paths, _seeds);
 
-    [Fact]
-    public void List_SeedsOnce_ControllerFirst()
+    private void Seed(string id, string name, string body, bool locked = false, string model = "claude-sonnet-5-5") =>
+        PersonaSeedFile.Write(_seeds, id, name, model, locked, body);
+
+    private string FileFor(string id) => Path.Combine(_home.Paths.HubPersonasDir, id + ".json");
+
+    /// <summary>Writes a whole-persona file the way installs before model-only overrides stored one.</summary>
+    private void WriteLegacy(string id, string name, string model, string definition, string? seedHash)
     {
-        var store = Make();
-        var list = store.List();
-        Assert.Equal("controller", list[0].Id);
-        Assert.True(list[0].Locked);
-        Assert.Equal("Control things.", list[0].Definition);
-        var builder = list.Single(p => p.Id == "builder");
-        store.Save(builder with { Definition = "Edited" });
-        Assert.Equal("Edited", Make().List().Single(p => p.Id == "builder").Definition);
+        Directory.CreateDirectory(_home.Paths.HubPersonasDir);
+        File.WriteAllText(FileFor(id), JsonSerializer.Serialize(
+            new { id, name, model, definition, locked = false, seedHash }, Json.Options));
     }
 
-    private void Seed(string id, string name, string body, bool locked = false) =>
-        PersonaSeedFile.Write(_seeds, id, name, "claude-sonnet-5-5", locked, body);
+    [Fact]
+    public void List_IsTheSeeds_ControllerFirst()
+    {
+        var list = Make().List();
+        Assert.Equal(["controller", "builder"], list.Select(p => p.Id));
+        Assert.True(list[0].Locked);
+        Assert.Equal("Control things.", list[0].Definition);
+        Assert.Equal("claude-sonnet-5-5", list[1].DefaultModel);
+    }
 
     [Fact]
     public void Hash_IsSha256OfNameModelDefinition() =>
         Assert.Equal("22319754cb8179c5f39718c645c51fbf82767867aedf0db954c8d94497577495", HubPersonas.Hash("A", "m", "d"));
 
     [Fact]
-    public void UneditedPersona_UpdatesToNewSeed_AndSeedHashAdvances()
+    public void SetModel_IsKept_AndThePersonaStillFollowsTheRepoText()
     {
-        var first = Make().Get("builder")!;
-        Assert.Equal(HubPersonas.Hash(first), first.SeedHash);
-        Seed("builder", "Builder", "Build better things.");
+        var saved = Make().SetModel("builder", "claude-opus-5-5");
+        Assert.Equal("claude-opus-5-5", saved.Model);
+        Assert.Equal("claude-sonnet-5-5", saved.DefaultModel);
+        Seed("builder", "Smith", "Build better things.");
         var after = Make().Get("builder")!;
+        Assert.Equal("claude-opus-5-5", after.Model);
+        Assert.Equal("Smith", after.Name);
         Assert.Equal("Build better things.", after.Definition);
-        Assert.Equal(HubPersonas.Hash(after), after.SeedHash);
-        Assert.False(after.UpdateAvailable);
     }
 
     [Fact]
-    public void EditedPersona_IsLeftAlone_AndFlagged_ThenResetClearsIt()
+    public void SetModel_ToTheDefault_ClearsTheOverride_SoTheRepoModelIsFollowed()
     {
         var store = Make();
-        store.Save(store.Get("builder")! with { Definition = "Mine" });
-        Seed("builder", "Builder", "Build better things.");
-        var again = Make();
-        var p = again.Get("builder")!;
-        Assert.Equal("Mine", p.Definition);
-        Assert.True(p.UpdateAvailable);
-        var reset = again.Reset("builder");
-        Assert.Equal("Build better things.", reset.Definition);
-        Assert.False(again.Get("builder")!.UpdateAvailable);
+        store.SetModel("builder", "claude-opus-5-5");
+        store.SetModel("builder", "claude-sonnet-5-5");
+        Assert.False(File.Exists(FileFor("builder")));
+        Seed("builder", "Builder", "Build things.", model: "claude-haiku-5-5");
+        Assert.Equal("claude-haiku-5-5", Make().Get("builder")!.Model);
     }
 
     [Fact]
-    public void EditedPersona_WithUnchangedSeed_IsNotFlagged()
+    public void Reset_ClearsTheOverride()
     {
         var store = Make();
-        store.Save(store.Get("builder")! with { Definition = "Mine" });
-        Assert.False(Make().Get("builder")!.UpdateAvailable);
+        store.SetModel("builder", "claude-opus-5-5");
+        var reset = store.Reset("builder");
+        Assert.Equal("claude-sonnet-5-5", reset.Model);
+        Assert.Equal("claude-sonnet-5-5", Make().Get("builder")!.Model);
     }
 
     [Fact]
-    public void LegacyPersona_InHistory_IsUpdated_NotInHistory_IsFlagged()
+    public void SetModel_And_Reset_OfAnUnknownPersona_Throw()
+    {
+        Assert.Throws<KeyNotFoundException>(() => Make().SetModel("scout", "claude-opus-5-5"));
+        Assert.Throws<KeyNotFoundException>(() => Make().Reset("scout"));
+        Assert.Throws<ArgumentException>(() => Make().Reset("Bad_Id"));
+    }
+
+    [Fact]
+    public void SetModel_UnknownModel_Throws() =>
+        Assert.Throws<ArgumentException>(() => Make().SetModel("builder", "gpt-4"));
+
+    [Fact]
+    public void ControllerModel_CanChange()
+    {
+        var saved = Make().SetModel("controller", "claude-opus-5-5");
+        Assert.True(saved.Locked);
+        Assert.Equal("Controller", saved.Name);
+        Assert.Equal("claude-opus-5-5", Make().Get("controller")!.Model);
+    }
+
+    [Fact]
+    public void LegacyEditedPersona_KeepsItsModel_ButTakesTheRepoNameAndText()
+    {
+        WriteLegacy("builder", "Smith", "claude-opus-5-5", "My own text.", seedHash: "0000");
+        var p = Make().Get("builder")!;
+        Assert.Equal("claude-opus-5-5", p.Model);
+        Assert.Equal("Builder", p.Name);
+        Assert.Equal("Build things.", p.Definition);
+    }
+
+    [Fact]
+    public void LegacyUneditedPersona_HasNoOverride()
+    {
+        // Synced to an older seed whose model was opus: it followed its seed, so it takes today's seed model.
+        WriteLegacy("builder", "Builder", "claude-opus-5-5", "Old text.", HubPersonas.Hash("Builder", "claude-opus-5-5", "Old text."));
+        Assert.Equal("claude-sonnet-5-5", Make().Get("builder")!.Model);
+    }
+
+    [Fact]
+    public void LegacyPersona_InHistory_HasNoOverride()
+    {
+        WriteLegacy("builder", "Builder", "claude-opus-5-5", "Old text.", seedHash: null);
+        File.WriteAllText(Path.Combine(_seeds, "persona-seed-history.json"),
+            $"{{\"builder\":[\"{HubPersonas.Hash("Builder", "claude-opus-5-5", "Old text.")}\"]}}");
+        Assert.Equal("claude-sonnet-5-5", Make().Get("builder")!.Model);
+    }
+
+    [Fact]
+    public void CustomPersona_WithoutASeed_IsIgnored_AndLeftOnDisk()
+    {
+        WriteLegacy("scout", "Scout", "claude-haiku-5-5", "Custom scout.", seedHash: null);
+        var store = Make();
+        Assert.Null(store.Get("scout"));
+        Assert.DoesNotContain(store.List(), p => p.Id == "scout");
+        Assert.True(File.Exists(FileFor("scout")));
+    }
+
+    [Fact]
+    public void UnreadableOrUnknownModelOverride_IsIgnored()
     {
         Directory.CreateDirectory(_home.Paths.HubPersonasDir);
-        var oldBuilder = new HubPersona("builder", "Builder", "claude-sonnet-5-5", "Old text.", false);
-        var oldScout = new HubPersona("scout", "Scout", "claude-sonnet-5-5", "Custom scout.", false);
-        foreach (var p in new[] { oldBuilder, oldScout })
-            File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, p.Id + ".json"), System.Text.Json.JsonSerializer.Serialize(p, Json.Options));
-        File.WriteAllText(Path.Combine(_home.Paths.HubPersonasDir, ".seeded"), "builder\ncontroller\nscout\n");
-        Seed("scout", "Scout", "New scout.");
-        File.WriteAllText(Path.Combine(_seeds, "persona-seed-history.json"), $"{{\"builder\":[\"{HubPersonas.Hash(oldBuilder)}\"]}}");
-        var store = Make();
-        Assert.Equal("Build things.", store.Get("builder")!.Definition);
-        var scout = store.Get("scout")!;
-        Assert.Equal("Custom scout.", scout.Definition);
-        Assert.True(scout.UpdateAvailable);
+        File.WriteAllText(FileFor("builder"), "{ not json");
+        File.WriteAllText(FileFor("controller"), "{\"model\":\"gpt-4\"}");
+        var list = Make().List();
+        Assert.All(list, p => Assert.Equal("claude-sonnet-5-5", p.Model));
     }
 
     [Fact]
-    public void CrlfSeed_HashesLikeLf()
+    public void CrlfSeed_ReadsLikeLf()
     {
-        Make().List();
         File.WriteAllText(Path.Combine(_seeds, "builder", "SKILL.md"), PersonaSeedFile.Text("builder", "Builder", "claude-sonnet-5-5", false, "Build\r\nthings.", "\r\n"));
-        var p = Make().Get("builder")!;
-        Assert.Equal("Build\nthings.", p.Definition);
+        Assert.Equal("Build\nthings.", Make().Get("builder")!.Definition);
     }
 
     [Fact]
-    public void LockedPersona_WithDifferentStoredName_StillUpdates()
+    public void SharedIsNeverAPersona()
     {
-        Make().List();
-        var file = Path.Combine(_home.Paths.HubPersonasDir, "controller.json");
-        var stored = System.Text.Json.JsonSerializer.Deserialize<HubPersona>(File.ReadAllText(file), Json.Options)!;
-        var renamed = stored with { Name = "Boss", SeedHash = null };
-        renamed = renamed with { SeedHash = HubPersonas.Hash(renamed) };
-        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(renamed, Json.Options));
-        Seed("controller", "Controller", "Control better.", locked: true);
-        var c = Make().Get("controller")!;
-        Assert.Equal("Boss", c.Name);
-        Assert.Equal("Control better.", c.Definition);
-        Assert.False(c.UpdateAvailable);
+        Seed("shared", "Shared", "Not a persona.");
+        Assert.Null(Make().Get("shared"));
     }
-
-    [Fact]
-    public void DeletedPersona_StaysDeleted()
-    {
-        var store = Make();
-        store.List();
-        store.Delete("builder");
-        Assert.Null(Make().Get("builder"));
-    }
-
-    [Fact]
-    public void LockedPersona_KeepsItsName_WhenUpdated()
-    {
-        Make().List();
-        Seed("controller", "Controller", "Control better.", locked: true);
-        var c = Make().Get("controller")!;
-        Assert.Equal("Controller", c.Name);
-        Assert.Equal("Control better.", c.Definition);
-        Assert.True(c.Locked);
-    }
-
-    [Fact]
-    public void Reset_WithoutSeed_Throws()
-    {
-        var store = Make();
-        store.Save(new HubPersona("", "Scout", "claude-haiku-5-5", "d", false));
-        Assert.Throws<KeyNotFoundException>(() => store.Reset("scout"));
-    }
-
-    [Fact]
-    public void Delete_Locked_Throws()
-    {
-        var store = Make();
-        store.List();
-        Assert.Throws<InvalidOperationException>(() => store.Delete("controller"));
-    }
-
-    [Fact]
-    public void Delete_Unknown_IsNoOp() => Make().Delete("nope");
-
-    [Fact]
-    public void Save_UnknownModel_Throws() =>
-        Assert.Throws<ArgumentException>(() => Make().Save(new HubPersona("", "X", "gpt-4", "d", false)));
-
-    [Fact]
-    public void Save_New_IdIsSlug()
-    {
-        var saved = Make().Save(new HubPersona("", "Data Engineer", "claude-haiku-5-5", "d", false));
-        Assert.Equal("data-engineer", saved.Id);
-        Assert.Equal("d", Make().Get("data-engineer")!.Definition);
-    }
-
-    [Fact]
-    public void Save_New_SlugCollision_Throws()
-    {
-        var store = Make();
-        store.Save(new HubPersona("", "Data Engineer", "claude-haiku-5-5", "d", false));
-        Assert.Throws<InvalidOperationException>(() => store.Save(new HubPersona("", "data engineer", "claude-haiku-5-5", "d", false)));
-    }
-
-    [Fact]
-    public void Save_Existing_KeepsIdAndLocked()
-    {
-        var store = Make();
-        store.List();
-        var saved = store.Save(new HubPersona("controller", "Controller", "claude-opus-5-5", "x", false));
-        Assert.Equal("controller", saved.Id);
-        Assert.True(saved.Locked);
-        Assert.Equal("claude-opus-5-5", store.Get("controller")!.Model);
-    }
-
-    [Fact]
-    public void Save_Existing_RenamesUnlockedPersona_KeepsId()
-    {
-        var store = Make();
-        store.List();
-        var saved = store.Save(new HubPersona("builder", "Smith", "claude-sonnet-5-5", "x", false));
-        Assert.Equal("builder", saved.Id);
-        Assert.Equal("Smith", store.Get("builder")!.Name);
-    }
-
-    [Fact]
-    public void Save_Existing_RenamingLockedPersona_Throws()
-    {
-        var store = Make();
-        store.List();
-        Assert.Throws<InvalidOperationException>(() =>
-            store.Save(new HubPersona("controller", "Boss", "claude-sonnet-5-5", "x", false)));
-        Assert.Equal("Controller", store.Get("controller")!.Name);
-    }
-
-    [Fact]
-    public void Delete_Seeded_StaysDeletedAfterRestart()
-    {
-        var store = Make();
-        store.List();
-        store.Delete("builder");
-        var again = Make();
-        Assert.Null(again.Get("builder"));
-        Assert.DoesNotContain(again.List(), p => p.Id == "builder");
-        Assert.Contains(again.List(), p => p.Id == "controller");
-    }
-
-    [Theory]
-    [InlineData("", "Shared")]
-    [InlineData("shared", "Whatever")]
-    public void Save_ReservedSharedId_Throws(string id, string name) =>
-        Assert.Throws<ArgumentException>(() => Make().Save(new HubPersona(id, name, "claude-haiku-5-5", "d", false)));
 }

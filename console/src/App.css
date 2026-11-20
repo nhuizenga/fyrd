@@ -197,3 +197,4 @@ body { margin: 0; background: var(--a2-background-color-default); color: var(--a
 .session-group-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drag-handle { display: inline-flex; cursor: grab; opacity: 0.6; }
 .session-group-move { display: flex; }
+.persona-default { display: flex; align-items: center; gap: 8px; }

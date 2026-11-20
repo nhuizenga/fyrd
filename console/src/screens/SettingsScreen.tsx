@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Alert, Button, Chip, SelectFieldSync, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import DeleteIcon from "@servicetitan/anvil2/assets/icons/material/round/delete.svg?react";
 import EditIcon from "@servicetitan/anvil2/assets/icons/material/round/edit.svg?react";
@@ -6,20 +6,27 @@ import * as api from "../api";
 import { navigate } from "../route";
 import { relativeTime } from "../time";
 import { getItemLimit, MAX_ITEM_LIMIT, MIN_ITEM_LIMIT, setItemLimit } from "../useTranscript";
-import type { HubBudgetView, SecretName, SecretsView, HubMemory, HubPersona, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
+import type { HubBudgetView, SecretName, SecretsView, HubMemory, MemoryEntry, MemoryScopeView, PendingMemoryEntry } from "../types";
 import type { ScreenProps } from "./ScreenProps";
 import SessionSkillsCard from "./SessionSkillsCard";
 
-const MODELS = [
-  { id: "claude-opus-5-5", label: "Opus 5.5" },
-  { id: "claude-sonnet-5-5", label: "Sonnet 5.5" },
-  { id: "claude-haiku-5-5", label: "Haiku 5.5" },
-  { id: "claude-fable-5-2", label: "Fable 5.2" },
-  { id: "claude-fable-5-1", label: "Fable 5.1" },
-];
-const MODEL_OPTIONS = MODELS.map((m) => ({ id: m.id, label: `${m.label} · ${m.id}` }));
+/** Shown when the persona table's chunk fails to load (a network blip, or asset names changed by a rebuild). */
+export function PersonasLoadFailed() {
+  return (
+    <Alert status="danger" title="Couldn't load the persona table" role="alert">
+      <Button onClick={() => window.location.reload()}>Reload</Button>
+    </Alert>
+  );
+}
+
+// The persona table is Anvil's DataTable, which is large: it loads when the Personas section first opens. A chunk that
+// fails to load shows an alert in its place instead of blanking the console.
+const PersonasTable = lazy(() => import("./PersonasCard").catch(() => ({ default: PersonasLoadFailed })));
+function PersonasCard() {
+  return <Suspense fallback={<Text subdued>Loading personas…</Text>}><PersonasTable /></Suspense>;
+}
+
 const APPLY_NOTE = "Changes apply to sessions created from now on.";
-const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** A whole number from `min` to `max` typed in a field, or null. */
@@ -339,148 +346,6 @@ function DisplayCard(_: CardProps) {
         >
           Save
         </Button>
-      </div>
-    </section>
-  );
-}
-
-function PersonasCard(_: CardProps) {
-  const [personas, setPersonas] = useState<HubPersona[]>([]);
-  const [editing, setEditing] = useState<{ draft: HubPersona; isNew: boolean } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setPersonas((await api.getPersonas()) ?? []);
-    } catch (e) {
-      setError(errText(e));
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-
-  const d = editing?.draft;
-  const locked = !!d && !editing!.isNew && (d.locked || d.id === "controller");
-  const patch = (p: Partial<HubPersona>) => setEditing((e) => (e ? { ...e, draft: { ...e.draft, ...p } } : e));
-
-  const save = async () => {
-    if (!d) return;
-    setError(null);
-    const id = editing!.isNew ? slug(d.name) : d.id;
-    if (!id || !d.name.trim()) {
-      setError("Give the persona a name.");
-      return;
-    }
-    const taken = (p: HubPersona) => p.id !== d.id && (p.id === slug(d.name) || p.name.trim().toLowerCase() === d.name.trim().toLowerCase());
-    if ((editing!.isNew && (id === "shared" || personas.some((p) => p.id === id))) || (!editing!.isNew && personas.some(taken))) {
-      setError("A persona with this name already exists.");
-      return;
-    }
-    try {
-      await api.savePersona({ ...d, id, name: d.name.trim() });
-      setEditing(null);
-      await load();
-    } catch (e) {
-      setError(errText(e));
-    }
-  };
-
-  const reset = async () => {
-    if (!d) return;
-    setError(null);
-    try {
-      const fresh = await api.resetPersona(d.id);
-      setEditing({ isNew: false, draft: { ...fresh } });
-      await load();
-    } catch (e) {
-      setError(errText(e));
-    }
-  };
-
-  const remove = async () => {
-    if (!d) return;
-    setError(null);
-    try {
-      await api.deletePersona(d.id);
-      setEditing(null);
-      await load();
-    } catch (e) {
-      setError(errText(e));
-    }
-  };
-
-  return (
-    <section className="card" aria-labelledby="personas-h">
-      <Text variant="headline" el="h3" size="medium" id="personas-h">Personas</Text>
-      {error && <Alert status="danger" title={error} role="alert" />}
-      <div>
-        <Button
-          appearance="secondary"
-          onClick={() => setEditing({ isNew: true, draft: { id: "", name: "", model: "claude-sonnet-5-5", definition: "", locked: false } })}
-        >
-          Add persona
-        </Button>
-      </div>
-      <div className="split">
-        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-          {personas.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                className="row-btn"
-                aria-current={!!d && !editing!.isNew && d.id === p.id}
-                onClick={() => setEditing({ isNew: false, draft: { ...p } })}
-              >
-                {p.name}
-                {p.updateAvailable && <Chip label="Update available" size="small" />}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {!d ? (
-            <Text subdued>Select a persona to edit it.</Text>
-          ) : (
-            <>
-              <TextField
-                label="Name"
-                value={d.name}
-                disabled={locked}
-                hint={locked ? "The Controller persona can't be renamed." : undefined}
-                onChange={(e) => patch({ name: e.target.value })}
-              />
-              <SelectFieldSync
-                label="Claude model"
-                disableSearch
-                disableClearButton
-                options={MODEL_OPTIONS}
-                value={MODEL_OPTIONS.find((m) => m.id === d.model) ?? null}
-                onSelectedOptionChange={(o) => o && patch({ model: String(o.id) })}
-              />
-              <Textarea
-                label="Definition"
-                description="Instructions given to the agent at the start of every session that uses this persona."
-                rows={8}
-                value={d.definition}
-                onChange={(e) => patch({ definition: e.target.value })}
-              />
-              {!editing!.isNew && d.updateAvailable && (
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <Text size="small">A newer default is available for this persona.</Text>
-                  <Button appearance="secondary" onClick={reset}>Reset to default</Button>
-                </div>
-              )}
-              <Text size="small" subdued>{APPLY_NOTE}</Text>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Button appearance="primary" onClick={save}>Save persona</Button>
-                <Button appearance="ghost" onClick={() => setEditing(null)}>Discard</Button>
-                {!editing!.isNew && (
-                  <Button appearance="secondary" disabled={locked} onClick={remove}>Delete persona</Button>
-                )}
-              </div>
-              {locked && <Text size="small">The Controller persona can't be deleted</Text>}
-            </>
-          )}
-        </div>
       </div>
     </section>
   );

@@ -6,16 +6,22 @@ using System.Text.RegularExpressions;
 namespace Fyrd.Core.Hub;
 
 /// <summary>
-/// <c>SeedHash</c> is the hash of the seed text this persona was last synced from (null for legacy installs).
-/// <c>UpdateAvailable</c> is computed on read and never stored.
+/// A hub persona: everything but <c>Model</c> comes from its seed in the repo. <c>Model</c> is the owner's override, or
+/// the seed's model (<c>DefaultModel</c>) when there is none.
 /// </summary>
-public sealed record HubPersona(string Id, string Name, string Model, string Definition, bool Locked, string? SeedHash = null, bool UpdateAvailable = false);
+public sealed record HubPersona(string Id, string Name, string Model, string Definition, bool Locked, string? DefaultModel = null);
 
 /// <summary>
-/// Hub persona store: one JSON file per persona under <see cref="FyrdPaths.HubPersonasDir"/>, seeded from the persona
-/// skills of the fyrd plugin: <c>skills/&lt;id&gt;/SKILL.md</c> whose front matter says <c>kind: persona</c>. The skill's
-/// body is the definition, and <c>persona-name</c>, <c>persona-model</c> and <c>persona-locked</c> are the rest. The same
-/// file is the plugin skill <c>fyrd:&lt;id&gt;</c>, so the persona text has one copy.
+/// Hub personas, read from the persona skills of the fyrd plugin: <c>skills/&lt;id&gt;/SKILL.md</c> whose front matter
+/// says <c>kind: persona</c>. The skill's body is the definition, and <c>persona-name</c>, <c>persona-model</c> and
+/// <c>persona-locked</c> are the rest. The same file is the plugin skill <c>fyrd:&lt;id&gt;</c>, so the persona text has
+/// one copy. The only thing the owner changes is a persona's model: the override is <c>{ "model": … }</c> in
+/// <c>&lt;id&gt;.json</c> under <see cref="FyrdPaths.HubPersonasDir"/>, and the name and text always follow the repo.
+/// <para>
+/// Older installs stored the whole persona there. Such a file is read for its model only, and only when it was edited
+/// (its hash is neither its <c>seedHash</c> nor in <c>persona-seed-history.json</c>); an unedited one followed its seed
+/// and so has no override. Its other fields, and files of personas that have no seed (custom personas), are ignored.
+/// </para>
 /// </summary>
 public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
 {
@@ -23,30 +29,27 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-2", "claude-fable-5-1"];
 
     private const string ControllerId = "controller";
-    private const string SeededMarker = ".seeded";
-    private readonly object _gate = new();
     private const string HistoryFile = "persona-seed-history.json";
+    private readonly object _gate = new();
 
     /// <summary>The front matter <c>kind</c> of a persona skill.</summary>
     public const string Kind = "persona";
-    private bool _seeded;
-    private Dictionary<string, HubPersona> _seeds = new();
+    private Dictionary<string, HubPersona>? _seeds;
+    private Dictionary<string, HashSet<string>>? _history;
 
     [GeneratedRegex("^[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex IdRegex();
+
+    /// <summary>What an override file holds. <c>Name</c>, <c>Definition</c> and <c>SeedHash</c> are only in older files.</summary>
+    private sealed record Stored(string? Model, string? Name = null, string? Definition = null, string? SeedHash = null);
+
+    private sealed record Override(string Model);
 
     public IReadOnlyList<HubPersona> List()
     {
         lock (_gate)
         {
-            SeedIfNeeded();
-            var all = new List<HubPersona>();
-            foreach (var f in Directory.EnumerateFiles(paths.HubPersonasDir, "*.json"))
-            {
-                var p = Read(f);
-                if (p is not null) all.Add(Flag(p));
-            }
-            return all
+            return Seeds().Values.Select(WithOverride)
                 .OrderBy(p => p.Id == ControllerId ? 0 : 1)
                 .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -56,29 +59,34 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
     public HubPersona? Get(string id)
     {
         if (!IdRegex().IsMatch(id ?? "")) return null;
-        lock (_gate)
-        {
-            SeedIfNeeded();
-            return Flag(Read(FileFor(id!)));
-        }
+        lock (_gate) return Seeds().TryGetValue(id!, out var seed) ? WithOverride(seed) : null;
     }
 
     /// <summary>
-    /// Replaces a persona with its current seed text. Reset is an explicit owner action, so it also recreates a persona the
-    /// owner deleted (sync alone never does). Throws <see cref="KeyNotFoundException"/> when the persona has no seed.
+    /// Sets a persona's model. Choosing its default model clears the override, so the persona follows the repo's model
+    /// again. Throws <see cref="KeyNotFoundException"/> for an unknown persona and <see cref="ArgumentException"/> for a
+    /// model that isn't allowed.
     /// </summary>
+    public HubPersona SetModel(string id, string model)
+    {
+        if (!AllowedModels.Contains(model)) throw new ArgumentException($"Unknown model '{model}'.", nameof(model));
+        lock (_gate)
+        {
+            var seed = SeedFor(id);
+            if (model == seed.Model) File.Delete(FileFor(id));
+            else AtomicFile.Write(FileFor(id), JsonSerializer.Serialize(new Override(model), Json.Options));
+            return WithOverride(seed);
+        }
+    }
+
+    /// <summary>Clears a persona's model override. Throws <see cref="KeyNotFoundException"/> for an unknown persona.</summary>
     public HubPersona Reset(string id)
     {
         lock (_gate)
         {
-            SeedIfNeeded();
-            Validate(id);
-            if (!_seeds.TryGetValue(id, out var seed)) throw new KeyNotFoundException($"Persona '{id}' has no default to reset to.");
-            var existing = Read(FileFor(id));
-            var effective = Effective(seed, existing);
-            var reset = effective with { Locked = existing?.Locked ?? seed.Locked, SeedHash = Hash(effective) };
-            AtomicFile.Write(FileFor(id), JsonSerializer.Serialize(reset, Json.Options));
-            return reset;
+            var seed = SeedFor(id);
+            File.Delete(FileFor(id));
+            return WithOverride(seed);
         }
     }
 
@@ -88,80 +96,32 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
     public static string Hash(string name, string model, string definition) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name + "\n" + model + "\n" + definition))).ToLowerInvariant();
 
-    /// <summary>A locked persona keeps its stored name, so its seed is compared and hashed under that name.</summary>
-    private static HubPersona Effective(HubPersona seed, HubPersona? stored) =>
-        stored is { Locked: true } ? seed with { Name = stored.Name } : seed;
+    private HubPersona SeedFor(string id) =>
+        Seeds().TryGetValue(Validate(id), out var seed) ? seed : throw new KeyNotFoundException($"Persona '{id}' not found.");
 
-    private HubPersona? Flag(HubPersona? p)
-    {
-        if (p is null) return null;
-        if (!_seeds.TryGetValue(p.Id, out var seed)) return p with { UpdateAvailable = false };
-        var own = Hash(p);
-        var seedHash = Hash(Effective(seed, p));
-        return p with { UpdateAvailable = own != seedHash && p.SeedHash != seedHash };
-    }
+    private HubPersona WithOverride(HubPersona seed) =>
+        OverrideModel(seed.Id) is { } model && model != seed.Model ? seed with { Model = model } : seed;
 
-    public HubPersona Save(HubPersona p)
+    /// <summary>The model the owner chose for this persona, or null (no file, an unreadable one, or an unedited older one).</summary>
+    private string? OverrideModel(string id)
     {
-        if (!AllowedModels.Contains(p.Model)) throw new ArgumentException($"Unknown model '{p.Model}'.", nameof(p));
-        if (string.IsNullOrWhiteSpace(p.Name)) throw new ArgumentException("Name is required.", nameof(p));
-        lock (_gate)
-        {
-            SeedIfNeeded();
-            HubPersona saved;
-            var existing = string.IsNullOrEmpty(p.Id) ? null : Read(FileFor(Validate(p.Id)));
-            if (existing is not null)
-            {
-                // Locked personas (the Controller) keep their name; Fyrd and the skills refer to them by it.
-                if (existing.Locked && !string.Equals(existing.Name, p.Name.Trim(), StringComparison.Ordinal))
-                    throw new InvalidOperationException($"The {existing.Name} persona can't be renamed.");
-                saved = existing with { Name = p.Name.Trim(), Model = p.Model, Definition = p.Definition ?? "", UpdateAvailable = false };
-            }
-            else
-            {
-                var id = string.IsNullOrEmpty(p.Id) ? Slug(p.Name) : Validate(p.Id);
-                if (id == HubMemory.Shared) throw new ArgumentException($"'{HubMemory.Shared}' is a reserved persona id.", nameof(p));
-                if (File.Exists(FileFor(id))) throw new InvalidOperationException($"A persona with id '{id}' already exists.");
-                saved = new HubPersona(id, p.Name.Trim(), p.Model, p.Definition ?? "", p.Locked);
-            }
-            AtomicFile.Write(FileFor(saved.Id), JsonSerializer.Serialize(saved with { UpdateAvailable = false }, Json.Options));
-            return Flag(saved)!;
-        }
-    }
-
-    /// <summary>False when no such persona exists.</summary>
-    public bool Delete(string id)
-    {
-        lock (_gate)
-        {
-            SeedIfNeeded();
-            var existing = Read(FileFor(Validate(id)));
-            if (existing is null) return false;
-            if (existing.Locked) throw new InvalidOperationException($"Persona '{id}' is locked and cannot be deleted.");
-            File.Delete(FileFor(id));
-            return true;
-        }
-    }
-
-    public static string Slug(string name)
-    {
-        var s = Regex.Replace((name ?? "").Trim().ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
-        if (s.Length > 40) s = s[..40].Trim('-');
-        if (s.Length == 0) throw new ArgumentException("Name must contain letters or digits.", nameof(name));
-        return s;
+        var file = FileFor(id);
+        if (!File.Exists(file)) return null;
+        Stored? stored;
+        try { stored = JsonSerializer.Deserialize<Stored>(File.ReadAllText(file), Json.Options); }
+        catch (JsonException) { return null; }
+        if (stored?.Model is not { } model || !AllowedModels.Contains(model)) return null;
+        if (stored.Definition is null) return model;
+        // An older whole-persona file: an unedited one followed its seed, so its model is not the owner's choice.
+        var own = Hash(stored.Name ?? "", model, stored.Definition);
+        var unedited = own == stored.SeedHash || (History().TryGetValue(id, out var known) && known.Contains(own));
+        return unedited ? null : model;
     }
 
     private static string Validate(string id) =>
         IdRegex().IsMatch(id ?? "") ? id! : throw new ArgumentException($"Invalid persona id '{id}'.", nameof(id));
 
     private string FileFor(string id) => Path.Combine(paths.HubPersonasDir, id + ".json");
-
-    private static HubPersona? Read(string file)
-    {
-        if (!File.Exists(file)) return null;
-        try { return JsonSerializer.Deserialize<HubPersona>(File.ReadAllText(file), Json.Options); }
-        catch (JsonException) { return null; }
-    }
 
     /// <summary>
     /// A persona seed is a <c>SKILL.md</c> whose front matter has <c>kind: persona</c> and a <c>name</c> equal to its
@@ -176,76 +136,38 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         var locked = fields.GetValueOrDefault("persona-locked", "").Equals("true", StringComparison.OrdinalIgnoreCase);
         if (!AllowedModels.Contains(model)) return null;
         // Normalised so a CRLF checkout hashes the same as the LF text persona-seed-history.json was built from.
-        return new HubPersona(id, name, model, body, locked);
+        return new HubPersona(id, name, model, body, locked, model);
     }
 
-    private Dictionary<string, HashSet<string>> ReadHistory()
+    private Dictionary<string, HashSet<string>> History()
     {
+        if (_history is not null) return _history;
+        _history = new();
         var file = Path.Combine(seedDir, HistoryFile);
         try
         {
             if (File.Exists(file))
-                return (JsonSerializer.Deserialize<Dictionary<string, List<string>>>(File.ReadAllText(file), Json.Options) ?? new())
+                _history = (JsonSerializer.Deserialize<Dictionary<string, List<string>>>(File.ReadAllText(file), Json.Options) ?? new())
                     .ToDictionary(kv => kv.Key, kv => kv.Value.ToHashSet(StringComparer.OrdinalIgnoreCase));
         }
         catch (JsonException) { }
-        return new();
+        return _history;
     }
 
-    /// <summary>
-    /// Seeds personas that were never seeded, and brings unedited ones up to the current seed text once per process.
-    /// A persona counts as unedited when its own hash equals the hash of the seed it came from.
-    /// </summary>
-    private void SeedIfNeeded()
+    /// <summary>The persona seeds, read once per process.</summary>
+    private Dictionary<string, HubPersona> Seeds()
     {
-        if (_seeded) return;
-        _seeded = true;
+        if (_seeds is not null) return _seeds;
+        _seeds = new();
         Directory.CreateDirectory(paths.HubPersonasDir);
-        if (!Directory.Exists(seedDir)) return;
-        var marker = Path.Combine(paths.HubPersonasDir, SeededMarker);
-        var seededIds = File.Exists(marker)
-            ? File.ReadAllLines(marker).Select(l => l.Trim()).Where(l => l.Length > 0).ToHashSet()
-            : new HashSet<string>();
-        var markerChanged = false;
-        var history = ReadHistory();
+        if (!Directory.Exists(seedDir)) return _seeds;
         foreach (var dir in Directory.EnumerateDirectories(seedDir))
         {
             var id = Path.GetFileName(dir);
             var file = Path.Combine(dir, "SKILL.md");
             if (!IdRegex().IsMatch(id) || id == HubMemory.Shared || !File.Exists(file)) continue;
-            var seed = ParseSeed(id, File.ReadAllText(file, Encoding.UTF8));
-            if (seed is null) continue;
-            _seeds[id] = seed;
-            var stored = Read(FileFor(id));
-            var seedHash = Hash(Effective(seed, stored));
-            if (!seededIds.Contains(id))
-            {
-                seededIds.Add(id);
-                markerChanged = true;
-                if (stored is null)
-                {
-                    AtomicFile.Write(FileFor(id), JsonSerializer.Serialize(seed with { SeedHash = seedHash }, Json.Options));
-                    continue;
-                }
-            }
-            if (stored is null) continue; // deleted by the owner: stays deleted
-            var own = Hash(stored);
-            var origin = stored.SeedHash;
-            if (origin is null && history.TryGetValue(id, out var known) && known.Contains(own)) origin = own;
-            if (origin is null || own != origin)
-            {
-                // Edited, or a legacy persona we can't place: leave the text alone.
-                continue;
-            }
-            if (origin == seedHash)
-            {
-                if (stored.SeedHash != origin) Write(stored with { SeedHash = origin });
-                continue;
-            }
-            Write(Effective(seed, stored) with { Locked = stored.Locked, SeedHash = seedHash });
+            if (ParseSeed(id, File.ReadAllText(file, Encoding.UTF8)) is { } seed) _seeds[id] = seed;
         }
-        if (markerChanged) AtomicFile.Write(marker, string.Join("\n", seededIds.Order(StringComparer.Ordinal)) + "\n");
-
-        void Write(HubPersona p) => AtomicFile.Write(FileFor(p.Id), JsonSerializer.Serialize(p, Json.Options));
+        return _seeds;
     }
 }
