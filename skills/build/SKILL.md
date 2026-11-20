@@ -1,15 +1,16 @@
 ---
-name: fyrd-build
+name: build
 description: "Fyrd Controller only: use when the Fyrd Controller is asked to build from a list of GitHub file URLs or claude.ai artifact links, such as plans or specs. Never use this outside the Fyrd Controller session."
+kind: controller-skill
 ---
 
-# fyrd-build
+# build
 
-Request: "Build the following: {uri list}". Start one Builder per uri, all at once. You write no code yourself. The naming, tag, recycle and session-cap rules are the Controller prompt's; `fyrd-peasant` has the full step list.
+Request: "Build the following: {uri list}". Start one Builder per uri, all at once. You write no code yourself. The naming, tag, recycle and session-cap rules are the Controller prompt's; `fyrd:peasant` has the full step list.
 
 1. **Titles.** For each uri: `builder-<suffix>` (the owner's suffix, else the uri's file name without extension, e.g. `…/auth-plan.md` gives `builder-auth-plan`, else `builder-1`, `builder-2`, …). Find existing sessions with `mcp__claude-code-remote__list_sessions` (`mine: true`, `limit: 100`, page with `after_id`, ignore archived). A live idle session with the same title (`get_session` `status_bucket` other than `working` or `blocked` and its tags don't include `fyrd-workers-running`): mark it to recycle under the same title, but don't archive it yet. Busy: next suffix (`-2`, `-3`, …).
 2. **Repo.** For each uri apply the Repo rule in the Controller prompt: infer the repo, else ask with `AskUserQuestion` (likely repos plus `No repo`), and decide it before the session-cap check.
-3. **Session cap.** Count once for the whole request: live Fyrd sessions (you plus every live peasant) plus the new Builders, against `session_cap`. If over, call `AskUserQuestion` with `Start fewer now`, `Tear down idle sessions`, `Cancel` before archiving or creating anything, and act as `fyrd-peasant` describes (`Tear down idle sessions` asks which with a `multiSelect` question; `Cancel` archives nothing).
+3. **Session cap.** Count once for the whole request: live Fyrd sessions (you plus every live peasant) plus the new Builders, against `session_cap`. If over, call `AskUserQuestion` with `Start fewer now`, `Tear down idle sessions`, `Cancel` before archiving or creating anything, and act as `fyrd:peasant` describes (`Tear down idle sessions` asks which with a `multiSelect` question; `Cancel` archives nothing).
 4. **Recycle.** Only for the Builders actually being started, archive each session marked in step 1 with `mcp__claude-code-remote__archive_session`.
 5. **Create.** Call `mcp__claude-code-remote__create_session` once per uri, in parallel, with:
    - `title` from step 1; `tags: ["fyrd-hub", "fyrd-role-builder"]`.

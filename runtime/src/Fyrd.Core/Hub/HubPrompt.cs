@@ -27,6 +27,11 @@ public static partial class HubPrompt
     /// line per skill the fyrd plugin ships when the owner confirmed the environment installs it, else (and for a skill
     /// edited or added in the console) the skill's whole body. The subagent texts are cut from the stored personas and carry no session skills.
     /// </para>
+    /// <para>
+    /// The Controller request skills (<see cref="HubSkills"/>) are, the same way, one <c>controller-skills</c> block of
+    /// lines naming the plugin skill <c>fyrd:&lt;name&gt;</c> when the owner confirmed the plugin, else one
+    /// <c>controller-skill</c> block per skill, named <c>fyrd:&lt;name&gt;</c> too, with its whole body, so a Controller works without the plugin.
+    /// </para>
     /// </summary>
     public static string Instructions(IReadOnlyList<HubPersona> personas, FyrdConfig config, IReadOnlyList<HubSkill>? skills = null,
         IReadOnlyList<SessionSkill>? sessionSkills = null)
@@ -46,10 +51,32 @@ public static partial class HubPrompt
             var target = t.For is null ? "" : $" for=\"{AttrEscape(t.For)}\"";
             sections.Add($"<subagent-persona-text id=\"{AttrEscape(t.Id)}\"{target}>{Safe(t.Text)}</subagent-persona-text>");
         }
-        foreach (var s in skills ?? [])
-            sections.Add($"<controller-skill name=\"{AttrEscape(s.Name)}\" description=\"{AttrEscape(s.Description)}\">{Safe(s.Body)}</controller-skill>");
+        if (installed && skills is { Count: > 0 })
+            sections.Add(ControllerSkillPointers(skills));
+        else
+            foreach (var s in skills ?? [])
+                sections.Add($"<controller-skill name=\"{AttrEscape(SessionSkillScript.PluginSkillName(s.Name))}\" description=\"{AttrEscape(s.Description)}\">{Safe(s.Body)}</controller-skill>");
         return string.Join("\n\n", sections);
     }
+
+    /// <summary>
+    /// Said once above the request skills' lines when the Controller loads them from the fyrd plugin. A Controller that
+    /// started before the owner installed the plugin gets these lines too, but its skill list has no <c>fyrd:</c> skills,
+    /// and only a new Controller session has them, so it names that step.
+    /// </summary>
+    public const string ControllerSkillsIntro =
+        "Your request skills are skills of the fyrd plugin in your session, not text here. Before you act on a request a line below covers, load its skill with the Skill tool. "
+        + "If the fyrd: skills are not in your skill list, this session started before the plugin was installed: do not act on the request, "
+        + "and tell the owner to replace the Controller (in the Fyrd console, Sessions, Replace Controller, then Create Controller).";
+
+    /// <summary>
+    /// The request skills as one block of lines, a line per skill with the name the Controller loads it by
+    /// (<c>fyrd:&lt;name&gt;</c>) and its description, sent instead of the bodies when the owner confirmed that the
+    /// environment's setup script installs the fyrd plugin.
+    /// </summary>
+    private static string ControllerSkillPointers(IReadOnlyList<HubSkill> skills) =>
+        "<controller-skills plugin=\"fyrd\">\n" + Safe(ControllerSkillsIntro + "\n\n"
+            + string.Join("\n", skills.Select(s => $"- `{SessionSkillScript.PluginSkillName(s.Name)}`: {s.Description}"))) + "\n</controller-skills>";
 
     public static string MemoryUpdate(HubMemory memory, IReadOnlyList<HubPersona> personas) =>
         string.Join("\n\n", new[]

@@ -19,7 +19,7 @@ public sealed class ControllerManagerTests : IDisposable
     public ControllerManagerTests()
     {
         Directory.CreateDirectory(_seeds);
-        File.WriteAllText(Path.Combine(_seeds, "controller.md"), "---\nname: Controller\nmodel: claude-opus-5-5\nlocked: true\n---\nControl things.");
+        PersonaSeedFile.Write(_seeds, "controller", "Controller", "claude-opus-5-5", true, "Control things.");
     }
 
     public void Dispose()
@@ -50,7 +50,7 @@ public sealed class ControllerManagerTests : IDisposable
     [Fact]
     public void BuildPrompt_CarriesSessionSkills_AndItsHashFollowsTheirTextAndMode()
     {
-        File.WriteAllText(Path.Combine(_seeds, "builder.md"), "---\nname: Builder\nmodel: claude-sonnet-5-5\nlocked: false\n---\nBuild things.");
+        PersonaSeedFile.Write(_seeds, "builder", "Builder", "claude-sonnet-5-5", false, "Build things.");
         var config = new ConfigStore(_home.Paths);
         config.Save(new FyrdConfig(EnvironmentId: "env_abc123"));
         var skillSeeds = Path.Combine(_seeds, "skill-seeds");

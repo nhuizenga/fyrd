@@ -2,7 +2,7 @@ using Fyrd.Core.Hub;
 
 namespace Fyrd.Core.Tests;
 
-/// <summary>Checks the checked-in hub persona seeds under <c>personas/hub</c>.</summary>
+/// <summary>Checks the checked-in hub persona seeds under <c>skills/&lt;id&gt;/SKILL.md</c>, the persona skills of the fyrd plugin.</summary>
 public sealed class HubSeedTests : IDisposable
 {
     private static readonly string[] Ids = ["builder", "controller", "investigator", "monitor", "researcher", "reviewer", "tuner", "validator"];
@@ -14,10 +14,10 @@ public sealed class HubSeedTests : IDisposable
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "personas", "hub");
+            var candidate = Path.Combine(dir.FullName, "skills");
             if (Directory.Exists(candidate)) return candidate;
         }
-        throw new DirectoryNotFoundException("personas/hub not found above " + AppContext.BaseDirectory);
+        throw new DirectoryNotFoundException("skills not found above " + AppContext.BaseDirectory);
     }
 
     private IReadOnlyList<HubPersona> Load() => new HubPersonas(_home.Paths, SeedDir()).List();
@@ -77,10 +77,55 @@ public sealed class HubSeedTests : IDisposable
     public void SeedHistory_ContainsTheHashOfEveryCurrentSeed()
     {
         var history = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, List<string>>>(
-            File.ReadAllText(Path.Combine(SeedDir(), "seed-history.json")))!;
+            File.ReadAllText(Path.Combine(SeedDir(), "persona-seed-history.json")))!;
         foreach (var p in Load())
             Assert.True(history.TryGetValue(p.Id, out var hashes) && hashes.Contains(HubPersonas.Hash(p.Name, p.Model, p.Definition)),
-                $"{p.Id}: seed-history.json is stale; run node scripts/seed-history.mjs and commit it");
+                $"{p.Id}: persona-seed-history.json is stale; run node scripts/seed-history.mjs and commit it");
+    }
+
+    /// <summary>
+    /// Each persona is a skill of the fyrd plugin, <c>fyrd:&lt;id&gt;</c>, at the one depth the plugin loader scans. The
+    /// plugin is installed environment-wide, so a session never loads a persona on its own: only a person runs it.
+    /// </summary>
+    [Fact]
+    public void EveryPersona_IsAPluginSkill_OnlyAPersonRuns()
+    {
+        var root = Path.GetDirectoryName(SeedDir())!;
+        Assert.True(File.Exists(Path.Combine(root, ".claude-plugin", "plugin.json")));
+        Assert.False(Directory.Exists(Path.Combine(root, "personas")), "personas live in skills/<id>/SKILL.md only");
+        foreach (var id in Ids)
+        {
+            Assert.True(FrontMatter.TryParse(File.ReadAllText(Path.Combine(SeedDir(), id, "SKILL.md")), out var fields, out _), id);
+            Assert.Equal(id, fields["name"]);
+            Assert.Equal(HubPersonas.Kind, fields["kind"]);
+            Assert.Equal("true", fields["disable-model-invocation"]);
+            Assert.StartsWith("Fyrd persona: ", fields["description"], StringComparison.Ordinal);
+            Assert.Contains($"/fyrd:{id}", fields["description"], StringComparison.Ordinal);
+            Assert.InRange(fields["description"].Length, 1, SessionSkills.MaxDescriptionLength);
+            // A skill's `model` would switch the session's model when it is run; the persona's model is Fyrd's setting.
+            Assert.False(fields.ContainsKey("model"), id);
+        }
+    }
+
+    /// <summary>The persona skills are neither session skills nor Controller request skills.</summary>
+    [Fact]
+    public void PersonaSkills_AreNoSessionOrRequestSkills()
+    {
+        Assert.DoesNotContain(RepoSeeds.SessionSkills(_home.Paths), s => Ids.Contains(s.Name));
+        Assert.DoesNotContain(new HubSkills(SeedDir()).List(), s => Ids.Contains(s.Name));
+    }
+
+    [Fact]
+    public void Controller_LoadsItsRequestSkillsFromThePlugin_WhenNoBlockCarriesThem()
+    {
+        var d = Get("controller").Definition;
+        Assert.Contains("its `<controller-skill>` block when this message has one (the block wins over an installed skill of that name), else the fyrd plugin skill, loaded with the Skill tool as the `<controller-skills>` block says", d, StringComparison.Ordinal);
+        Assert.Contains("or one `<controller-skills>` block naming the fyrd plugin skills to load instead", d, StringComparison.Ordinal);
+        foreach (var name in new[] { "build", "research", "investigate", "watch", "tune", "peasant" })
+        {
+            Assert.Contains($"`fyrd:{name}`", d, StringComparison.Ordinal);
+            Assert.DoesNotContain($"`fyrd-{name}`", d, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -345,7 +390,7 @@ public sealed class HubSeedTests : IDisposable
     {
         var d = Get("controller").Definition;
         Assert.Contains("\"Investigate {input}\"", d, StringComparison.Ordinal);
-        Assert.Contains("`fyrd-investigate`", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd:investigate`", d, StringComparison.Ordinal);
         Assert.Contains("`monitor`, `investigator` and `tuner`", d, StringComparison.Ordinal);
         Assert.Contains("with `id=\"investigator\"`", d, StringComparison.Ordinal);
         Assert.Contains("for a Validator or a Monitor, only the investigator one", d, StringComparison.Ordinal);
@@ -456,7 +501,7 @@ public sealed class HubSeedTests : IDisposable
     {
         var d = Get("tuner").Definition;
         Assert.Contains("run `git fetch origin main` first and read every persona and skill at `origin/main`", d, StringComparison.Ordinal);
-        Assert.Contains("`git show origin/main:personas/hub/builder.md`", d, StringComparison.Ordinal);
+        Assert.Contains("`git show origin/main:skills/builder/SKILL.md`", d, StringComparison.Ordinal);
         Assert.Contains("never the working tree", d, StringComparison.Ordinal);
         Assert.Contains("already handled in the current text (at `origin/main`", d, StringComparison.Ordinal);
         Assert.Contains("the exact current wording (at `origin/main`)", d, StringComparison.Ordinal);
@@ -509,14 +554,14 @@ public sealed class HubSeedTests : IDisposable
     {
         var d = Get("controller").Definition;
         Assert.Contains("\"Tune <PR or stack url>\"", d, StringComparison.Ordinal);
-        Assert.Contains("`fyrd-tune`", d, StringComparison.Ordinal);
+        Assert.Contains("`fyrd:tune`", d, StringComparison.Ordinal);
         Assert.Contains("For a Monitor or the Tuner, first delete its scheduled task", d, StringComparison.Ordinal);
     }
 
     [Fact]
     public void NoPlaceholdersLeft()
     {
-        foreach (var f in Directory.EnumerateFiles(SeedDir(), "*.md"))
+        foreach (var f in Directory.EnumerateFiles(SeedDir(), "SKILL.md", SearchOption.AllDirectories))
             Assert.DoesNotContain("TODO(Task 10)", File.ReadAllText(f), StringComparison.Ordinal);
     }
 }

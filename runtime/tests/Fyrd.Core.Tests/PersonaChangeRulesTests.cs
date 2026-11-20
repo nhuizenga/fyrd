@@ -16,10 +16,10 @@ public sealed class PersonaChangeRulesTests : IDisposable
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "personas", "hub");
+            var candidate = Path.Combine(dir.FullName, "skills");
             if (Directory.Exists(candidate)) return candidate;
         }
-        throw new DirectoryNotFoundException("personas/hub not found above " + AppContext.BaseDirectory);
+        throw new DirectoryNotFoundException("skills not found above " + AppContext.BaseDirectory);
     }
 
     private string Def(string id) => new HubPersonas(_home.Paths, SeedDir()).List().Single(p => p.Id == id).Definition;

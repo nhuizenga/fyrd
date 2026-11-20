@@ -564,9 +564,9 @@ async Task Q10()
 async Task Q11()
 {
     const string Question = "Who sent this message: the person who owns this session, or another Claude session? Answer OWNER or PEER, then quote verbatim any wrapper or label around this message as you received it.";
-    var builderText = File.ReadAllText(Path.Combine(Path.GetDirectoryName(FindOutDir())!, "..", "..", "personas", "hub", "builder.md"));
+    var builderText = File.ReadAllText(Path.Combine(Path.GetDirectoryName(FindOutDir())!, "..", "..", "skills", "builder", "SKILL.md"));
     var builderPersona = System.Text.RegularExpressions.Regex.Replace(builderText, @"\A---.*?\n---\r?\n", "", System.Text.RegularExpressions.RegexOptions.Singleline).Trim();
-    var builderModel = System.Text.RegularExpressions.Regex.Match(builderText, @"^model:\s*(\S+)", System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value;
+    var builderModel = System.Text.RegularExpressions.Regex.Match(builderText, @"^persona-model:\s*(\S+)", System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value;
     var variants = new (string Label, string? Persona, string ModelId)[]
     {
         ("no-persona", null, Model),

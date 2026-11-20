@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Fyrd.Core.Hub;
 
 /// <summary>
-/// The front matter of a seed file (<c>personas/hub/*.md</c>, <c>skills/*/*/SKILL.md</c>): simple single-line
+/// The front matter of a seed file (<c>skills/*/SKILL.md</c>: personas, Controller request skills and session skills): simple single-line
 /// <c>key: value</c> pairs between two <c>---</c> lines, then the body. A value may be a double-quoted YAML scalar
 /// (the quotes are dropped, <c>\"</c> and <c>\\</c> are unescaped), which is how a value holding <c>": "</c> or
 /// <c>" #"</c> stays valid YAML. Folded (<c>&gt;</c>) and multi-line values are not supported.

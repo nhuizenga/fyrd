@@ -11,7 +11,12 @@ namespace Fyrd.Core.Hub;
 /// </summary>
 public sealed record HubPersona(string Id, string Name, string Model, string Definition, bool Locked, string? SeedHash = null, bool UpdateAvailable = false);
 
-/// <summary>Hub persona store: one JSON file per persona under <see cref="FyrdPaths.HubPersonasDir"/>, seeded from markdown files.</summary>
+/// <summary>
+/// Hub persona store: one JSON file per persona under <see cref="FyrdPaths.HubPersonasDir"/>, seeded from the persona
+/// skills of the fyrd plugin: <c>skills/&lt;id&gt;/SKILL.md</c> whose front matter says <c>kind: persona</c>. The skill's
+/// body is the definition, and <c>persona-name</c>, <c>persona-model</c> and <c>persona-locked</c> are the rest. The same
+/// file is the plugin skill <c>fyrd:&lt;id&gt;</c>, so the persona text has one copy.
+/// </summary>
 public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
 {
     public static readonly IReadOnlyList<string> AllowedModels =
@@ -20,7 +25,10 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
     private const string ControllerId = "controller";
     private const string SeededMarker = ".seeded";
     private readonly object _gate = new();
-    private const string HistoryFile = "seed-history.json";
+    private const string HistoryFile = "persona-seed-history.json";
+
+    /// <summary>The front matter <c>kind</c> of a persona skill.</summary>
+    public const string Kind = "persona";
     private bool _seeded;
     private Dictionary<string, HubPersona> _seeds = new();
 
@@ -155,15 +163,19 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
         catch (JsonException) { return null; }
     }
 
-    private static HubPersona? ParseSeed(string file)
+    /// <summary>
+    /// A persona seed is a <c>SKILL.md</c> whose front matter has <c>kind: persona</c> and a <c>name</c> equal to its
+    /// directory's, the persona id. Null for any other skill, and for a persona whose model isn't allowed.
+    /// </summary>
+    public static HubPersona? ParseSeed(string id, string text)
     {
-        var id = Path.GetFileNameWithoutExtension(file);
-        if (!FrontMatter.TryParse(File.ReadAllText(file, Encoding.UTF8), out var fields, out var body)) return null;
-        var name = fields.GetValueOrDefault("name", id);
-        var model = fields.GetValueOrDefault("model", "claude-sonnet-5-5");
-        var locked = fields.GetValueOrDefault("locked", "").Equals("true", StringComparison.OrdinalIgnoreCase);
+        if (!FrontMatter.TryParse(text, out var fields, out var body)) return null;
+        if (fields.GetValueOrDefault("kind") != Kind || fields.GetValueOrDefault("name") != id) return null;
+        var name = fields.GetValueOrDefault("persona-name", id);
+        var model = fields.GetValueOrDefault("persona-model", "claude-sonnet-5-5");
+        var locked = fields.GetValueOrDefault("persona-locked", "").Equals("true", StringComparison.OrdinalIgnoreCase);
         if (!AllowedModels.Contains(model)) return null;
-        // Normalised so a CRLF checkout hashes the same as the LF text seed-history.json was built from.
+        // Normalised so a CRLF checkout hashes the same as the LF text persona-seed-history.json was built from.
         return new HubPersona(id, name, model, body, locked);
     }
 
@@ -196,11 +208,12 @@ public sealed partial class HubPersonas(FyrdPaths paths, string seedDir)
             : new HashSet<string>();
         var markerChanged = false;
         var history = ReadHistory();
-        foreach (var f in Directory.EnumerateFiles(seedDir, "*.md"))
+        foreach (var dir in Directory.EnumerateDirectories(seedDir))
         {
-            var id = Path.GetFileNameWithoutExtension(f);
-            if (!IdRegex().IsMatch(id) || id == HubMemory.Shared) continue;
-            var seed = ParseSeed(f);
+            var id = Path.GetFileName(dir);
+            var file = Path.Combine(dir, "SKILL.md");
+            if (!IdRegex().IsMatch(id) || id == HubMemory.Shared || !File.Exists(file)) continue;
+            var seed = ParseSeed(id, File.ReadAllText(file, Encoding.UTF8));
             if (seed is null) continue;
             _seeds[id] = seed;
             var stored = Read(FileFor(id));
