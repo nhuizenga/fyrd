@@ -305,15 +305,26 @@ test.describe("Settings and shell", () => {
     const navBox = await box(nav);
     const heading = await box(page.getByRole("heading", { name: "Personas" }));
     expect(navBox.x).toBeLessThan(heading.x);
-    expect(await fontOf(page.getByRole("button", { name: /^Builder/ }))).toContain("Nunito Sans");
+    expect(await fontOf(page.getByRole("gridcell", { name: "Builder" }))).toContain("Nunito Sans");
   });
 
-  test("personas rename except the Controller", async ({ page }) => {
+  test("personas are a table where only the model changes", async ({ page }) => {
+    const { sent } = await mockApi(page);
     await page.goto("/#/settings/personas");
-    await page.getByRole("button", { name: /^Controller/ }).click();
-    await expect(page.getByLabel("Name")).toBeDisabled();
-    await page.getByRole("button", { name: /^Builder/ }).click();
-    await expect(page.getByLabel("Name")).toBeEnabled();
+    const grid = page.getByRole("grid");
+    await expect(grid.getByRole("row")).toHaveCount(4);
+    await expect(page.getByRole("button", { name: /Add persona|Save persona|Delete persona/ })).toHaveCount(0);
+    await expect(page.getByLabel("Definition")).toHaveCount(0);
+
+    const builder = grid.getByRole("row").filter({ has: page.getByRole("gridcell", { name: "Builder", exact: true }) });
+    await builder.getByRole("gridcell").nth(1).click();
+    await page.getByRole("option", { name: /^Haiku 5\.5/ }).click();
+    await expect(page.getByText("Builder now uses Haiku 5.5.")).toBeVisible();
+    expect(sent).toContainEqual({ url: "/api/hub/personas/builder", body: { model: "claude-haiku-5-5" } });
+
+    await page.getByRole("button", { name: "Reset Reviewer to the default model" }).click();
+    await expect(page.getByText("Reviewer now uses Sonnet 5.5.")).toBeVisible();
+    expect(sent.map((x) => x.url)).toContain("/api/hub/personas/reviewer/reset");
   });
 
   test("memory: pencil edits, trash deletes at once", async ({ page }) => {

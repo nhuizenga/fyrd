@@ -12,8 +12,8 @@ import SettingsScreen from "./SettingsScreen";
 vi.mock("../api");
 
 const personas: HubPersona[] = [
-  { id: "controller", name: "Controller", model: "claude-opus-5-5", definition: "Control.", locked: true },
-  { id: "builder", name: "Builder", model: "claude-sonnet-5-5", definition: "Build things.", locked: false },
+  { id: "controller", name: "Controller", model: "claude-opus-5-5", defaultModel: "claude-opus-5-5", definition: "Control.", locked: true },
+  { id: "builder", name: "Builder", model: "claude-sonnet-5-5", defaultModel: "claude-sonnet-5-5", definition: "Build things.", locked: false },
 ];
 const memory: HubMemory = {
   scopes: [
@@ -42,17 +42,16 @@ beforeEach(() => {
   vi.mocked(api.approvePendingMemory).mockResolvedValue({ id: "n", text: "x", source: "builder-1", at: "t" });
   vi.mocked(api.rejectPendingMemory).mockResolvedValue(undefined);
   vi.mocked(api.updateConfig).mockResolvedValue(config() as never);
-  vi.mocked(api.savePersona).mockImplementation(async (p) => p);
+  vi.mocked(api.setPersonaModel).mockImplementation(async (id, model) => ({ ...personas.find((p) => p.id === id)!, model }));
   vi.mocked(api.addMemory).mockResolvedValue({ id: "n", text: "x", source: "owner", at: "t" });
   vi.mocked(api.editMemory).mockResolvedValue(undefined);
   vi.mocked(api.deleteMemory).mockResolvedValue(undefined);
-  vi.mocked(api.deletePersona).mockResolvedValue(undefined);
 });
 
 const renderSettings = async (section: "Environment" | "Spend limits" | "Display" | "Personas" | "Agent memory" = "Personas", state = hubState()) => {
   render(<Routed state={state} onChanged={vi.fn()} />);
   await userEvent.click(screen.getByRole("button", { name: section }));
-  if (section === "Personas") await screen.findByRole("button", { name: /^Builder/ });
+  if (section === "Personas") await screen.findByRole("gridcell", { name: "Builder" }, { timeout: 10000 }); // the table loads lazily
   else if (section === "Agent memory") await screen.findByText("Shared note");
 };
 
@@ -101,46 +100,55 @@ it("session cap rejects 0 and saves 20", async () => {
   expect(api.updateConfig).toHaveBeenCalledWith({ sessionCap: 20 });
 });
 
-it("personas list, edit model and definition, save", async () => {
+/** The persona table's rows, as [persona, model, default] cell text. */
+const personaRows = () =>
+  within(screen.getByRole("grid")).getAllByRole("row").slice(1)
+    .map((r) => within(r).getAllByRole("gridcell").map((c) => c.textContent?.replace(/Press Enter.*$/, "").replace(/Reset$/, "").trim()));
+
+it("personas are a table of name, model and default, with no prompt or name editing", async () => {
   await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  await userEvent.click(screen.getByRole("combobox", { name: "Claude model" }));
+  expect(personaRows()).toEqual([
+    ["Controller", "Opus 5.5", "Opus 5.5"],
+    ["Builder", "Sonnet 5.5", "Sonnet 5.5"],
+  ]);
+  for (const gone of ["Add persona", "Save persona", "Delete persona"])
+    expect(screen.queryByRole("button", { name: gone })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Definition")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Reset .* to the default model/ })).not.toBeInTheDocument();
+});
+
+it("picking a model in the table saves only the model", async () => {
+  await renderSettings();
+  const row = screen.getAllByRole("row").find((r) => within(r).queryByRole("gridcell", { name: "Builder" }))!;
+  await userEvent.click(within(row).getAllByRole("gridcell")[1]);
   expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
     "Opus 5.5 · claude-opus-5-5", "Sonnet 5.5 · claude-sonnet-5-5", "Haiku 5.5 · claude-haiku-5-5", "Fable 5.2 · claude-fable-5-2", "Fable 5.1 · claude-fable-5-1",
   ]);
   await userEvent.click(screen.getByRole("option", { name: "Haiku 5.5 · claude-haiku-5-5" }));
-  const def = screen.getByLabelText("Definition");
-  await userEvent.clear(def);
-  await userEvent.type(def, "New def");
-  await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
-  expect(api.savePersona).toHaveBeenCalledWith({
-    id: "builder", name: "Builder", model: "claude-haiku-5-5", definition: "New def", locked: false,
-  });
+  expect(api.setPersonaModel).toHaveBeenCalledWith("builder", "claude-haiku-5-5");
+  expect(await screen.findByText("Builder now uses Haiku 5.5.")).toBeInTheDocument();
+  expect(personaRows()[1]).toEqual(["Builder", "Haiku 5.5", "Sonnet 5.5"]);
 });
 
-it("controller delete disabled", async () => {
+it("a persona on another model than its default can be reset", async () => {
+  vi.mocked(api.getPersonas).mockResolvedValue([personas[0], { ...personas[1], model: "claude-opus-5-5" }]);
+  vi.mocked(api.resetPersona).mockResolvedValue(personas[1]);
   await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: /^Controller/ }));
-  expect(screen.getByRole("button", { name: "Delete persona" })).toBeDisabled();
-  expect(screen.getByText("The Controller persona can't be deleted")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Reset Builder to the default model" }));
+  expect(api.resetPersona).toHaveBeenCalledWith("builder");
+  expect(await screen.findByText("Builder now uses Sonnet 5.5.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Reset Builder to the default model" })).not.toBeInTheDocument();
 });
 
-it("deletes a normal persona", async () => {
+it("a failed model change shows the error and reloads the table", async () => {
+  vi.mocked(api.setPersonaModel).mockRejectedValue(new Error("Unknown model 'x'."));
   await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  await userEvent.click(screen.getByRole("button", { name: "Delete persona" }));
-  expect(api.deletePersona).toHaveBeenCalledWith("builder");
-});
-
-it("add persona", async () => {
-  await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: "Add persona" }));
-  await userEvent.type(screen.getByLabelText("Name"), "Doc Writer");
-  await userEvent.type(screen.getByLabelText("Definition"), "Write docs.");
-  await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
-  expect(api.savePersona).toHaveBeenCalledWith({
-    id: "doc-writer", name: "Doc Writer", model: "claude-sonnet-5-5", definition: "Write docs.", locked: false,
-  });
+  const row = screen.getAllByRole("row").find((r) => within(r).queryByRole("gridcell", { name: "Builder" }))!;
+  await userEvent.click(within(row).getAllByRole("gridcell")[1]);
+  await userEvent.click(screen.getByRole("option", { name: "Haiku 5.5 · claude-haiku-5-5" }));
+  expect(await screen.findByText("Unknown model 'x'.")).toBeInTheDocument();
+  expect(api.getPersonas).toHaveBeenCalledTimes(2);
 });
 
 it("memory groups shared first; add, edit, delete entry", async () => {
@@ -174,26 +182,9 @@ it("memory scope picker hides the Controller (its memory is Shared)", async () =
   expect(screen.queryByRole("option", { name: "Controller" })).not.toBeInTheDocument();
 });
 
-it("definition helper text appears once", async () => {
-  await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  expect(screen.getAllByText("Instructions given to the agent at the start of every session that uses this persona.")).toHaveLength(1);
-});
-
 it("changes apply note", async () => {
   await renderSettings("Agent memory");
   expect(screen.getAllByText("Changes apply to sessions created from now on.").length).toBeGreaterThan(0);
-});
-
-it("add persona rejects a name that collides with an existing persona or shared", async () => {
-  await renderSettings();
-  for (const name of ["builder", "Shared", "!!!"]) {
-    await userEvent.click(screen.getByRole("button", { name: "Add persona" }));
-    await userEvent.type(screen.getByLabelText("Name"), name);
-    await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
-    expect(await screen.findByText(name === "!!!" ? "Give the persona a name." : "A persona with this name already exists.")).toBeInTheDocument();
-  }
-  expect(api.savePersona).not.toHaveBeenCalled();
 });
 
 it("a section has its own deep link", async () => {
@@ -202,43 +193,6 @@ it("a section has its own deep link", async () => {
   expect(screen.getByRole("heading", { name: "Agent memory" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Personas" }));
   expect(window.location.hash).toBe("#/settings/personas");
-});
-
-it("personas can be renamed, except the Controller", async () => {
-  await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: /^Controller/ }));
-  expect(screen.getByLabelText("Name")).toBeDisabled();
-  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  const name = screen.getByLabelText("Name");
-  expect(name).toBeEnabled();
-  await userEvent.clear(name);
-  await userEvent.type(name, "Smith");
-  await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
-  expect(api.savePersona).toHaveBeenCalledWith(expect.objectContaining({ id: "builder", name: "Smith" }));
-});
-
-it("renaming a persona to another persona's name is rejected", async () => {
-  await renderSettings();
-  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  await userEvent.clear(screen.getByLabelText("Name"));
-  await userEvent.type(screen.getByLabelText("Name"), "controller");
-  await userEvent.click(screen.getByRole("button", { name: "Save persona" }));
-  expect(await screen.findByText("A persona with this name already exists.")).toBeInTheDocument();
-  expect(api.savePersona).not.toHaveBeenCalled();
-});
-
-it("a persona with a newer default shows a chip and can be reset to default", async () => {
-  vi.mocked(api.getPersonas).mockResolvedValue([
-    personas[0],
-    { ...personas[1], definition: "Mine", updateAvailable: true },
-  ]);
-  vi.mocked(api.resetPersona).mockResolvedValue({ ...personas[1], definition: "Build better things." });
-  await renderSettings();
-  expect(screen.getByText("Update available")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /^Builder/ }));
-  await userEvent.click(screen.getByRole("button", { name: "Reset to default" }));
-  expect(api.resetPersona).toHaveBeenCalledWith("builder");
-  expect(await screen.findByDisplayValue("Build better things.")).toBeInTheDocument();
 });
 
 it("spend limits load, validate and save both limits", async () => {

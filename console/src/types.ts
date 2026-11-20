@@ -193,14 +193,15 @@ export interface TranscriptWorker {
   line?: string | null;
 }
 
+/** A persona as the repo defines it (`skills/<id>/SKILL.md`), with the owner's model choice in `model`. */
 export interface HubPersona {
   id: string;
   name: string;
   model: string;
+  /** The model the repo gives this persona; `model` differs when the owner chose another. */
+  defaultModel?: string | null;
   definition: string;
   locked: boolean;
-  seedHash?: string | null;
-  updateAvailable?: boolean;
 }
 
 /** Text a role's sessions load on demand with the Skill tool. `roles` are persona ids. */
