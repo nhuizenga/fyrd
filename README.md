@@ -26,6 +26,8 @@ Requires:
 
 Windows is the primary platform. On macOS and Linux, Fyrd gives `claude` a terminal with the `script` utility (util-linux or BSD), so that must be installed, and **Settings › Environment** can't save secrets: set the environment variables instead.
 
+Fyrd reads the login only from `~/.claude/.credentials.json`, with no other fallback. Claude Code on macOS usually keeps it in the Keychain and may not write that file, so following and creating cloud sessions on macOS is untested and may fail with "Sign in to Claude Code with `claude auth login`".
+
 ```
 /plugin marketplace add nhuizenga/fyrd
 /plugin install fyrd@fyrd
@@ -33,7 +35,7 @@ Windows is the primary platform. On macOS and Linux, Fyrd gives `claude` a termi
 
 To work from a local clone instead, add the clone's folder as the marketplace (`/plugin marketplace add /path/to/fyrd`), and run `/reload-plugins` after edits.
 
-To update, run `/plugin marketplace update fyrd`, then `/fyrd:down` and `/fyrd:up`.
+To update, run `/plugin marketplace update fyrd`, then `claude plugin update fyrd@fyrd` in a terminal (the marketplace update alone leaves the installed plugin at its old version), then `/reload-plugins` (or restart Claude Code), `/fyrd:down` and `/fyrd:up`.
 
 ## Usage
 
@@ -57,7 +59,7 @@ By default every session gets its session skills and the Controller its request 
 
 ### Personas
 
-**Settings › Personas** is a table of the personas where you change only each persona's model; **Reset** goes back to the default in the persona's front matter. A persona's name and text always come from `skills/<id>/SKILL.md`. Fyrd reads persona text once when it starts, so after a `git pull` that changes a persona, run `/fyrd:down` then `/fyrd:up`. Request skills are re-read on every poll, so in inline mode a pull is enough for them. In plugin mode (the plugin installed and confirmed in Settings › Session skills), a pull changes only the names and descriptions the Controller sees: a change to a request skill's body reaches the Controller only after the plugin's version is bumped, `/plugin marketplace update fyrd` runs (or the environment snapshot is refreshed) and a new Controller session starts (see `docs/controller-skills.md`).
+**Settings › Personas** is a table of the personas where you change only each persona's model; **Reset** goes back to the default in the persona's front matter. A persona's name and text always come from `skills/<id>/SKILL.md`. Fyrd reads persona text once when it starts, so after a `git pull` that changes a persona, run `/fyrd:down` then `/fyrd:up`. Request skills are re-read on every poll, so in inline mode a pull is enough for them. In plugin mode (the plugin installed and confirmed in Settings › Session skills), a pull changes only the names and descriptions the Controller sees: a change to a request skill's body reaches the Controller only after the plugin's version is bumped, the cloud environment's setup script runs again (it runs `claude plugin marketplace update fyrd` and `claude plugin update fyrd@fyrd` when the environment snapshot is refreshed) and a new Controller session starts (see `docs/controller-skills.md`).
 
 ### Sessions and pull requests
 
