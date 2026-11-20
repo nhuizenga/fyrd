@@ -12,7 +12,7 @@ Fyrd is a Claude Code plugin. `/fyrd:up` starts a local console (a .NET service 
 | Reviewer | Reviews a branch, pull request or implementation plan |
 | Investigator | Looks into a failing run, an incident or a suspected bug and recommends what to do |
 | Monitor | Watches one pull request or Slack channel |
-| Tuner | Reviews finished Fyrd work and proposes changes to the Fyrd personas and skills |
+| Tuner | Reviews finished Fyrd work and proposes changes to the Fyrd personas and skills, in a private claude.ai artifact |
 
 The repository is public and MIT licensed.
 
@@ -51,7 +51,7 @@ All of Fyrd's prompts are skills of this plugin, at `skills/<name>/SKILL.md`, lo
 
 - **Request skills** (`kind: controller-skill`), one per request type, which the Controller uses to start and tear down sessions: `/fyrd:build`, `/fyrd:research`, `/fyrd:investigate`, `/fyrd:watch`, `/fyrd:tune` and `/fyrd:peasant` (start, recycle or tear down a peasant). See [docs/controller-skills.md](docs/controller-skills.md).
 - **Persona skills** (`kind: persona`), the full instructions of each role: `/fyrd:builder`, `/fyrd:controller`, `/fyrd:investigator`, `/fyrd:monitor`, `/fyrd:researcher`, `/fyrd:reviewer`, `/fyrd:tuner`, `/fyrd:validator`. Fyrd gives each session its persona in its system prompt, and a session that runs a Validator, Reviewer or Investigator subagent briefs it to load that persona skill itself (only these three let a session load them; the others only run when you run them); you can run one in any session to make it act in that role, or to read it; `/fyrd:controller` is only for reading, since Fyrd sends the Controller persona to the Controller session itself.
-- **Session skills**, parts of a role's instructions that only some tasks need: `fyrd:stacked-pull-requests`, which a Builder loads when its work is split into more than one pull request,, `fyrd:validate-dbt`, which a Builder, its workers and a Validator load for a change to a dbt project, and `fyrd:review-data-modeling`, which a second Reviewer subagent loads when a Builder's brief asks it to for a dbt or warehouse diff. You edit them under **Settings › Session skills**.
+- **Session skills**, parts of a role's instructions that only some tasks need: `fyrd:stacked-pull-requests`, which a Builder loads when its work is split into more than one pull request, `fyrd:validate-dbt`, which a Builder, its workers and a Validator load for a change to a dbt project, and `fyrd:review-data-modeling`, which a second Reviewer subagent loads when a Builder's brief asks it to for a dbt or warehouse diff. You edit them under **Settings › Session skills**.
 
 ### Cloud environment setup
 
