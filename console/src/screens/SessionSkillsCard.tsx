@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Checkbox, Chip, Text, TextField, Textarea } from "@servicetitan/anvil2";
+import { Alert, Button, Chip, Text, TextField, Textarea } from "@servicetitan/anvil2";
 import * as api from "../api";
 import Markdown from "../components/Markdown";
 import type { SessionSkill, SessionSkillSetup } from "../types";
 
 /** The server's limits (SessionSkills.cs), checked here too so a mistake shows before the request. */
 export const MAX_SKILL_WORDS = 1500;
-const NAME = /^fyrd-[a-z0-9]+(-[a-z0-9]+)*$/;
+const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_NAME = 64;
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export const wordCount = (s: string) => s.split(/\s+/).filter(Boolean).length;
 const parseRoles = (s: string) => [...new Set(s.split(",").map((r) => r.trim()).filter(Boolean))];
-
-/** Enough of a hash to compare by eye with the first line of a pasted block. */
-export const shortHash = (hash: string) => hash.slice(0, 12);
 
 /** When a change reaches sessions: the Controller creates them, and it is sent new instructions only while it is idle. */
 const WHEN = "the Controller creates after it has taken its new instructions, which it gets the next time it is idle";
@@ -27,20 +24,16 @@ const draftOf = (s: SessionSkill): Draft => ({
 
 /** What sessions get right now, and what the owner has to do about it. */
 function SetupStatus({ setup }: { setup: SessionSkillSetup }) {
-  if (setup.mode === "out-of-date") {
-    return (
-      <Alert status="warning" role="status" title="The setup script is out of date">
-        The skills changed after you pasted the script. Sessions use the inline text until you paste the new script and confirm.
-      </Alert>
-    );
-  }
+  const installed = setup.mode === "installed";
+  const inline = setup.inlineSkills ?? [];
   return (
     <div role="status" aria-label="Session skills status" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      <Chip label={setup.mode === "installed" ? "Installed" : "Inline"} size="small" />
+      <Chip label={installed ? "Installed" : "Inline"} size="small" />
       <Text size="small">
-        {setup.mode === "installed"
-          ? "New sessions load these skills on demand from the environment's setup script."
-          : "Sessions get the whole text of every skill in their instructions. To load it on demand instead, paste the setup script and confirm."}
+        {installed
+          ? "New sessions load the default skills on demand from the fyrd plugin."
+          : "Sessions get the whole text of every skill in their instructions. To load the defaults on demand from the fyrd plugin instead, paste the setup script and confirm."}
+        {installed && inline.length > 0 && ` The plugin doesn't hold skills you edited or added here, so sessions get their whole text: ${inline.join(", ")}.`}
       </Text>
     </div>
   );
@@ -50,10 +43,6 @@ const GUIDE_ID = "session-skills-guide";
 
 function SetupScript({ setup, onChange, setError }: { setup: SessionSkillSetup; onChange: (s: SessionSkillSetup) => void; setError: (e: string | null) => void }) {
   const [copied, setCopied] = useState(false);
-  // The hash of the script this tab last put on the clipboard: that script, not the one on screen now, is what the owner pasted.
-  const [copiedHash, setCopiedHash] = useState<string | null>(null);
-  // The hash the owner vouched for without copying here (pasted in an earlier visit, or copied by hand).
-  const [vouchedHash, setVouchedHash] = useState<string | null>(null);
   const [guide, setGuide] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -71,8 +60,6 @@ function SetupScript({ setup, onChange, setError }: { setup: SessionSkillSetup; 
       onChange(await action());
     } catch (e) {
       setError(errText(e));
-      // A 409 means the skills changed under this script: show the current one.
-      try { onChange(await api.getSessionSkillSetup()); } catch { /* the error above stands */ }
     } finally {
       setBusy(false);
     }
@@ -84,7 +71,6 @@ function SetupScript({ setup, onChange, setError }: { setup: SessionSkillSetup; 
       // No clipboard on a page that is not a secure context, or in an older browser.
       if (!navigator.clipboard) throw new Error("no clipboard");
       await navigator.clipboard.writeText(setup.script);
-      setCopiedHash(setup.hash);
       setCopied(true);
     } catch {
       setError("Could not copy. Select the script and copy it by hand.");
@@ -101,56 +87,33 @@ function SetupScript({ setup, onChange, setError }: { setup: SessionSkillSetup; 
     }
   };
 
-  const installed = setup.mode === "installed";
-  const changedSinceCopy = copiedHash !== null && copiedHash !== setup.hash;
-  const vouched = vouchedHash === setup.hash;
-  // What is confirmed is the script that was pasted: the one copied here, else the one the owner vouches for.
-  const pastedHash = copiedHash ?? (vouched ? setup.hash : null);
+  const where = setup.environmentId
+    ? `Paste this block into the setup script of environment ${setup.environmentId} at claude.ai/code`
+    : "Fyrd has no environment set (Settings, Environment), so sessions start in the Controller's environment: paste this block into that environment's setup script at claude.ai/code";
 
   return (
     <>
       <Text variant="headline" el="h4" size="small">Setup script</Text>
       <Text size="small" subdued>
-        {setup.environmentId
-          ? `Paste this block into the setup script of environment ${setup.environmentId} at claude.ai/code, replacing an older Fyrd block between the markers and keeping anything else in the script. `
-          : "Fyrd has no environment set (Settings, Environment), so sessions start in the Controller's environment: paste this block into that environment's setup script at claude.ai/code, replacing an older Fyrd block between the markers and keeping anything else in the script. "}
-        It writes the skills to {setup.skillsDir} for sessions created afterwards.
+        {where}, keeping anything else in the script. If the script has an older Fyrd block (from <code># &gt;&gt;&gt; fyrd session skills</code> to <code># &lt;&lt;&lt; fyrd session skills &lt;&lt;&lt;</code>), replace it with this one.
+        {" "}It installs the fyrd plugin from github.com/{setup.repository} for sessions created afterwards. The block is the same whatever you change here, so you paste it once.
       </Text>
       <Textarea label="Setup script" rows={8} readOnly value={setup.script} style={{ fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace" }} />
-      <Text size="small" subdued>
-        This script's first line holds the hash that starts with <code>{shortHash(setup.hash)}</code>.
-      </Text>
-      {!installed && changedSinceCopy && (
-        <Alert status="warning" role="status" title="The script changed since you copied it">
-          The block you copied starts with {shortHash(copiedHash)} and is no longer the current one. Copy the script again, paste it over the old block, then confirm.
-        </Alert>
-      )}
-      {!installed && copiedHash === null && (
-        <Checkbox
-          label={`I pasted this script without copying it here just now, and the first line of the block in the environment holds the hash that starts with ${shortHash(setup.hash)}`}
-          checked={vouched}
-          onChange={(e) => setVouchedHash(e.target.checked ? setup.hash : null)}
-        />
-      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <Button appearance="secondary" onClick={copy}>Copy script</Button>
-        <Button
-          appearance="primary"
-          disabled={busy || installed || changedSinceCopy || pastedHash === null}
-          onClick={() => pastedHash !== null && run(() => api.confirmSessionSkillSetup(pastedHash))}
-        >
+        <Button appearance="primary" disabled={busy || setup.confirmed} onClick={() => run(api.confirmSessionSkillSetup)}>
           I've pasted this script
         </Button>
-        {setup.confirmedHash && (
+        {setup.confirmed && (
           <Button appearance="ghost" disabled={busy} onClick={() => run(api.clearSessionSkillSetup)}>Stop using the script</Button>
         )}
         <Button appearance="ghost" aria-expanded={guide !== null} aria-controls={GUIDE_ID} onClick={toggleGuide}>{guide !== null ? "Hide the setup guide" : "Setup guide"}</Button>
         <Text role="status" size="small">{copied ? "Copied." : ""}</Text>
       </div>
-      {!installed && copiedHash === null && !vouched && (
-        <Text size="small" subdued>To confirm, copy the script here and paste it, or tick the box above if the block is already in the environment.</Text>
+      {!setup.confirmed && (
+        <Text size="small" subdued>Confirm only after you saved the environment with the block in its setup script.</Text>
       )}
-      {setup.confirmedHash && (
+      {setup.confirmed && (
         <Text size="small" subdued>
           "Stop using the script" puts the whole text back into the instructions of the sessions {WHEN}. Remove the block from the environment yourself, after that.
         </Text>
@@ -213,7 +176,7 @@ export default function SessionSkillsCard() {
     const name = d.name.trim();
     const roles = parseRoles(d.roles);
     const problem =
-      !NAME.test(name) || name.length > MAX_NAME ? "Name the skill fyrd- followed by lower-case words joined by hyphens, such as fyrd-release-notes."
+      !NAME.test(name) || name.length > MAX_NAME ? "Name the skill with lower-case words joined by hyphens, such as release-notes."
       : d.isNew && skills.some((s) => s.name === name) ? "A session skill with this name already exists."
       : !d.description.trim() ? "Give the skill a description: what it holds and when to load it."
       : roles.length === 0 ? "Name at least one role, such as builder."
@@ -238,7 +201,7 @@ export default function SessionSkillsCard() {
       {error && <Alert status="danger" title={error} role="alert" />}
       {setup && <SetupStatus setup={setup} />}
       <div>
-        <Button appearance="secondary" onClick={() => leaveFor({ name: "fyrd-", description: "", roles: "builder", body: "", isNew: true, seeded: false, updateAvailable: false })}>
+        <Button appearance="secondary" onClick={() => leaveFor({ name: "", description: "", roles: "builder", body: "", isNew: true, seeded: false, updateAvailable: false })}>
           Add session skill
         </Button>
       </div>
@@ -291,7 +254,7 @@ export default function SessionSkillsCard() {
                 label="Name"
                 value={d.name}
                 disabled={!d.isNew}
-                hint={d.isNew ? "fyrd- followed by lower-case words joined by hyphens." : "A skill keeps its name: sessions load it by that name."}
+                hint={d.isNew ? "Lower-case words joined by hyphens." : "A skill keeps its name: sessions load it by that name."}
                 onChange={(e) => patch({ name: e.target.value })}
               />
               <TextField
@@ -320,8 +283,8 @@ export default function SessionSkillsCard() {
                 </div>
               )}
               <Text size="small" subdued>
-                {setup?.confirmedHash
-                  ? `Saving a change makes the pasted setup script out of date: sessions ${WHEN}, get the inline text until you paste the new script and confirm.`
+                {setup?.confirmed
+                  ? `Changes apply to sessions ${WHEN}. The fyrd plugin holds only the defaults: once you change a skill's description or body, sessions get its whole text instead of loading it from the plugin, until you reset it.`
                   : `Changes apply to sessions ${WHEN}.`}
               </Text>
               {asking?.kind === "delete" && !d.isNew && (

@@ -213,28 +213,33 @@ export interface SessionSkill {
   /** Set for a skill that came from a default; such a skill can be reset. */
   seedHash?: string | null;
   updateAvailable?: boolean;
+  /** Its description and body are its default's, the text the fyrd plugin ships: a session with the plugin loads it as `fyrd:<name>`. */
+  inPlugin?: boolean;
 }
 
 /**
- * How sessions get their session skills: `inline` (no setup script confirmed: the whole text is in their instructions),
- * `installed` (the confirmed script matches the skills: they load them on demand) or `out-of-date` (the skills changed
- * after the script was confirmed: inline again until the new script is pasted and confirmed).
+ * How sessions get their session skills: `inline` (the plugin setup script is not confirmed: the whole text is in their
+ * instructions) or `installed` (the environment installs the fyrd plugin: they load the defaults from it on demand, and
+ * get the whole text of skills edited or added in the console).
  */
-export type SessionSkillMode = "inline" | "installed" | "out-of-date";
+export type SessionSkillMode = "inline" | "installed";
 
 export interface SessionSkillSetup {
   mode: SessionSkillMode;
-  /** The hash of the current skills, which names `script`. */
-  hash: string;
-  confirmedHash: string | null;
+  /** The owner confirmed the block is in the environment's setup script. */
+  confirmed: boolean;
   environmentId: string | null;
   skills: string[];
+  /** The skills sessions load from the plugin, by the name they load them by (`fyrd:<name>`). */
+  pluginSkills?: string[];
+  /** Skills edited or added in the console: sessions always get their whole text. */
+  inlineSkills?: string[];
   /** Defaults the owner deleted; resetting one by name brings it back. */
   missingDefaults?: string[];
-  /** The block to paste into the environment's setup script. */
+  /** The block to paste into the environment's setup script. It is the same for any skills. */
   script: string;
-  skillsDir: string;
-  hashFile: string;
+  /** The GitHub repository the block installs the plugin from, as owner/repo. */
+  repository: string;
 }
 
 export interface MemoryEntry {
