@@ -184,9 +184,9 @@ public sealed class HubSeedTests : IDisposable
     /// whole persona still says to ask the owner (the Inputs rule) and to coordinate workers, so every brief overrides that.
     /// </summary>
     [Theory]
-    [InlineData("builder", "Load the fyrd:<validator | reviewer | investigator> skill and follow only its <The check | Reviewing code | The investigation and As a subagent> sections and Working in Fyrd's Inputs bullet (and Untrusted content for an Investigator); if it won't load, return blocked. Never ask the owner, change the PR's code, commit, push, post anything or message anyone; return your findings only.")]
+    [InlineData("builder", "Load the fyrd:<validator | reviewer | investigator> skill and follow only its <The check | Reviewing code | The investigation and As a subagent> sections and Working in Fyrd's Inputs bullet (and Untrusted content for an Investigator); if it won't load, return blocked. Never ask the owner, change the PR's code, commit, push, mark a PR ready, post anything or message anyone; return your findings only.")]
     [InlineData("researcher", "Load the fyrd:reviewer skill and follow only its Reviewing a plan section and Working in Fyrd's Inputs bullet; if it won't load, return blocked. Never ask the owner, post anything or message anyone; return your findings only.")]
-    [InlineData("validator", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd's Inputs and Untrusted content bullets; if it won't load, return blocked. Never ask the owner, post anything or message anyone; return your findings only.")]
+    [InlineData("validator", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd's Inputs and Untrusted content bullets; if it won't load, return blocked. Never ask the owner, change code, commit, push, post anything or message anyone; return your findings only.")]
     [InlineData("monitor", "Load the fyrd:investigator skill and follow only its The investigation and As a subagent sections and Working in Fyrd's Inputs and Untrusted content bullets; if it won't load, return blocked. Never ask the owner, post anything or message anyone; return your findings only.")]
     public void EveryCoordinator_HasItsPersonaSubagentLoadItsSkill_AndNeverAskOrPost(string id, string line)
     {
@@ -301,33 +301,67 @@ public sealed class HubSeedTests : IDisposable
     /// <summary>
     /// Persona subagents need the fyrd plugin in the environment (owner's decision): each coordinator checks once, at task
     /// start, that every persona skill its brief loads is in its skill list, and tells the owner once, instead of asking
-    /// per round when a subagent returns blocked.
+    /// per round. Only a subagent whose skill won't load falls back without asking; any other <c>blocked</c> (a question)
+    /// still goes to the owner. The Researcher asks once, then, whether to publish unreviewed or stop (owner's decision).
+    /// A Monitor wakes on every event and trigger firing in one session, so it checks once per session.
     /// </summary>
     [Theory]
-    [InlineData("builder")]
-    [InlineData("researcher")]
-    [InlineData("validator")]
-    [InlineData("monitor")]
-    public void EveryCoordinator_ChecksOnceThatTheSkillsItBriefsAreInstalled(string coordinator)
+    [InlineData("builder", "- At task start, check", "then, when a subagent returns `blocked` because its skill won't load, report that check as not run instead of asking; handle any other `blocked` as Owner questions says.")]
+    [InlineData("researcher", "- At task start, check", "ask with `AskUserQuestion` then: `Publish unreviewed` or `Stop`. On `Publish unreviewed`, skip step 6 and have the plan worker put `Review: not run` at the top of the plan; on `Stop`, say so and stop. When a review returns `blocked` for another reason, handle it as Owner questions says.")]
+    [InlineData("validator", "- At task start, check", "then, when it returns `blocked` because its skill won't load, mark the failure `needs investigation`; handle any other `blocked` as Owner questions says.")]
+    [InlineData("monitor", "- Once per session, at task start, check", "then, when it returns `blocked` because its skill won't load, go on without it and say in your reply that the problem needs investigating; handle any other `blocked` as Owner questions says.")]
+    public void EveryCoordinator_ChecksOnceThatTheSkillsItBriefsAreInstalled(string coordinator, string lead, string fallback)
     {
         var d = Get(coordinator).Definition;
         var start = d.IndexOf("# Persona subagents\n", StringComparison.Ordinal);
         var section = d[start..d.IndexOf("\n# ", start, StringComparison.Ordinal)];
         var skills = BriefLoads(SubagentBrief(Get(coordinator).Definition)).Select(id => $"`fyrd:{id}`").ToArray();
         var list = skills.Length == 1 ? skills[0] : string.Join(", ", skills[..^1]) + " and " + skills[^1];
-        Assert.Contains($"- At task start, check your skill list for {list}; if ", section, StringComparison.Ordinal);
-        Assert.Contains(" missing, tell the owner once, then", section, StringComparison.Ordinal);
+        var check = $"{lead} your skill list for {list}; if ";
+        Assert.Contains(check, section, StringComparison.Ordinal);
+        var line = section[section.IndexOf(check, StringComparison.Ordinal)..];
+        line = line[..(line.IndexOf('\n') is var nl and >= 0 ? nl : line.Length)];
+        Assert.Contains(" missing, tell the owner once", line, StringComparison.Ordinal);
+        Assert.Contains(fallback, line, StringComparison.Ordinal);
+        // The fallback names the Owner questions bullet; it must be in the persona.
+        Assert.Contains("- **Owner questions.** When a worker returns `blocked` with a question, ask the owner", d, StringComparison.Ordinal);
         Assert.DoesNotContain("ask the owner whether", section, StringComparison.Ordinal);
         Assert.DoesNotContain("can't load its skill", section, StringComparison.Ordinal);
+        // The unscoped fallbacks turned every blocked into a silent "not run" (or an unreviewed plan).
+        Assert.DoesNotContain("report a `blocked` subagent's check as not run", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("publish a plan whose review returned `blocked`", section, StringComparison.Ordinal);
     }
 
-    /// <summary>The Builder is told outright what its persona subagents don't do; asking the owner is the Builder's.</summary>
+    /// <summary>
+    /// Docs state the plugin version persona subagents need; a stated minimum above the plugin's own version is one no
+    /// install can meet.
+    /// </summary>
+    [Fact]
+    public void TheStatedPluginMinimum_IsNoHigherThanThePluginsVersion()
+    {
+        var root = Path.GetDirectoryName(SeedDir())!;
+        using var plugin = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, ".claude-plugin", "plugin.json")));
+        var version = Version.Parse(plugin.RootElement.GetProperty("version").GetString()!);
+        foreach (var doc in new[] { "README.md", "docs/session-skills.md", "docs/controller-skills.md", "docs/superpowers/specs/2026-10-31-fyrd-controller-design.md" })
+        {
+            var stated = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(Path.Combine(root, doc)), @"plugin at (\d+\.\d+\.\d+) or later");
+            Assert.True(stated.Count > 0, $"{doc} no longer states the plugin version persona subagents need");
+            foreach (System.Text.RegularExpressions.Match m in stated)
+                Assert.True(Version.Parse(m.Groups[1].Value) <= version, $"{doc} asks for the plugin at {m.Groups[1].Value} or later, above plugin.json's {version}");
+        }
+    }
+
+    /// <summary>
+    /// The Builder's brief tells its persona subagents what they don't do; asking the owner and marking a PR ready are
+    /// the Builder's. The brief is the only place that says it, so the section carries no second copy.
+    /// </summary>
     [Fact]
     public void Builder_SaysAPersonaSubagentNeverAsksTheOwner()
     {
-        var d = Get("builder").Definition;
-        var section = d[d.IndexOf("# Persona subagents", StringComparison.Ordinal)..d.IndexOf("# Workers", StringComparison.Ordinal)];
-        Assert.Contains("A persona subagent never asks the owner,", section, StringComparison.Ordinal);
+        var brief = SubagentBrief(Get("builder").Definition);
+        var never = brief[brief.IndexOf("Never ", StringComparison.Ordinal)..];
+        foreach (var act in new[] { "ask the owner", "mark a PR ready" })
+            Assert.Contains(act, never, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -538,7 +572,7 @@ public sealed class HubSeedTests : IDisposable
     /// tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("builder", 4200)]
+    [InlineData("builder", 4202)]
     [InlineData("controller", 2600)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
