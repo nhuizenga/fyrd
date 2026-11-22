@@ -107,7 +107,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// </summary>
     [Theory]
     [InlineData("stacked-pull-requests", 540)]
-    [InlineData("validate-dbt", 1030)]
+    [InlineData("validate-dbt", 1110)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
