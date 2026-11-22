@@ -71,7 +71,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
 
     /// <summary>A description opens with the name of the section the skill holds (the persona refers to it by that name) and says when to load it.</summary>
     [Theory]
-    [InlineData("review-data-modeling", "Review data modeling", "Use when your brief asks for them, as a Builder's step 7 does for a dbt or warehouse diff.")]
+    [InlineData("review-data-modeling", "Review data modeling", "Use when your brief asks for them, as a Builder's step 7 does for a diff that touches a dbt project")]
     [InlineData("stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
     [InlineData("validate-dbt", "Validate dbt", "before you start or request a warehouse build")]
     public void EachDescription_NamesItsSection_AndSaysWhenToLoadIt(string name, string section, string when)
@@ -103,23 +103,32 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var validator = RepoSeeds.Personas(_home.Paths).Single(p => p.Id == "validator").Definition;
         Assert.Contains("load the Validate dbt skill (`fyrd:validate-dbt`) with the Skill tool and run its checks here and in step 3; if you can't load it, report them as not run.", Section(validator, "# The check"), StringComparison.Ordinal);
         var builder = Builder().Definition;
-        Assert.Contains("In a dbt project, also load the Validate dbt skill (`fyrd:validate-dbt`), run its checks and return its report; if you can't load it, name them as not run.", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("In a dbt project, also load the Validate dbt skill (`fyrd:validate-dbt`) and run its checks; if you can't load it, name them as not run.", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("how it was tested, any Validate dbt report,", Section(builder, "# Build rules"), StringComparison.Ordinal);
         Assert.Contains("load Validate dbt (`fyrd:validate-dbt`) and do its Builder part", Section(builder, "# Your job"), StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Review data modeling is run by a Reviewer subagent, which loads the skill itself: the Builder's step 7 briefs it to,
-    /// with the not-run fallback, and the skill says the same for a Reviewer that can't load it.
+    /// Review data modeling is run by a Reviewer subagent, which loads the skill itself: the Builder's step 7 briefs it to
+    /// (and the re-reviewer, on such a diff). A subagent that can't load the skill never reads a rule inside it, so the
+    /// Builder's step 7, not the skill, says what to report then.
     /// </summary>
     [Fact]
     public void ReviewDataModeling_IsLoadedByTheReviewerSubagent_AsTheBuildersBriefSays()
     {
         var builder = Builder().Definition;
         var job = builder[builder.IndexOf("# Your job\n", StringComparison.Ordinal)..builder.IndexOf("\n# Build rules\n", StringComparison.Ordinal)];
-        Assert.Contains("for a dbt or warehouse diff another briefed to load Review data modeling (`fyrd:review-data-modeling`) and run its checks, or report them not run if it can't.", job, StringComparison.Ordinal);
+        Assert.Contains("for a dbt or warehouse diff as the Review data modeling skill (`fyrd:review-data-modeling`) defines it, another briefed to load that skill and run its checks (if it can't load it, it reports those checks as not run)", job, StringComparison.Ordinal);
+        Assert.Contains("with the earlier findings to confirm fixed (it loads that skill too on such a diff)", job, StringComparison.Ordinal);
         Assert.DoesNotContain("copy its text in", job, StringComparison.Ordinal);
         var body = Skills().Single(s => s.Name == "review-data-modeling").Body;
-        Assert.Contains("A Reviewer whose brief names this skill but can't load it reports these checks as not run.", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("checks as not run", body, StringComparison.Ordinal);
+        // Query results reach a public review: only aggregates leave the warehouse.
+        Assert.Contains("Report only aggregates from a query (counts, bytes, durations) and the columns you grouped by, never row values or sample rows.", body, StringComparison.Ordinal);
+        // The skill's trigger is Validate dbt's paths.
+        var paths = "models/, macros/, tests/, seeds/, snapshots/, dbt_project.yml, packages.yml";
+        Assert.Contains(paths, Skills().Single(s => s.Name == "validate-dbt").Description, StringComparison.Ordinal);
+        Assert.Contains(paths, Skills().Single(s => s.Name == "review-data-modeling").Description, StringComparison.Ordinal);
         Assert.Contains("Never write", body, StringComparison.Ordinal);
         // Deploy-only checks is the Reviewer persona's; the skill refers to it by that name.
         Assert.Contains("Apply the Reviewer's Deploy-only checks", body, StringComparison.Ordinal);
@@ -131,9 +140,9 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("review-data-modeling", 760)]
+    [InlineData("review-data-modeling", 810)]
     [InlineData("stacked-pull-requests", 540)]
-    [InlineData("validate-dbt", 900)]
+    [InlineData("validate-dbt", 1030)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -172,7 +181,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
             + "- The review you post yourself in step 7, and each reply you post on a thread, comes back as a review-comment event authored by you: it is not new work, so don't start a worker for it. Act only on comments and reviews from others.\n"
             + "- Review comments and failing checks that reach you after review are work: start a fresh worker to fix them, run the tests and push, validate again, then update the PR body and reply on each thread as Pull request hygiene says. A check that failed on a commit that is no longer the PR's head, or a roll-up check that only reports a failure a worker already has, is not new work: say so in one line and end your turn. A fix made after your report is validated but not re-reviewed unless the owner asks; say in your reply that the new head is unreviewed. When a bot reviewer has raised new findings on heads your own post-report fixes produced for a third round on one PR, ask the owner whether to keep fixing before you start another worker. Never resolve a reviewer's thread for them.\n"
             + "- When a PR is merged or closed, call `mcp__claude-code-remote__unsubscribe_pr_activity` for it. When every PR is merged or closed, stop.\n\n# Workers",
-            "`event: COMMENT`; never approve or request changes. Then start a fresh worker",
+            "`event: COMMENT`; never approve or request changes). Then start a fresh worker",
         })
             Assert.Contains(rule, d, StringComparison.Ordinal);
         Assert.Contains("Never run two workers on the same branch.", d, StringComparison.Ordinal);
@@ -228,7 +237,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4350;
+    private const int InstalledBudget = 4395;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()

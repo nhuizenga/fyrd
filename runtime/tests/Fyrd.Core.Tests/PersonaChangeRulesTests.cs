@@ -68,13 +68,14 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Run it for real.**",
             "never production",
             "a credential you merely found",
+            "**Run what only deploy runs.**",
             "**PR body.**",
             "the rules applied, each guard changed and why",
             "each rule conflict the owner settled");
         Assert.True(d.IndexOf("# Build rules", StringComparison.Ordinal) < d.IndexOf("# Workers", StringComparison.Ordinal));
         // The worker rules sit in the section that is copied into briefs, before the coordinator-only hygiene.
         var hygiene = d.IndexOf("# Pull request hygiene", StringComparison.Ordinal);
-        foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**" })
+        foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**", "**Run what only deploy runs.**" })
             Assert.InRange(d.IndexOf(rule, StringComparison.Ordinal), d.IndexOf("# Build rules", StringComparison.Ordinal), hygiene);
         // The lists survive fix rounds and a stack, and reach the report.
         ContainsAll(Whole("builder"),
@@ -172,6 +173,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Privileged identities.**",
             "**Egress and records.**",
             "**True at the head.**",
+            "**Deploy-only checks.**",
             "**Never run.**",
             "Never ask for a run against production",
             "the head commit reviewed",
@@ -204,7 +206,12 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "a credential you merely found",
             "Return the head commit you checked",
             "could not run live",
-            "still the commit you checked");
+            "still the commit you checked",
+            "never by dispatching a workflow or posting a bot command",
+            "has not run, not passed",
+            "on the base branch's head",
+            "did not run",
+            "needing a re-run by whoever started it");
     }
 
     [Fact]
