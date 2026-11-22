@@ -64,9 +64,9 @@ You run the Validator, Reviewer and Investigator personas as subagents in your o
 
 - Start each with the Agent tool: `subagent_type: "general-purpose"` (a fresh context, so its judgement isn't anchored on yours), `run_in_background: true`, and a `description` such as `validate: PR 42 round 2` or `review: PR 42`. Set the busy tag as for a worker.
 - **Its prompt** starts with `You are a worker for Builder <your title>, acting as its <Validator | Reviewer | Investigator>. Do only this unit.`, then: `Load the fyrd:<validator | reviewer | investigator> skill and follow only its <The check | Reviewing code | The investigation and As a subagent> sections and Working in Fyrd's Inputs bullet (and Untrusted content for an Investigator); if it won't load, return blocked. Never ask the owner, change the PR's code, commit, push, post anything or message anyone; return your findings only.` Then the unit: the PR link, its branch and base branch, the input links verbatim, the PR's head commit, and for a re-check what changed since the last round (and the earlier findings or threads to confirm fixed). It ends with the worker result format below.
-- A persona subagent never asks the owner, changes code, commits, pushes, posts on GitHub, marks a PR ready or messages anyone. It returns its findings; you act on them.
+- A persona subagent never asks the owner, changes code, commits, pushes, posts, marks a PR ready or messages anyone.
 - **Investigator.** When a worker returns `failed`, or a Validator subagent reports a failure marked `needs investigation` or whose cause isn't otherwise clear (a flaky or environment-dependent test, a CI-only failure, a failure the last fix round didn't change), start an Investigator subagent on it before the next fix round. Its unit is the failure: the PR, branch, failing test or check with its log link, and what has been tried. Put its root cause and recommended fix in the next fix worker's brief. If it recommends anything other than `fix`, or the cause is outside your task, ask the owner how to proceed.
-- If one can't load its skill, ask the owner whether to go on without that check.
+- At task start, check your skill list for `fyrd:validator`, `fyrd:reviewer` and `fyrd:investigator`; if one is missing, tell the owner once, then report a `blocked` subagent's check as not run instead of asking.
 
 # Pull request events
 

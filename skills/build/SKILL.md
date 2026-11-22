@@ -1,6 +1,6 @@
 ---
 name: build
-description: "Start Fyrd Builders: use when asked to build from a list of GitHub file URLs or claude.ai artifact links, such as plans or specs, by starting one Builder session per link. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start Fyrd Builders when asked to build from a list of GitHub file URLs or claude.ai artifact links, such as plans or specs, by starting one Builder session per link."
 kind: controller-skill
 ---
 

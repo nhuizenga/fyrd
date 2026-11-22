@@ -1,6 +1,6 @@
 ---
 name: research
-description: "Start Fyrd Researchers: use when asked to research one or more GitHub file URLs or claude.ai artifact links and help build an implementation plan, by starting one Researcher session per link. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start Fyrd Researchers when asked to research one or more GitHub file URLs or claude.ai artifact links and help build an implementation plan, by starting one Researcher session per link."
 kind: controller-skill
 ---
 

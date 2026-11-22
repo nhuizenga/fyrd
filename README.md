@@ -35,7 +35,7 @@ Fyrd reads the login only from `~/.claude/.credentials.json`, with no other fall
 
 To work from a local clone instead, add the clone's folder as the marketplace (`/plugin marketplace add /path/to/fyrd`), and run `/reload-plugins` after edits.
 
-To update, run `/plugin marketplace update fyrd`, then `claude plugin update fyrd@fyrd` in a terminal (the marketplace update alone leaves the installed plugin at its old version), then `/reload-plugins` (or restart Claude Code), `/fyrd:down` and `/fyrd:up`.
+To update, run `/plugin marketplace update fyrd`, then `claude plugin update fyrd@fyrd` in a terminal (the marketplace update alone leaves the installed plugin at its old version), then `/reload-plugins` (or restart Claude Code), `/fyrd:down` and `/fyrd:up`. Then refresh the environment snapshot after merging: cloud sessions and their persona subagents use the fyrd plugin as the environment's setup script installed it when its snapshot was built, so have the environment build a new snapshot (it does when you change its setup script; see `docs/session-skills.md`, Limits). Persona subagents need the plugin at 0.2.54 or later there.
 
 ## Usage
 

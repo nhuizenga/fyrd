@@ -1,6 +1,6 @@
 ---
 name: tune
-description: "Start the Fyrd Tuner: use when asked to start the Tuner session, or to have it review a pull request or stack for ways to improve the Fyrd personas and skills. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start the Fyrd Tuner when asked to start the Tuner session, or to have it review a pull request or stack for ways to improve the Fyrd personas and skills."
 kind: controller-skill
 ---
 

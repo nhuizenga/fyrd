@@ -1,6 +1,6 @@
 ---
 name: investigate
-description: "Start Fyrd Investigators: use when asked to investigate a failing GitHub workflow run, an incident, a suspected bug or an ad hoc finding by starting an Investigator session that recommends a response. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start Fyrd Investigators when asked to investigate a failing GitHub workflow run, an incident, a suspected bug or an ad hoc finding by starting an Investigator session that recommends a response."
 kind: controller-skill
 ---
 

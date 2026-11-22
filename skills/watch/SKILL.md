@@ -1,6 +1,6 @@
 ---
 name: watch
-description: "Start Fyrd Monitors: use when asked to watch a pull request and fix what comes up, or to start a watcher on a Slack channel, by starting a Monitor session. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start Fyrd Monitors when asked to watch a pull request and fix what comes up, or to start a watcher on a Slack channel, by starting a Monitor session."
 kind: controller-skill
 ---
 

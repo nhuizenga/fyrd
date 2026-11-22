@@ -50,9 +50,19 @@ public sealed class HubSkillsTests
             var d = m.Groups[1].Value.Trim().Trim((char)34);
             Assert.DoesNotContain("Controller only", d, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("Never use this", d, StringComparison.Ordinal);
-            Assert.Contains(": use when asked to ", d, StringComparison.Ordinal);
-            Assert.EndsWith("Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools.", d, StringComparison.Ordinal);
-            Assert.Contains($"# {n}\n\n**Needs:** ", Read(n).ReplaceLineEndings("\n"), StringComparison.Ordinal);
+            // The needs come first, so a session without that message doesn't load the skill on the rest of the description.
+            const string needs = "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: ";
+            Assert.StartsWith(needs, d, StringComparison.Ordinal);
+            Assert.Contains(" when asked to ", d, StringComparison.Ordinal);
+            var text = Read(n).ReplaceLineEndings("\n");
+            Assert.Contains($"# {n}\n\n**Needs:** ", text, StringComparison.Ordinal);
+            // The body's Needs line names the same blocks as the description.
+            var line = text[text.IndexOf("**Needs:** ", StringComparison.Ordinal)..];
+            line = line[..line.IndexOf('\n')];
+            var blocks = Regex.Matches(line, "`<([a-z-]+)>`").Select(b => b.Groups[1].Value).ToArray();
+            var listed = needs["From the Fyrd Controller message's ".Length..needs.IndexOf(" blocks", StringComparison.Ordinal)]
+                .Split(new[] { ", ", " and " }, StringSplitOptions.TrimEntries);
+            Assert.Equal(listed.Order(StringComparer.Ordinal), blocks.Order(StringComparer.Ordinal));
             Assert.Contains("Without them, start and change nothing: say which is missing and carry on without this skill.", Read(n), StringComparison.Ordinal);
         }
     }

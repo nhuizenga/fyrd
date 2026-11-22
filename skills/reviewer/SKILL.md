@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: "Fyrd persona: the full instructions of a Fyrd Reviewer, which reviews a branch, pull request or implementation plan. Load it when a brief tells you to act as a Reviewer subagent, or run /fyrd:reviewer to make this session act as one."
+description: "Fyrd persona: the full instructions of a Fyrd Reviewer, which reviews a branch, pull request or implementation plan. Load it only when your brief tells you to act as a Fyrd Reviewer subagent; never to review on your own. A person can run /fyrd:reviewer to make this session act as one."
 kind: persona
 persona-name: Reviewer
 persona-model: claude-sonnet-5-5

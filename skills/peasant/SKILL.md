@@ -1,6 +1,6 @@
 ---
 name: peasant
-description: "Start, recycle or tear down Fyrd peasants: use when asked to start a new builder, reviewer, validator, investigator or other peasant session, to recycle one, or to tear one down. Needs the Fyrd Controller message (its hub-settings and peasant-persona blocks) and the claude-code-remote session tools."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start, recycle or tear down Fyrd peasants when asked to start a new builder, reviewer, validator, investigator or other peasant session, to recycle one, or to tear one down."
 kind: controller-skill
 ---
 

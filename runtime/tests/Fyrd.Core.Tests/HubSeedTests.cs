@@ -104,7 +104,9 @@ public sealed class HubSeedTests : IDisposable
             if (SubagentIds.Contains(id))
             {
                 Assert.False(fields.ContainsKey("disable-model-invocation"), $"{id}: a subagent loads it with the Skill tool");
-                Assert.Contains("when a brief tells you to act as", fields["description"], StringComparison.Ordinal);
+                // A narrow trigger: the plugin is installed environment-wide, so a broad one would load the persona in any session.
+                Assert.Contains("Load it only when your brief tells you to act as a Fyrd ", fields["description"], StringComparison.Ordinal);
+                Assert.Contains(" subagent; never to ", fields["description"], StringComparison.Ordinal);
             }
             else
                 Assert.Equal("true", fields["disable-model-invocation"]);
@@ -257,16 +259,66 @@ public sealed class HubSeedTests : IDisposable
             Assert.Contains(act, never, StringComparison.Ordinal);
     }
 
-    /// <summary>The sections a brief names are headings of the persona the subagent loads; a renamed one breaks the brief.</summary>
-    [Theory]
-    [InlineData("validator", new[] { "The check", "Working in Fyrd" })]
-    [InlineData("reviewer", new[] { "Reviewing code", "Reviewing a plan", "Working in Fyrd" })]
-    [InlineData("investigator", new[] { "The investigation", "As a subagent", "Working in Fyrd" })]
-    public void TheSectionsABriefNames_AreHeadingsOfThePersona(string id, string[] headings)
+    /// <summary>The personas a brief loads, in order: `Load the fyrd:reviewer skill` or `Load the fyrd:&lt;a | b&gt; skill`.</summary>
+    private static string[] BriefLoads(string brief)
     {
-        var lines = Get(id).Definition.ReplaceLineEndings("\n").Split('\n');
-        foreach (var h in headings)
-            Assert.Equal(1, lines.Count(l => l == "# " + h));
+        const string from = "Load the fyrd:";
+        var ids = brief[(brief.IndexOf(from, StringComparison.Ordinal) + from.Length)..brief.IndexOf(" skill", StringComparison.Ordinal)];
+        return ids.Trim('<', '>').Split(" | ", StringSplitOptions.TrimEntries);
+    }
+
+    /// <summary>
+    /// The sections a brief names are headings of the persona the subagent loads; a renamed one breaks the brief. The names
+    /// are read from each coordinator's brief: the text between "follow only its " and " section(s)", one alternative per
+    /// loaded persona in a `&lt;a | b&gt;` brief, split on " and " and ", ", plus Working in Fyrd, whose bullets it names.
+    /// </summary>
+    [Theory]
+    [InlineData("builder")]
+    [InlineData("researcher")]
+    [InlineData("validator")]
+    [InlineData("monitor")]
+    public void TheSectionsABriefNames_AreHeadingsOfThePersona(string coordinator)
+    {
+        var brief = SubagentBrief(Get(coordinator).Definition);
+        var loads = BriefLoads(brief);
+        const string from = "follow only its ";
+        var start = brief.IndexOf(from, StringComparison.Ordinal) + from.Length;
+        var named = brief[start..brief.IndexOf(" section", start, StringComparison.Ordinal)];
+        var perPersona = named.StartsWith('<') ? named.Trim('<', '>').Split(" | ", StringSplitOptions.TrimEntries) : new[] { named };
+        Assert.Equal(loads.Length, perPersona.Length);
+        Assert.Contains(" section", brief[start..brief.IndexOf("Working in Fyrd's ", StringComparison.Ordinal)], StringComparison.Ordinal);
+        for (var i = 0; i < loads.Length; i++)
+        {
+            var lines = Get(loads[i]).Definition.ReplaceLineEndings("\n").Split('\n');
+            var headings = perPersona[i].Split(new[] { " and ", ", " }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Append("Working in Fyrd").ToArray();
+            Assert.True(headings.Length >= 2, $"{coordinator}: no section named for {loads[i]}");
+            foreach (var h in headings)
+                Assert.True(lines.Count(l => l == "# " + h) == 1, $"{coordinator}'s brief names \"{h}\", which is not exactly one heading of {loads[i]}");
+        }
+    }
+
+    /// <summary>
+    /// Persona subagents need the fyrd plugin in the environment (owner's decision): each coordinator checks once, at task
+    /// start, that every persona skill its brief loads is in its skill list, and tells the owner once, instead of asking
+    /// per round when a subagent returns blocked.
+    /// </summary>
+    [Theory]
+    [InlineData("builder")]
+    [InlineData("researcher")]
+    [InlineData("validator")]
+    [InlineData("monitor")]
+    public void EveryCoordinator_ChecksOnceThatTheSkillsItBriefsAreInstalled(string coordinator)
+    {
+        var d = Get(coordinator).Definition;
+        var start = d.IndexOf("# Persona subagents\n", StringComparison.Ordinal);
+        var section = d[start..d.IndexOf("\n# ", start, StringComparison.Ordinal)];
+        var skills = BriefLoads(SubagentBrief(Get(coordinator).Definition)).Select(id => $"`fyrd:{id}`").ToArray();
+        var list = skills.Length == 1 ? skills[0] : string.Join(", ", skills[..^1]) + " and " + skills[^1];
+        Assert.Contains($"- At task start, check your skill list for {list}; if ", section, StringComparison.Ordinal);
+        Assert.Contains(" missing, tell the owner once, then", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("ask the owner whether", section, StringComparison.Ordinal);
+        Assert.DoesNotContain("can't load its skill", section, StringComparison.Ordinal);
     }
 
     /// <summary>The Builder is told outright what its persona subagents don't do; asking the owner is the Builder's.</summary>
@@ -486,14 +538,14 @@ public sealed class HubSeedTests : IDisposable
     /// tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
-    [InlineData("builder", 4195)]
+    [InlineData("builder", 4200)]
     [InlineData("controller", 2600)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
     [InlineData("researcher", 2430)]
     [InlineData("reviewer", 2780)]
     [InlineData("tuner", 3040)]
-    [InlineData("validator", 2800)]
+    [InlineData("validator", 2807)]
     public void EveryPersona_StaysUnderItsWordBudget(string id, int budget)
     {
         var words = Get(id).Definition.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
