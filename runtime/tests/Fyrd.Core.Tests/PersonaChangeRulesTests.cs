@@ -68,7 +68,10 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Run it for real.**",
             "never production",
             "a credential you merely found",
+            "counts only for the code and tool versions",
             "**Run what only deploy runs.**",
+            "Within the limits of Run it for real",
+            "where only a build may write without the task's ask",
             "**PR body.**",
             "the rules applied, each guard changed and why",
             "each rule conflict the owner settled");
@@ -210,8 +213,12 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "never by dispatching a workflow or posting a bot command",
             "has not run, not passed",
             "on the base branch's head",
-            "did not run",
-            "needing a re-run by whoever started it");
+            "never report it as a pass or an expected failure",
+            "needing a re-run by whoever started it",
+            "needing a rebuild by whoever started it",
+            "where the limits in step 5 allow a target",
+            "a target and permission that the task gives",
+            "sandbox or preview target may write without the task's ask");
     }
 
     [Fact]
