@@ -11,7 +11,7 @@ Checks for the second Reviewer that the Builder starts in step 7 on a PR whose d
 
 - You read code: the diff, the models and tests around it, their configs and docs, and what the PR's CI logs show.
 - Run a read-only query on the warehouse only where your session has a read-only warehouse connector and the repo's docs allow such queries. Otherwise run nothing, and name the check under questions (check 7). Prefer metadata, `information_schema`, or a partition- or date-bounded query; name a full scan as a question instead.
-- Report only aggregates from a query (counts, bytes, durations) and the columns you grouped by, never row values or sample rows.
+- Report only aggregates from a query (counts, bytes, durations) and the names of grouped columns, never their values, row values or sample rows.
 - Never write: no builds, no DDL or DML, nothing into any schema, table or stage, in any env. Never use a credential you merely found in the environment.
 - An estimate you didn't measure says so, and says what it is based on.
 

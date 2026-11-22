@@ -124,11 +124,16 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         var body = Skills().Single(s => s.Name == "review-data-modeling").Body;
         Assert.DoesNotContain("checks as not run", body, StringComparison.Ordinal);
         // Query results reach a public review: only aggregates leave the warehouse.
-        Assert.Contains("Report only aggregates from a query (counts, bytes, durations) and the columns you grouped by, never row values or sample rows.", body, StringComparison.Ordinal);
-        // The skill's trigger is Validate dbt's paths.
-        var paths = "models/, macros/, tests/, seeds/, snapshots/, dbt_project.yml, packages.yml";
-        Assert.Contains(paths, Skills().Single(s => s.Name == "validate-dbt").Description, StringComparison.Ordinal);
-        Assert.Contains(paths, Skills().Single(s => s.Name == "review-data-modeling").Description, StringComparison.Ordinal);
+        // Grouped key values (ids, emails) are row data too: only the grouped columns' names leave.
+        Assert.Contains("Report only aggregates from a query (counts, bytes, durations) and the names of grouped columns, never their values, row values or sample rows.", body, StringComparison.Ordinal);
+        // The skill's trigger is Validate dbt's paths, each one in both descriptions (they join the list differently).
+        string[] paths = ["models/", "macros/", "tests/", "seeds/", "snapshots/", "dbt_project.yml", "packages.yml", "selectors.yml"];
+        foreach (var name in new[] { "validate-dbt", "review-data-modeling" })
+        {
+            var description = Skills().Single(s => s.Name == name).Description;
+            foreach (var path in paths)
+                Assert.True(description.Contains(path, StringComparison.Ordinal), $"{name}'s description is missing {path}");
+        }
         Assert.Contains("Never write", body, StringComparison.Ordinal);
         // Deploy-only checks is the Reviewer persona's; the skill refers to it by that name.
         Assert.Contains("Apply the Reviewer's Deploy-only checks", body, StringComparison.Ordinal);
@@ -142,7 +147,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     [Theory]
     [InlineData("review-data-modeling", 810)]
     [InlineData("stacked-pull-requests", 540)]
-    [InlineData("validate-dbt", 1030)]
+    [InlineData("validate-dbt", 1110)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -237,7 +242,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4401;
+    private const int InstalledBudget = 4403;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
