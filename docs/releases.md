@@ -42,14 +42,25 @@ A tag already on the pushed commit is used as it is.
 
 ## Install the console tool from a release
 
-The tool needs the .NET 10 runtime. Download `fyrd.<version>.nupkg` from the release into a folder of its own, then:
+Installing the tool needs the .NET 10 SDK, and running it the .NET 10 runtime. Download `fyrd.<version>.nupkg` from the
+release into a folder of its own, then:
 
 ```
-dotnet tool install --global fyrd --add-source <that folder> --version <version>
+dotnet tool install --global fyrd --version <version> --source <folder>
 ```
 
-To move to a newer release, download its package into the folder and run
-`dotnet tool update --global fyrd --add-source <that folder> --version <version>`.
+`--source` replaces every package source in your NuGet configuration with that folder for this one command, so a
+package called `fyrd` on nuget.org or any other feed can never be installed in its place. (`--add-source` would add
+the folder beside your other sources, and whichever source answered with that version would win.)
+
+To move to another release, download its package into the folder and run:
+
+```
+dotnet tool update --global fyrd --version <version> --source <folder> --allow-downgrade
+```
+
+`--allow-downgrade` lets it go back to an older release too, to match an older plugin. `fyrd --version` prints
+`fyrd <version>` and exits.
 
 `fyrd` starts the console on `http://127.0.0.1:4870` (pass `--urls http://127.0.0.1:<port>` for another port). It
 serves the console, skills and guide that came in its package; the environment variables in the README's
@@ -64,10 +75,13 @@ Unzip `fyrd-plugin-<version>.zip` into a folder, then in Claude Code:
 /plugin install fyrd@fyrd
 ```
 
-The zip has no runtime source, so `/fyrd:up` runs the `fyrd` tool from your `PATH` instead of building the server (on
-Windows, macOS and Linux, `dotnet tool install --global` puts it in `~/.dotnet/tools`, which must be on `PATH`), and
-points it at the plugin's own skills and docs. Install the tool from the same release as the zip. Without it, `/fyrd:up`
-says how to install it. `/fyrd:up` still needs Node. A clone of the repository keeps building and running the server
+The zip has no runtime source, so `/fyrd:up` runs the `fyrd` tool instead of building the server, and points it at the
+plugin's own skills and docs. It looks for `fyrd` on your `PATH`, then in `~/.dotnet/tools` (where
+`dotnet tool install --global` puts it on Windows, macOS and Linux, under `DOTNET_CLI_HOME` when that is set). Before
+starting it, `/fyrd:up` runs `fyrd --version` and refuses to start anything that does not answer `fyrd <version>` with
+the plugin's own version: a different program called `fyrd`, or the tool from another release. Install the tool from
+the same release as the zip. When the tool is missing or refused, `/fyrd:up` prints the install or update command
+above with the plugin's version filled in. `/fyrd:up` still needs Node. A clone of the repository keeps building and running the server
 from source, as before.
 
 ## What the plugin zip holds

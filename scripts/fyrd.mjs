@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   runDir, readServerFile, writeServerFile, removeServerFile,
   isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState,
-  readSessionSkills, sessionSkillsLine, serverLaunch, toolMissing, findOnPath,
+  readSessionSkills, sessionSkillsLine, serverLaunch, toolMissing, findOnPath, pluginVersion, checkTool,
 } from "./lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -65,9 +65,16 @@ async function up() {
     }
     run("dotnet", ["build", "runtime/src/Fyrd.Server", "-c", "Release"], repoRoot);
   } else {
+    // The plugin zip has no runtime source: run the fyrd tool, but only once it has said it is Fyrd at this version.
+    const version = pluginVersion(repoRoot);
     launch.cmd = findOnPath(launch.cmd);
     if (!launch.cmd) {
-      console.error(toolMissing);
+      console.error(toolMissing(version));
+      process.exit(1);
+    }
+    const check = checkTool(launch.cmd, version);
+    if (!check.ok) {
+      console.error(check.message);
       process.exit(1);
     }
   }

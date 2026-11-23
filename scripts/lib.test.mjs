@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine, serverLaunch, toolMissing, findOnPath } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine, serverLaunch, toolMissing, findOnPath, pluginVersion, toolInstallCommands, checkTool } from "./lib.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -169,17 +169,86 @@ test("serverLaunch runs the fyrd tool with the plugin's skills and docs when the
   assert.equal(l.cwd, root);
 });
 
-test("toolMissing says how to install the tool from a release", () => {
-  assert.match(toolMissing, /dotnet tool install --global fyrd --add-source/);
+test("pluginVersion reads plugin.json, and refuses a version that is not MAJOR.MINOR.PATCH", () => {
+  const read = (v) => () => JSON.stringify({ name: "fyrd", version: v });
+  assert.equal(pluginVersion("r", read("0.2.57")), "0.2.57");
+  assert.throws(() => pluginVersion("r", read("0.2.57\n")), /MAJOR\.MINOR\.PATCH/);
+  assert.throws(() => pluginVersion("r", read(undefined)), /MAJOR\.MINOR\.PATCH/);
+  const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+  assert.match(pluginVersion(repo), /^[0-9]+\.[0-9]+\.[0-9]+$/);
+});
+
+test("toolInstallCommands installs and updates from the release folder only", () => {
+  const c = toolInstallCommands("1.2.3", "/dl");
+  assert.equal(c.install, "dotnet tool install --global fyrd --version 1.2.3 --source /dl");
+  assert.equal(c.update, "dotnet tool update --global fyrd --version 1.2.3 --source /dl --allow-downgrade");
+  assert.doesNotMatch(c.install + c.update, /--add-source/);
+});
+
+test("docs/releases.md shows the same install and update commands", () => {
+  const docs = fs.readFileSync(new URL("../docs/releases.md", import.meta.url), "utf8");
+  const c = toolInstallCommands("<version>", "<folder>");
+  assert.ok(docs.includes(c.install), `docs/releases.md lacks: ${c.install}`);
+  assert.ok(docs.includes(c.update), `docs/releases.md lacks: ${c.update}`);
+});
+
+test("toolMissing names the plugin version and the real install command", () => {
+  const m = toolMissing("1.2.3");
+  assert.match(m, /This plugin is 1\.2\.3/);
+  assert.match(m, /fyrd\.1\.2\.3\.nupkg/);
+  assert.match(m, /GitHub Release v1\.2\.3/);
+  assert.ok(m.includes(toolInstallCommands("1.2.3").install));
+  assert.doesNotMatch(m, /<version>/);
+});
+
+const answers = (r) => { const calls = []; const run = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return r; }; return { run, calls }; };
+
+test("checkTool accepts the Fyrd tool at the plugin version, asking it with --version", () => {
+  const { run, calls } = answers({ status: 0, stdout: "fyrd 1.2.3\r\n" });
+  assert.deepEqual(checkTool("/t/fyrd", "1.2.3", run), { ok: true });
+  assert.equal(calls[0].cmd, "/t/fyrd");
+  assert.deepEqual(calls[0].args, ["--version"]);
+  assert.ok(calls[0].opts.timeout > 0);
+});
+
+test("checkTool refuses the Fyrd tool at another version, with the update command", () => {
+  const r = checkTool("/t/fyrd", "1.2.3", answers({ status: 0, stdout: "fyrd 1.2.2\n" }).run);
+  assert.equal(r.ok, false);
+  assert.match(r.message, /it is the fyrd tool 1\.2\.2, but this plugin is 1\.2\.3/);
+  assert.ok(r.message.includes(toolInstallCommands("1.2.3").update));
+});
+
+test("checkTool refuses a fyrd that is not the Fyrd tool", () => {
+  for (const [res, why] of [
+    [{ status: 0, stdout: "fyrd version 3.0 (some other fyrd)\n" }, /answered "fyrd version 3\.0/],
+    [{ status: 0, stdout: "fyrd 1.2.3\nextra\n" }, /answered "fyrd 1\.2\.3"/],
+    [{ status: 2, stdout: "fyrd 1.2.3\n" }, /exited with 2/],
+    [{ status: null, signal: "SIGTERM", stdout: "" }, /exited with SIGTERM/],
+    [{ error: new Error("spawn EACCES"), stdout: "" }, /failed \(spawn EACCES\)/],
+  ]) {
+    const r = checkTool("/t/fyrd", "1.2.3", answers(res).run);
+    assert.equal(r.ok, false);
+    assert.match(r.message, /Refusing to start \/t\/fyrd: it is not the Fyrd console tool/);
+    assert.match(r.message, why);
+    assert.ok(r.message.includes(toolInstallCommands("1.2.3").install));
+  }
 });
 
 test("findOnPath finds a command on POSIX PATH and returns null when absent", () => {
   const env = { PATH: "/a:/b" };
-  assert.equal(findOnPath("fyrd", env, "linux", (p) => p === "/b/fyrd"), "/b/fyrd");
-  assert.equal(findOnPath("fyrd", env, "linux", () => false), null);
-  assert.equal(findOnPath("fyrd", {}, "linux", () => true), null);
+  assert.equal(findOnPath("fyrd", env, "linux", (p) => p === "/b/fyrd", "/home/u"), "/b/fyrd");
+  assert.equal(findOnPath("fyrd", env, "linux", () => false, "/home/u"), null);
+  assert.equal(findOnPath("fyrd", {}, "linux", () => false, "/home/u"), null);
 });
 
+test("findOnPath prefers PATH, then falls back to ~/.dotnet/tools", () => {
+  const env = { PATH: "/a" };
+  assert.equal(findOnPath("fyrd", env, "linux", (p) => p === "/home/u/.dotnet/tools/fyrd", "/home/u"), "/home/u/.dotnet/tools/fyrd");
+  assert.equal(findOnPath("fyrd", env, "linux", () => true, "/home/u"), "/a/fyrd");
+  assert.equal(findOnPath("fyrd", { DOTNET_CLI_HOME: "/cli" }, "linux", (p) => p === "/cli/.dotnet/tools/fyrd", "/home/u"), "/cli/.dotnet/tools/fyrd");
+  assert.equal(findOnPath("fyrd", { Path: "C:\\t" }, "win32", (p) => p === "C:\\Users\\u\\.dotnet\\tools\\fyrd.exe", "C:\\Users\\u"),
+    "C:\\Users\\u\\.dotnet\\tools\\fyrd.exe");
+});
 test("findOnPath tries PATHEXT on Windows", () => {
   const env = { Path: "C:\\t;C:\\u", PATHEXT: ".COM;.EXE" };
   assert.equal(findOnPath("fyrd", env, "win32", (p) => p === "C:\\u\\fyrd.EXE"), "C:\\u\\fyrd.EXE");
