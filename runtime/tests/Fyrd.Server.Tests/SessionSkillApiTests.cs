@@ -11,6 +11,7 @@ public class SessionSkillApiTests
 {
     private const string Stacks = "stacked-pull-requests";
     private const string Dbt = "validate-dbt";
+    private const string Data = "review-data-modeling";
 
     private static async Task<JsonElement> ReadJson(HttpResponseMessage r) =>
         JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
@@ -38,14 +39,18 @@ public class SessionSkillApiTests
     {
         using var f = new FyrdFactory();
         var list = await Get(f.CreateClient(), "/api/hub/session-skills");
-        Assert.Equal([Stacks, Dbt], list.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
-        var stacks = list[0];
+        Assert.Equal([Data, Stacks, Dbt], list.EnumerateArray().Select(s => s.GetProperty("name").GetString()));
+        var data = list[0];
+        Assert.Equal(["builder"], data.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
+        Assert.StartsWith("Review data modeling: ", data.GetProperty("description").GetString());
+        Assert.True(data.GetProperty("inPlugin").GetBoolean());
+        var stacks = list[1];
         Assert.Equal(["builder"], stacks.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
         Assert.StartsWith("Stacked pull requests: ", stacks.GetProperty("description").GetString());
         Assert.StartsWith("# Stacked pull requests\n", stacks.GetProperty("body").GetString());
         Assert.False(stacks.GetProperty("updateAvailable").GetBoolean());
         Assert.True(stacks.GetProperty("inPlugin").GetBoolean());
-        var dbt = list[1];
+        var dbt = list[2];
         Assert.Equal(["builder", "validator"], dbt.GetProperty("roles").EnumerateArray().Select(r => r.GetString()));
         Assert.StartsWith("Validate dbt: ", dbt.GetProperty("description").GetString());
         Assert.True(dbt.GetProperty("inPlugin").GetBoolean());
@@ -129,7 +134,7 @@ public class SessionSkillApiTests
             req.Headers.Add("Origin", "http://evil.example");
             Assert.Equal(HttpStatusCode.Forbidden, (await c.SendAsync(req)).StatusCode);
         }
-        Assert.Equal(2, (await Get(c, "/api/hub/session-skills")).GetArrayLength());
+        Assert.Equal(3, (await Get(c, "/api/hub/session-skills")).GetArrayLength());
     }
 
     [Fact]
@@ -144,8 +149,8 @@ public class SessionSkillApiTests
         Assert.False(state.GetProperty("confirmed").GetBoolean());
         Assert.Equal("env_test1", state.GetProperty("environmentId").GetString());
         Assert.Equal("nhuizenga/fyrd", state.GetProperty("repository").GetString());
-        Assert.Equal([Stacks, Dbt], state.GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
-        Assert.Equal(["fyrd:" + Stacks, "fyrd:" + Dbt], state.GetProperty("pluginSkills").EnumerateArray().Select(s => s.GetString()));
+        Assert.Equal([Data, Stacks, Dbt], state.GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
+        Assert.Equal(["fyrd:" + Data, "fyrd:" + Stacks, "fyrd:" + Dbt], state.GetProperty("pluginSkills").EnumerateArray().Select(s => s.GetString()));
         Assert.Empty(state.GetProperty("inlineSkills").EnumerateArray());
         var script = state.GetProperty("script").GetString()!;
         Assert.Equal(SessionSkillScript.Render(), script);
