@@ -8,7 +8,8 @@ namespace Fyrd.Core.Hub;
 /// One hub poll pass: captures <c>fyrd-remember</c> and <c>fyrd-prs</c> blocks from hub sessions, finds pending
 /// <c>AskUserQuestion</c> items, publishes the session list to <see cref="HubState"/>, and posts memory updates to the
 /// Controller. A peasant's <c>scope: shared</c> block goes to <see cref="PendingMemory"/> instead of shared memory; a
-/// <c>fyrd-prs</c> block's PRs and every PR found on a session's branches go to <see cref="SessionPullRequests"/>.
+/// <c>fyrd-prs</c> block's PRs and the session's own PRs among those found on its branches (see <c>RememberOwned</c>)
+/// go to <see cref="SessionPullRequests"/>.
 /// Passes must run sequentially (the per-session windows and the cursor file are not locked).
 /// </summary>
 public sealed partial class HubRunner(
@@ -128,7 +129,7 @@ public sealed partial class HubRunner(
                         // The repo's listing is fetched once, up front and concurrently; wait for it so it is not fetched twice.
                         if (repo is not null && ownedWarm.TryGetValue(repo, out var warm)) await warm;
                         owned = await ownedPrs.FindOwnedAsync(repo, Branches(s.Raw), ct);
-                        RememberOwned(s.Id, owned);
+                        RememberOwned(s, owned);
                     }
                     views.Add(View(s, w.LastActivity, owned));
                     // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
@@ -422,15 +423,31 @@ public sealed partial class HubRunner(
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
     }
 
-    /// <summary>Caches every PR the branch matching found for the session: a relationship stays once it exists.</summary>
-    private void RememberOwned(string sessionId, OwnedSet owned)
+    /// <summary>
+    /// Caches the PRs the branch matching found that are this session's own: a relationship stays once it exists. Branch
+    /// names are reused (a recycled peasant keeps <c>fyrd/&lt;title&gt;</c>; sessions share a fork's <c>main</c>), so a
+    /// direct match is cached only while it is open, or when it was opened at or after the session was created; a merged
+    /// or closed PR from before the session, or one with no known creation time, is shown while the matching finds it but
+    /// never cached. Stack matches are always open PRs (the walk ignores merged and closed ones) and are cached.
+    /// </summary>
+    private void RememberOwned(CloudSession s, OwnedSet owned)
     {
         if (owned.Urls.Count == 0) return;
         var stacked = owned.Stacked.ToHashSet(StringComparer.Ordinal);
+        var direct = owned.Direct.ToDictionary(p => p.Url, StringComparer.Ordinal);
+        var sessionCreated = CreatedAt(s.Raw);
         // One at a time, in the listing's order, so the cache keeps that order; only a new PR writes the file.
         foreach (var url in owned.Urls)
-            _sessionPrs.Add(sessionId, [url], stacked.Contains(url) ? SessionPullRequests.FromStack : SessionPullRequests.FromBranch);
+        {
+            if (stacked.Contains(url))
+                _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromStack);
+            else if (direct.TryGetValue(url, out var pr) && OwnDirectMatch(pr, sessionCreated))
+                _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromBranch);
+        }
     }
+
+    private static bool OwnDirectMatch(PullRequestHead pr, DateTimeOffset? sessionCreated) =>
+        pr.State == "open" || (pr.CreatedAt is { } opened && sessionCreated is { } created && opened >= created);
 
     /// <summary>
     /// A session's pull requests: the ones found now on its repo and branches (the cloud API reports none itself), then

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -28,7 +29,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
           rateLimit{cost remaining resetAt}
           repository(owner:$owner,name:$name){
             defaultBranchRef{name}
-            all:pullRequests(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{url number title state isDraft headRefName baseRefName isCrossRepository}}
+            all:pullRequests(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{url number title state isDraft headRefName baseRefName isCrossRepository createdAt}}
             open:pullRequests(first:5,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{
         """ + PrFields + """
         }}}}
@@ -89,6 +90,8 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                     CrossRepository = e.TryGetProperty("isCrossRepository", out var x) && x.ValueKind == JsonValueKind.True,
                     Status = open.TryGetValue(url!, out var rich) ? rich : light,
                     Partial = rich is null && light.State == "open",
+                    CreatedAt = Str(e, "createdAt") is { } c && DateTimeOffset.TryParse(c, CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var created) ? created : null,
                 });
             }
         var def = Path(data, "repository", "defaultBranchRef", "name", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;

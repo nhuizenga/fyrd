@@ -110,6 +110,9 @@ public sealed record PullRequestHead(string Url, string Branch)
     public bool CrossRepository { get; init; }
     public PullRequestStatus? Status { get; init; }
 
+    /// <summary>When the PR was opened, or null when the listing did not say.</summary>
+    public DateTimeOffset? CreatedAt { get; init; }
+
     /// <summary>An open PR the listing did not read in full (no checks, review or mergeability): read it on its own when needed.</summary>
     public bool Partial { get; init; }
 }

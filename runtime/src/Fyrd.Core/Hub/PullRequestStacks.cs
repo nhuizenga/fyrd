@@ -4,6 +4,9 @@ namespace Fyrd.Core.Hub;
 public sealed record OwnedSet(IReadOnlyList<string> Urls, IReadOnlyList<string> Stacked)
 {
     public static readonly OwnedSet Empty = new([], []);
+
+    /// <summary>The listing's entries for the direct matches (head is one of the session's branches), with state and creation time.</summary>
+    public IReadOnlyList<PullRequestHead> Direct { get; init; } = [];
 }
 
 /// <summary>
@@ -39,7 +42,10 @@ public static class PullRequestStacks
         var stacked = seen.Where(u => !directUrls.Contains(u)).ToList();
         return new OwnedSet(
             directUrls.Concat(stacked).Distinct(StringComparer.Ordinal).OrderBy(Number).ToList(),
-            stacked.OrderBy(Number).ToList());
+            stacked.OrderBy(Number).ToList())
+        {
+            Direct = direct,
+        };
     }
 
     /// <summary>The open PR below this one (its base is that PR's head) and every open PR above it, never through the default branch.</summary>

@@ -1018,6 +1018,38 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Equal(3, fresh.Sessions.Single().PullRequests.Count);
     }
 
+    private static PullRequestHead MergedHead(int n, string head, DateTimeOffset? created) =>
+        new($"https://github.com/acme/widgets/pull/{n}", head)
+        {
+            Base = "main", State = "merged", CreatedAt = created,
+            Status = new PullRequestStatus($"https://github.com/acme/widgets/pull/{n}", n, $"PR {n}", "merged", false, "none"),
+        };
+
+    [Fact]
+    public async Task Poll_AMergedPrOnTheSessionsBranch_IsCachedOnlyWhenOpenedAfterTheSessionStarted()
+    {
+        // A recycled peasant keeps its branch name: #5 merged before this session existed, #7 was opened by it.
+        var started = DateTimeOffset.Parse("2026-11-10T08:00:00Z");
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            MergedHead(5, "fyrd/shared-memory", started.AddDays(-3)),
+            MergedHead(6, "fyrd/shared-memory", null),
+            MergedHead(7, "fyrd/shared-memory", started.AddHours(1)),
+            OpenHead(8, "fyrd/shared-memory", "main"),
+        ];
+        var raw = LiveBuilderRaw.Replace("{\"session_context\"", $"{{\"created_at\":\"{started:O}\",\"session_context\"");
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        // The live view still shows every branch match; only the session's own are remembered.
+        Assert.Equal(["https://github.com/acme/widgets/pull/5", "https://github.com/acme/widgets/pull/6",
+            "https://github.com/acme/widgets/pull/7", "https://github.com/acme/widgets/pull/8"], _state.Sessions.Single().PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/7", "https://github.com/acme/widgets/pull/8"],
+            new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
     [Fact]
     public async Task Poll_ViewUnion_ListsALivePrOnce_EvenWhenTheBlockSpelledItInAnotherCase()
     {
