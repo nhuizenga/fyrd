@@ -77,4 +77,14 @@ public sealed class CheckoutsSkillTests : IDisposable
         foreach (var p in RepoSeeds.Personas(_home.Paths))
             Assert.Empty(PullRequestBlock.Parse(p.Definition));
     }
+
+    /// <summary>The personas whose sessions push branches or open pull requests themselves point at the skill.</summary>
+    [Theory]
+    [InlineData("monitor")]
+    [InlineData("researcher")]
+    public void ThePersonasThatPushOrOpenPrs_PointAtTheSkill(string id)
+    {
+        var d = RepoSeeds.Personas(_home.Paths).Single(p => p.Id == id).Definition;
+        Assert.Contains("\n\nAfter you or a worker create, push or switch a branch, add a worktree or open a pull request, run the `fyrd:checkouts` skill yourself, if your skill list has it.\n\n", d, StringComparison.Ordinal);
+    }
 }
