@@ -219,3 +219,63 @@ Describe 'Get-ReleaseArguments' {
         { Get-ReleaseArguments -Repo 'o/r' -Tag 'v1.2.3' -Target "$($script:sha)`n" -Assets @($script:a1) } | Should -Throw '*full commit SHA*'
     }
 }
+
+Describe 'Assert-TagOnTarget' {
+    BeforeAll {
+        $script:target = 'a' * 40
+        $script:other = 'b' * 40
+        $script:tagObject = 'c' * 40
+        # A fake gh api: answers each path from $Answers, and 404s for anything else.
+        function New-FakeApi {
+            param([hashtable]$Answers)
+            $log = [System.Collections.Generic.List[string]]::new()
+            $script:asked = $log
+            {
+                param($Path)
+                $log.Add($Path)
+                if ($Answers.ContainsKey($Path)) { @{ ExitCode = 0; Output = ($Answers[$Path] | ConvertTo-Json -Depth 5) } }
+                else { @{ ExitCode = 1; Output = 'gh: Not Found (HTTP 404)' } }
+            }.GetNewClosure()
+        }
+    }
+    It 'is missing when the tag does not exist, so the release creates it on the target' {
+        Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke (New-FakeApi @{}) | Should -Be 'missing'
+        $script:asked | Should -Be @('repos/o/r/git/ref/tags/v1.2.3')
+    }
+    It 'is on-target when a lightweight tag is on the target commit' {
+        $api = New-FakeApi @{ 'repos/o/r/git/ref/tags/v1.2.3' = @{ object = @{ type = 'commit'; sha = $script:target } } }
+        Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api | Should -Be 'on-target'
+    }
+    It 'throws when a lightweight tag is on another commit' {
+        $api = New-FakeApi @{ 'repos/o/r/git/ref/tags/v1.2.3' = @{ object = @{ type = 'commit'; sha = $script:other } } }
+        { Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api } |
+            Should -Throw "*already exists in o/r on commit $($script:other), not on $($script:target)*"
+    }
+    It 'follows an annotated tag to its commit' {
+        $api = New-FakeApi @{
+            'repos/o/r/git/ref/tags/v1.2.3'                 = @{ object = @{ type = 'tag'; sha = $script:tagObject } }
+            "repos/o/r/git/tags/$($script:tagObject)"       = @{ object = @{ type = 'commit'; sha = $script:target } }
+        }
+        Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api | Should -Be 'on-target'
+        $script:asked | Should -Be @('repos/o/r/git/ref/tags/v1.2.3', "repos/o/r/git/tags/$($script:tagObject)")
+    }
+    It 'throws when an annotated tag is on another commit' {
+        $api = New-FakeApi @{
+            'repos/o/r/git/ref/tags/v1.2.3'                 = @{ object = @{ type = 'tag'; sha = $script:tagObject } }
+            "repos/o/r/git/tags/$($script:tagObject)"       = @{ object = @{ type = 'commit'; sha = $script:other } }
+        }
+        { Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api } | Should -Throw '*already exists*'
+    }
+    It 'throws when the tag points at something other than a commit' {
+        $api = New-FakeApi @{ 'repos/o/r/git/ref/tags/v1.2.3' = @{ object = @{ type = 'tree'; sha = $script:target } } }
+        { Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api } | Should -Throw '*not a commit*'
+    }
+    It 'throws when the tag cannot be read, instead of guessing' {
+        $api = { @{ ExitCode = 1; Output = 'gh: Bad credentials (HTTP 401)' } }
+        { Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api } | Should -Throw '*Could not read tag*HTTP 401*'
+    }
+    It 'throws when an annotated tag object cannot be read' {
+        $api = New-FakeApi @{ 'repos/o/r/git/ref/tags/v1.2.3' = @{ object = @{ type = 'tag'; sha = $script:tagObject } } }
+        { Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api } | Should -Throw '*Could not read tag object*'
+    }
+}

@@ -31,3 +31,10 @@ function Write-StepOutput {
         if ($Path) { Add-Content -LiteralPath $Path -Value $line }
     }
 }
+
+# Runs `gh api <path>` (a GET) and returns its exit code and combined output; tests pass their own instead.
+function Invoke-GhApi {
+    param([Parameter(Mandatory)][string]$Path)
+    $output = & gh api $Path 2>&1 | Out-String
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}

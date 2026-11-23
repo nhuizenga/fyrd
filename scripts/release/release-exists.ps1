@@ -21,13 +21,6 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 
-# Runs gh and returns its exit code and combined output; tests pass their own.
-function Invoke-GhApi {
-    param([Parameter(Mandatory)][string]$Path)
-    $output = & gh api $Path 2>&1 | Out-String
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
-}
-
 function Test-ReleaseExists {
     param(
         [Parameter(Mandatory)][string]$Repo,
