@@ -15,3 +15,5 @@ spikes/cloud-cli/out-*.txt
 # Playwright
 console/test-results/
 console/playwright-report/
+# Release assets built locally (scripts/release)
+out/
