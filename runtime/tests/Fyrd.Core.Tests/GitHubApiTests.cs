@@ -73,6 +73,10 @@ public class GitHubApiTests
         Assert.Equal(("acme", "widgets", 12), PullRequestUrl.Parse(Url));
 
     [Fact]
+    public void Url_Parse_ANumberPastIntMax_IsAGitHubException_NotAnOverflow() =>
+        Assert.Throws<GitHubException>(() => PullRequestUrl.Parse("https://github.com/acme/widgets/pull/99999999999"));
+
+    [Fact]
     public async Task Get_DraftOpenWithPassingChecks()
     {
         var (api, graph, _) = Make();
@@ -150,7 +154,7 @@ public class GitHubApiTests
         graph.Then("""
             {"data":{"repository":{"defaultBranchRef":{"name":"main"},
               "all":{"nodes":[
-                {"url":"https://github.com/acme/widgets/pull/13","number":13,"title":"old","state":"MERGED","isDraft":false,"headRefName":"fyrd/a","baseRefName":"main","isCrossRepository":false},
+                {"url":"https://github.com/acme/widgets/pull/13","number":13,"title":"old","state":"MERGED","isDraft":false,"headRefName":"fyrd/a","baseRefName":"main","isCrossRepository":false,"createdAt":"2026-11-01T09:30:00Z"},
                 {"url":"https://github.com/acme/widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":true,"headRefName":"fyrd/b","baseRefName":"fyrd/a","isCrossRepository":false},
                 {"url":"https://github.com/acme/widgets/pull/16","number":16,"title":"fork","state":"OPEN","isDraft":false,"headRefName":"fyrd/f","baseRefName":"main","isCrossRepository":true},
                 {"url":"not a url","headRefName":"fyrd/c"},
@@ -168,6 +172,8 @@ public class GitHubApiTests
         var merged = list.Prs[0];
         Assert.Equal(("fyrd/a", "main", "merged", false), (merged.Branch, merged.Base, merged.State, merged.CrossRepository));
         Assert.Equal("none", merged.Status!.Checks); // light: no rollup for non-open PRs
+        Assert.Equal(DateTimeOffset.Parse("2026-11-01T09:30:00Z"), merged.CreatedAt);
+        Assert.Null(list.Prs[1].CreatedAt);
         var open = list.Prs[1];
         Assert.Equal(("fyrd/b", "fyrd/a", "open"), (open.Branch, open.Base, open.State));
         Assert.Equal("failing", open.Status!.Checks); // heavy: joined by URL
@@ -178,8 +184,30 @@ public class GitHubApiTests
         using var body = JsonDocument.Parse(Assert.Single(graph.Requests).Body!);
         var q = body.RootElement.GetProperty("query").GetString()!;
         Assert.Contains("all:pullRequests(first:100", q);
+        Assert.Contains("isCrossRepository createdAt}", q);
         Assert.Contains("open:pullRequests(first:5,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC})", q);
         Assert.Contains("defaultBranchRef{name}", q);
+    }
+
+    [Fact]
+    public async Task List_AndGet_LowerCaseTheUrlsGitHubSpellsInMixedCase()
+    {
+        var (api, graph, _) = Make();
+        graph.Then("""
+            {"data":{"repository":{"defaultBranchRef":{"name":"main"},
+              "all":{"nodes":[{"url":"https://github.com/Acme/Widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":false,"headRefName":"fyrd/b","baseRefName":"main","isCrossRepository":false}]},
+              "open":{"nodes":[{"url":"https://github.com/Acme/Widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":false,"headRefName":"fyrd/b","baseRefName":"main",
+                 "mergeable":"CONFLICTING","commits":{"nodes":[]}}]}}}}
+            """);
+        graph.Then(Get(Pr()));
+
+        var pr = Assert.Single((await api.ListAsync("Acme/Widgets")).Prs);
+        var read = await api.GetAsync("https://github.com/ACME/widgets/pull/12");
+
+        Assert.Equal("https://github.com/acme/widgets/pull/14", pr.Url);
+        Assert.Equal("https://github.com/acme/widgets/pull/14", pr.Status!.Url);
+        Assert.Equal("conflicting", pr.Status.Mergeable); // still joined with the heavy alias
+        Assert.Equal("https://github.com/acme/widgets/pull/12", read.Url);
     }
 
     [Fact]
@@ -284,6 +312,7 @@ public class GitHubApiTests
         graph.Then("""{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository"}]}""");
         var e = await Assert.ThrowsAsync<GitHubException>(() => api.GetAsync(Url));
         Assert.Equal("GitHub token lacks access to acme/widgets.", e.Message);
+        Assert.IsNotType<GitHubPullRequestNotFoundException>(e); // a hidden repo is not proof the PR does not exist
     }
 
     [Fact]
@@ -291,7 +320,7 @@ public class GitHubApiTests
     {
         var (api, graph, _) = Make();
         graph.Then("""{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND","path":["repository","pullRequest"],"message":"Could not resolve to a PullRequest with the number of 12."}]}""");
-        var e = await Assert.ThrowsAsync<GitHubException>(() => api.GetAsync(Url));
+        var e = await Assert.ThrowsAsync<GitHubPullRequestNotFoundException>(() => api.GetAsync(Url));
         Assert.Equal($"GitHub has no pull request at {Url}.", e.Message);
     }
 

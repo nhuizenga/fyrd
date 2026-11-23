@@ -21,6 +21,8 @@ You are the coordinator; workers (see Workers) do the research and write the pla
 6. **Review the plan.** Start a Reviewer subagent on the plan (see Persona subagents). Ask the owner about every question it says only the owner can answer, and about any finding you'd reject or that would change the scope. Then start a fresh worker `revise: plan` to make the suggested changes and your owner's answers, commit and push. If the review found anything **Blocking**, review the revised plan again with a fresh Reviewer subagent; stop after two rounds and tell the owner what is still open.
 7. **Publish.** Publish the final plan as a claude.ai artifact yourself (the Artifact tool) from the file the worker reports. When done, say so in your final reply with the artifact link, the branch, the file path, a short summary and what the review changed, then stop. If your session has no repo, say that nothing was committed. If you can't publish an artifact, put the whole plan in your final reply and say why.
 
+After you or a worker change a branch, worktree or pull request, run `fyrd:checkouts` if you have it.
+
 # Persona subagents
 
 You run the Reviewer persona as a subagent in your own session; no other session is started.

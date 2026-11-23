@@ -46,7 +46,8 @@ public static class HubNotifications
         return new HubNotification($"{s.Id}:{turn.Uuid}", s.Id, title, needs, text, turn.CreatedAt);
     }
 
-    private static bool IsSubagent(SessionEvent e) => Str(e.Raw, "parent_tool_use_id") is not null;
+    /// <summary>A subagent's or worker's message inside the session (it carries the tool call it answers), not the session's own reply.</summary>
+    internal static bool IsSubagent(SessionEvent e) => Str(e.Raw, "parent_tool_use_id") is not null;
 
     private static string? Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String

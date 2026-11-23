@@ -5,15 +5,18 @@ using Fyrd.Core.CloudSessions;
 namespace Fyrd.Core.Hub;
 
 /// <summary>
-/// One hub poll pass: captures <c>fyrd-remember</c> blocks from hub sessions, finds pending <c>AskUserQuestion</c>
-/// items, publishes the session list to <see cref="HubState"/>, and posts memory updates to the Controller.
-/// A peasant's <c>scope: shared</c> block goes to <see cref="PendingMemory"/> instead of shared memory.
+/// One hub poll pass: captures <c>fyrd-remember</c> and <c>fyrd-prs</c> blocks from hub sessions, finds pending
+/// <c>AskUserQuestion</c> items, publishes the session list to <see cref="HubState"/>, and posts memory updates to the
+/// Controller. A peasant's <c>scope: shared</c> block goes to <see cref="PendingMemory"/> instead of shared memory; a
+/// <c>fyrd-prs</c> block's PRs and the session's own PRs among those found on its branches (see <c>RememberOwned</c>)
+/// go to <see cref="SessionPullRequests"/>.
 /// Passes must run sequentially (the per-session windows and the cursor file are not locked).
 /// </summary>
 public sealed partial class HubRunner(
     ICloudSessions cloud, HubMemory memory, HubPersonas personas, ControllerManager controller,
     HubState state, FyrdPaths paths, TimeProvider time, CostLedger ledger, CostGuard guard, PendingMemory pending,
-    IOwnerMessages owner, OwnedPullRequests? ownedPrs = null, NotificationDismissals? dismissals = null)
+    IOwnerMessages owner, OwnedPullRequests? ownedPrs = null, NotificationDismissals? dismissals = null,
+    SessionPullRequests? sessionPrs = null)
 {
     private const string HubTag = "fyrd-hub";
     private const string RoleTagPrefix = "fyrd-role-";
@@ -44,6 +47,7 @@ public sealed partial class HubRunner(
     private Dictionary<string, string>? _cursors;
     private string? _controllerId;
     private readonly NotificationDismissals _dismissals = dismissals ?? new(paths);
+    private readonly SessionPullRequests _sessionPrs = sessionPrs ?? new(paths, time);
 
     [GeneratedRegex("^[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex ScopeRegex();
@@ -125,6 +129,7 @@ public sealed partial class HubRunner(
                         // The repo's listing is fetched once, up front and concurrently; wait for it so it is not fetched twice.
                         if (repo is not null && ownedWarm.TryGetValue(repo, out var warm)) await warm;
                         owned = await ownedPrs.FindOwnedAsync(repo, Branches(s.Raw), ct);
+                        RememberOwned(s, owned);
                     }
                     views.Add(View(s, w.LastActivity, owned));
                     // A can_use_tool left unanswered by an interrupt stays in the log; only a session that is actually
@@ -180,7 +185,13 @@ public sealed partial class HubRunner(
 
         // Separate tries: a failed or slow instructions refresh must not skip the memory update for the pass.
         var liveIds = sessions.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var post in new Func<Task>[] { () => PostInstructionsRefreshAsync(sessions, ct), () => PostMemoryUpdateAsync(liveIds, ct) })
+        // A session this pass could not read is alive as far as anyone knows: only the cloud's own answer reaps one.
+        var reapLive = liveIds.Concat(failed).ToHashSet(StringComparer.Ordinal);
+        foreach (var post in new Func<Task>[]
+                 {
+                     () => PostInstructionsRefreshAsync(sessions, ct), () => PostMemoryUpdateAsync(liveIds, ct),
+                     () => _sessionPrs.ReapAsync(cloud, reapLive, ct),
+                 })
         {
             try { await post(); }
             catch (Exception e) when (e is not (CloudSessionAuthException or ClaudeAuthMissingException)
@@ -331,7 +342,10 @@ public sealed partial class HubRunner(
         return events;
     }
 
-    /// <summary>Persists the cursor after each event that added memory or queued a proposal, so a later failure never re-adds it.</summary>
+    /// <summary>
+    /// Persists the cursor after each event that added memory, queued a proposal or added a PR relationship, so a later
+    /// failure never re-adds it (re-adding a PR would be harmless anyway: the cache is a set).
+    /// </summary>
     private void Capture(CloudSession s, IEnumerable<SessionEvent> events, Dictionary<string, string> cursors)
     {
         var role = Role(s);
@@ -358,6 +372,10 @@ public sealed partial class HubRunner(
                 memory.Add(scope, d.Text, source, at);
                 consumed = true;
             }
+            // Only the session's own reply names its PRs: a subagent's or worker's message (it may be about any branch) does not.
+            var prs = HubNotifications.IsSubagent(e) ? [] : PullRequestBlock.Parse(e.Text);
+            if (prs.Count > 0 && _sessionPrs.Add(s.Id, prs, SessionPullRequests.FromBlock, e.CreatedAt == default ? null : e.CreatedAt).Count > 0)
+                consumed = true;
             if (consumed && e.Uuid.Length > 0)
             {
                 cursors[s.Id] = e.Uuid;
@@ -406,17 +424,63 @@ public sealed partial class HubRunner(
         foreach (var id in _windows.Keys.Where(id => !live.Contains(id)).ToList()) _windows.Remove(id);
     }
 
-    /// <summary>A session's pull requests are the ones found on its repo and branches (the cloud API reports none itself).</summary>
+    /// <summary>
+    /// Caches the PRs the branch matching found that are this session's own: a relationship stays once it exists. A direct
+    /// match is by branch name only, so it is never cached when its head is in a fork (a fork's branch merely shares the
+    /// name) or is the repo's default branch (a session on <c>main</c> matches every PR from <c>main</c>), or when the
+    /// listing did not say which branch is the default. Branch names are also reused (a recycled peasant keeps
+    /// <c>fyrd/&lt;title&gt;</c>), so any other direct match is cached only while it is open, or when it was opened at or
+    /// after the session was created; a merged or closed PR from before the session, or one with no known creation time, is
+    /// shown while the matching finds it but never cached. Stack matches are always open same-repo PRs (the walk ignores
+    /// merged, closed and fork PRs); one is cached only when it is reachable from a direct match on a branch that is not the
+    /// default (<see cref="OwnedSet.OwnStacked"/>), so a PR from <c>main</c> to <c>release</c> does not bring in its neighbours.
+    /// </summary>
+    private void RememberOwned(CloudSession s, OwnedSet owned)
+    {
+        if (owned.Urls.Count == 0) return;
+        var stacked = owned.Stacked.ToHashSet(StringComparer.Ordinal);
+        var ownStacked = owned.OwnStacked.ToHashSet(StringComparer.Ordinal);
+        var direct = owned.Direct.ToDictionary(p => p.Url, StringComparer.Ordinal);
+        var sessionCreated = CreatedAt(s.Raw);
+        // One at a time, in the listing's order, so the cache keeps that order; only a new PR writes the file.
+        foreach (var url in owned.Urls)
+        {
+            if (stacked.Contains(url))
+            {
+                if (ownStacked.Contains(url)) _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromStack);
+            }
+            else if (direct.TryGetValue(url, out var pr) && OwnDirectMatch(pr, owned.DefaultBranch, sessionCreated))
+                _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromBranch);
+        }
+    }
+
+    private static bool OwnDirectMatch(PullRequestHead pr, string? defaultBranch, DateTimeOffset? sessionCreated) =>
+        !pr.CrossRepository && !string.IsNullOrEmpty(defaultBranch) && pr.Branch != defaultBranch
+        && (pr.State == "open" || (pr.CreatedAt is { } opened && sessionCreated is { } created && opened >= created));
+
+    /// <summary>
+    /// A session's pull requests: the ones found now on its repo and branches (the cloud API reports none itself), then
+    /// every other one cached for it (<see cref="SessionPullRequests"/>: named in a <c>fyrd-prs</c> block, or found on its
+    /// branches before), oldest first. A cached PR the matching no longer finds counts as stacked when it was cached as one.
+    /// </summary>
     private HubSessionView View(CloudSession s, DateTimeOffset? lastActivity, OwnedSet? owned = null)
     {
         var (repo, branch) = RepoAndBranch(s.Raw);
-                return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
+        var urls = (owned?.Urls ?? []).ToList();
+        var stacked = (owned?.Stacked ?? []).ToList();
+        foreach (var cached in _sessionPrs.For(s.Id))
+        {
+            if (urls.Contains(cached.Url, StringComparer.OrdinalIgnoreCase)) continue;
+            urls.Add(cached.Url);
+            if (cached.Source == SessionPullRequests.FromStack) stacked.Add(cached.Url);
+        }
+        return new HubSessionView(s.Id, Title(s), Role(s) ?? "", s.SessionStatus ?? "unknown", repo, branch,
             CreatedAt(s.Raw), lastActivity, s.Tags.ToList())
         {
             Repos = Repos(s.Raw),
             Branches = Branches(s.Raw),
-            PullRequests = owned?.Urls ?? [],
-            StackedPullRequests = owned?.Stacked ?? [],
+            PullRequests = urls,
+            StackedPullRequests = stacked,
         };
     }
 

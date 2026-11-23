@@ -576,7 +576,7 @@ public sealed class HubSeedTests : IDisposable
     [InlineData("controller", 2600)]
     [InlineData("investigator", 2300)]
     [InlineData("monitor", 2070)]
-    [InlineData("researcher", 2430)]
+    [InlineData("researcher", 2446)]
     [InlineData("reviewer", 2780)]
     [InlineData("tuner", 3040)]
     [InlineData("validator", 2807)]

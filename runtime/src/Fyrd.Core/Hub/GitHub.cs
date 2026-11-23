@@ -53,6 +53,9 @@ public sealed record FailingCheck(string Name, string? Url);
 
 public class GitHubException(string message) : Exception(message);
 
+/// <summary>GitHub can read the repo but has no pull request with that number.</summary>
+public sealed class GitHubPullRequestNotFoundException(string url) : GitHubException($"GitHub has no pull request at {url}.");
+
 /// <summary>No GitHub token is set, so nothing was sent to GitHub.</summary>
 public sealed class GitHubNotConfiguredException() : GitHubException("GitHub is not configured. Set GH_TOKEN before /fyrd:up.");
 
@@ -107,6 +110,9 @@ public sealed record PullRequestHead(string Url, string Branch)
     public bool CrossRepository { get; init; }
     public PullRequestStatus? Status { get; init; }
 
+    /// <summary>When the PR was opened, or null when the listing did not say.</summary>
+    public DateTimeOffset? CreatedAt { get; init; }
+
     /// <summary>An open PR the listing did not read in full (no checks, review or mergeability): read it on its own when needed.</summary>
     public bool Partial { get; init; }
 }
@@ -142,12 +148,22 @@ public static partial class PullRequestUrl
     /// <summary>Plain <c>https://github.com/{owner}/{repo}/pull/{n}</c> only, so nothing else ever reaches a query.</summary>
     public static bool IsValid(string? url) => url is not null && Pattern().IsMatch(url);
 
+    /// <summary>
+    /// The one spelling Fyrd keeps for a PR URL: all lower case. GitHub owner and repo names are case-insensitive (links and
+    /// API calls work in any case), so every URL entering the hub (a <c>fyrd-prs</c> block, a GitHub listing or read, the
+    /// cache file, a console request) is lower-cased, and URLs then compare exactly everywhere.
+    /// </summary>
+    public static string Canonical(string url) => url.ToLowerInvariant();
+
     /// <summary>Owner, repo and number of a valid URL; throws <see cref="GitHubException"/> for anything else.</summary>
     public static (string Owner, string Repo, int Number) Parse(string url)
     {
         if (!IsValid(url)) throw new GitHubException("Not a GitHub pull request URL.");
         var parts = url["https://github.com/".Length..].Split('/');
-        return (parts[0], parts[1], int.Parse(parts[3]));
+        // The pattern allows any digits: a number past int.MaxValue is no PR, and must not escape as an OverflowException.
+        if (!int.TryParse(parts[3], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number))
+            throw new GitHubException("Not a GitHub pull request URL.");
+        return (parts[0], parts[1], number);
     }
 }
 

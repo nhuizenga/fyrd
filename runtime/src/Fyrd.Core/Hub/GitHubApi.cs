@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -28,7 +29,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
           rateLimit{cost remaining resetAt}
           repository(owner:$owner,name:$name){
             defaultBranchRef{name}
-            all:pullRequests(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{url number title state isDraft headRefName baseRefName isCrossRepository}}
+            all:pullRequests(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{url number title state isDraft headRefName baseRefName isCrossRepository createdAt}}
             open:pullRequests(first:5,states:OPEN,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{
         """ + PrFields + """
         }}}}
@@ -73,12 +74,13 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
         var open = new Dictionary<string, PullRequestStatus>(StringComparer.Ordinal);
         if (Path(data, "repository", "open", "nodes", out var openNodes) && openNodes.ValueKind == JsonValueKind.Array)
             foreach (var e in openNodes.EnumerateArray())
-                if (Str(e, "url") is { } u && PullRequestUrl.IsValid(u)) open[u] = ParseStatus(u, e);
+                if (Str(e, "url") is { } u && PullRequestUrl.IsValid(u)) open[PullRequestUrl.Canonical(u)] = ParseStatus(PullRequestUrl.Canonical(u), e);
         var heads = new List<PullRequestHead>();
         if (Path(data, "repository", "all", "nodes", out var nodes) && nodes.ValueKind == JsonValueKind.Array)
             foreach (var e in nodes.EnumerateArray())
             {
-                var url = Str(e, "url");
+                // GitHub spells owner and repo as they are named (mixed case); Fyrd keeps PR URLs in lower case.
+                var url = Str(e, "url") is { } raw ? PullRequestUrl.Canonical(raw) : null;
                 var branch = Str(e, "headRefName");
                 if (!PullRequestUrl.IsValid(url) || string.IsNullOrEmpty(branch)) continue;
                 var light = ParseStatus(url!, e);
@@ -89,6 +91,8 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                     CrossRepository = e.TryGetProperty("isCrossRepository", out var x) && x.ValueKind == JsonValueKind.True,
                     Status = open.TryGetValue(url!, out var rich) ? rich : light,
                     Partial = rich is null && light.State == "open",
+                    CreatedAt = Str(e, "createdAt") is { } c && DateTimeOffset.TryParse(c, CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind, out var created) ? created : null,
                 });
             }
         var def = Path(data, "repository", "defaultBranchRef", "name", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
@@ -99,7 +103,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
     {
         var (owner, repo, number) = PullRequestUrl.Parse(url);
         using var data = await QueryAsync(GetQuery, new { owner, name = repo, number }, $"{owner}/{repo}", ct, url);
-        return ParseStatus(url, NodeOf(Data(data), url));
+        return ParseStatus(PullRequestUrl.Canonical(url), NodeOf(Data(data), url));
     }
 
     public async Task MarkReadyAsync(string url, CancellationToken ct = default)
@@ -129,7 +133,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
 
     private static JsonElement NodeOf(JsonElement data, string url) =>
         Path(data, "repository", "pullRequest", out var pr) && pr.ValueKind == JsonValueKind.Object
-            ? pr : throw new GitHubException($"GitHub has no pull request at {url}.");
+            ? pr : throw new GitHubPullRequestNotFoundException(url);
 
     /// <summary>Maps one GraphQL pull request node. Check rules: any running check means pending, any failed one failing.</summary>
     public static PullRequestStatus ParseStatus(string url, JsonElement r)
@@ -225,7 +229,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                 doc.Dispose();
                 if (type == "RATE_LIMITED") throw new GitHubRateLimitException(_time.GetUtcNow().AddMinutes(1));
                 if (type == "NOT_FOUND" && prUrl is not null && missingPr)
-                    throw new GitHubException($"GitHub has no pull request at {prUrl}.");
+                    throw new GitHubPullRequestNotFoundException(prUrl);
                 if (type == "NOT_FOUND" || type == "FORBIDDEN") throw new GitHubException($"GitHub token lacks access to {subject}.");
                 throw new GitHubException($"GitHub refused the request: {message}");
             }

@@ -37,6 +37,19 @@ public class PullRequestStacksTests
     }
 
     [Fact]
+    public void OwnStacked_LeavesOutWhatOnlyADefaultBranchHeadReaches_ButStackedStillHasIt()
+    {
+        var prs = new[] { Pr(7, "release", "prod"), Pr(8, "main", "release"), Pr(9, "a", "main"), Pr(10, "b", "a") };
+        var set = Owned(["main", "a"], prs);
+        Assert.Equal([Url(7), Url(10)], set.Stacked);
+        Assert.Equal([Url(10)], set.OwnStacked);
+        // With no default branch known, the walk can link through main, so nothing it finds is the session's for sure.
+        var unknown = PullRequestStacks.Owned(new PullRequestListing(null, prs), ["a"]);
+        Assert.Equal([Url(7), Url(8), Url(10)], unknown.Stacked);
+        Assert.Empty(unknown.OwnStacked);
+    }
+
+    [Fact]
     public void AThreeDeepChainIsFollowedBothWays()
     {
         var prs = new[] { Pr(1, "a", "main"), Pr(2, "b", "a"), Pr(3, "c", "b"), Pr(4, "d", "c") };

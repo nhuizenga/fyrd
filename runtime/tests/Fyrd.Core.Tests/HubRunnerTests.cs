@@ -935,4 +935,283 @@ public sealed class HubRunnerTests : IDisposable
         Assert.Single(_state.Sessions);
         Assert.Contains("interrupt down", _state.LastError);
     }
+
+    // ---- fyrd-prs blocks and the session → PR cache ----
+
+    private static string PrBlock(params string[] urls) => "My checkouts.\n```fyrd-prs\n" + string.Join("\n", urls) + "\n```\n";
+
+    private string SessionPrsFile => Path.Combine(_home.Paths.HubDir, "session-prs.json");
+
+    [Fact]
+    public async Task Poll_PrBlock_InAnAssistantEvent_BecomesTheSessionsPr_AndIsCached()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "researcher-1", role: "researcher"), Hub("session_s2", "builder-2", role: "builder"));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/acme/widgets/pull/12", "not a url", "https://github.com/acme/other/pull/3"));
+        // A user turn is not the session's own claim.
+        _cloud.AddEvent("session_s2", new SessionEvent("u1", "user", DateTimeOffset.UnixEpoch, PrBlock("https://github.com/acme/widgets/pull/99"), FakeCloudSessions.Empty));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/12", "https://github.com/acme/other/pull/3"], _state.Sessions.Single(v => v.Id == "session_s1").PullRequests);
+        Assert.Empty(_state.Sessions.Single(v => v.Id == "session_s2").PullRequests);
+        var cached = new SessionPullRequests(_home.Paths, _time).For("session_s1");
+        Assert.All(cached, p => Assert.Equal(SessionPullRequests.FromBlock, p.Source));
+        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("session_s2"));
+    }
+
+    [Fact]
+    public async Task Poll_PrBlock_InASubagentsMessage_IsIgnored_ButItsRememberBlockStillCounts()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-ab12", role: "builder"));
+        // A worker's message inside the session carries the tool call it answers: it is not the session's own reply.
+        var raw = JsonDocument.Parse("""{"parent_tool_use_id":"toolu_1"}""").RootElement.Clone();
+        _cloud.AddEvent("session_s1", new SessionEvent("w1", "assistant", DateTimeOffset.UnixEpoch,
+            Remember("role", "Use pnpm.") + PrBlock("https://github.com/acme/widgets/pull/77"), raw));
+        _cloud.AddAssistantEvent("session_s1", "e2", PrBlock("https://github.com/acme/widgets/pull/12"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/12"], _state.Sessions.Single().PullRequests);
+        Assert.Single(_memory.List("builder"));
+    }
+
+    [Fact]
+    public async Task Poll_PrBlock_IsCapturedOnce_TheCursorSkipsItAfterARestart()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "researcher-1", role: "researcher"));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/acme/widgets/pull/12"));
+        await Make().PollOnceAsync(default);
+        Assert.Contains("\"e1\"", File.ReadAllText(Path.Combine(_home.Paths.HubDir, "cursors.json")), StringComparison.Ordinal);
+
+        // Lose the cache: a restarted service must not capture the old event again, only new ones.
+        File.Delete(SessionPrsFile);
+        _cloud.AddAssistantEvent("session_s1", "e2", PrBlock("https://github.com/acme/widgets/pull/13"));
+        var restarted = new HubState();
+        await new HubRunner(_cloud, _memory, _personas, _controller, restarted, _home.Paths, _time, _ledger, _guard, _pending, _owner)
+            .PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/13"], restarted.Sessions.Single().PullRequests);
+    }
+
+    [Fact]
+    public async Task Poll_PrBlock_AndARememberBlock_InOneEvent_BothCount()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("session_s1", "e1", Remember("role", "Use pnpm.") + PrBlock("https://github.com/acme/widgets/pull/12"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Single(_memory.List("builder"));
+        Assert.Equal(["https://github.com/acme/widgets/pull/12"], _state.Sessions.Single().PullRequests);
+    }
+
+    [Fact]
+    public async Task Poll_ABranchMatchedPr_StaysTheSessions_AfterTheMatchingNoLongerFindsIt()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [OpenHead(8, "fyrd/base", "main"), OpenHead(9, "fyrd/shared-memory", "fyrd/base")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+        var runner = Make(gh);
+        await runner.PollOnceAsync(default);
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+
+        // The branch's PR merged and dropped out of the listing, and the session switched branch.
+        gh.ByRepo["acme/widgets"] = [OpenHead(10, "fyrd/next", "main")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw.Replace("fyrd/shared-memory", "fyrd/next")));
+        _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
+        await runner.PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal(["https://github.com/acme/widgets/pull/10", "https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], v.PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/8"], v.StackedPullRequests);
+        var cached = new SessionPullRequests(_home.Paths, _time).For("session_s1").ToDictionary(p => p.Url, p => p.Source);
+        Assert.Equal(SessionPullRequests.FromStack, cached["https://github.com/acme/widgets/pull/8"]);
+        Assert.Equal(SessionPullRequests.FromBranch, cached["https://github.com/acme/widgets/pull/9"]);
+        Assert.Equal(SessionPullRequests.FromBranch, cached["https://github.com/acme/widgets/pull/10"]);
+        // A restart still shows them from the cache, even before GitHub is read.
+        var fresh = new HubState();
+        await new HubRunner(_cloud, _memory, _personas, _controller, fresh, _home.Paths, _time, _ledger, _guard, _pending, _owner).PollOnceAsync(default);
+        Assert.Equal(3, fresh.Sessions.Single().PullRequests.Count);
+    }
+
+    private static PullRequestHead MergedHead(int n, string head, DateTimeOffset? created) =>
+        new($"https://github.com/acme/widgets/pull/{n}", head)
+        {
+            Base = "main", State = "merged", CreatedAt = created,
+            Status = new PullRequestStatus($"https://github.com/acme/widgets/pull/{n}", n, $"PR {n}", "merged", false, "none"),
+        };
+
+    [Fact]
+    public async Task Poll_AMergedPrOnTheSessionsBranch_IsCachedOnlyWhenOpenedAfterTheSessionStarted()
+    {
+        // A recycled peasant keeps its branch name: #5 merged before this session existed, #7 was opened by it.
+        var started = DateTimeOffset.Parse("2026-11-10T08:00:00Z");
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            MergedHead(5, "fyrd/shared-memory", started.AddDays(-3)),
+            MergedHead(6, "fyrd/shared-memory", null),
+            MergedHead(7, "fyrd/shared-memory", started.AddHours(1)),
+            OpenHead(8, "fyrd/shared-memory", "main"),
+        ];
+        var raw = LiveBuilderRaw.Replace("{\"session_context\"", $"{{\"created_at\":\"{started:O}\",\"session_context\"");
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        // The live view still shows every branch match; only the session's own are remembered.
+        Assert.Equal(["https://github.com/acme/widgets/pull/5", "https://github.com/acme/widgets/pull/6",
+            "https://github.com/acme/widgets/pull/7", "https://github.com/acme/widgets/pull/8"], _state.Sessions.Single().PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/7", "https://github.com/acme/widgets/pull/8"],
+            new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
+    public async Task Poll_AnOpenForkPrOnAMatchingBranchName_IsShownButNotCached()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            OpenHead(8, "fyrd/shared-memory", "main") with { CrossRepository = true },
+            OpenHead(9, "fyrd/shared-memory", "main"),
+        ];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
+    public async Task Poll_AnOpenPrWhoseHeadIsTheDefaultBranch_IsShownButNotCached()
+    {
+        // The session is on main as well as its own branch: every open PR from main matches by name.
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [OpenHead(8, "main", "release"), OpenHead(9, "fyrd/shared-memory", "main")];
+        var raw = LiveBuilderRaw.Replace("{\"\":\"fyrd/shared-memory\"}", "{\"a\":\"fyrd/shared-memory\",\"b\":\"main\"}");
+        Assert.NotEqual(LiveBuilderRaw, raw);
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
+    public async Task Poll_PrsStackedOnlyWithADefaultBranchHead_AreShownButNotCached()
+    {
+        // main -> release (#8) walks up to the open PR whose head is release (#7). The session's own stack (#9 <- #10) is cached.
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [
+            OpenHead(7, "release", "prod"), OpenHead(8, "main", "release"),
+            OpenHead(9, "fyrd/shared-memory", "main"), OpenHead(10, "fyrd/top", "fyrd/shared-memory"),
+        ];
+        var raw = LiveBuilderRaw.Replace("{\"\":\"fyrd/shared-memory\"}", "{\"a\":\"fyrd/shared-memory\",\"b\":\"main\"}");
+        Assert.NotEqual(LiveBuilderRaw, raw);
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal([7, 8, 9, 10], v.PullRequests.Select(PullRequestStacks.Number));
+        Assert.Equal([7, 10], v.StackedPullRequests.Select(PullRequestStacks.Number));
+        var cached = new SessionPullRequests(_home.Paths, _time).For("session_s1");
+        Assert.Equal([(9, SessionPullRequests.FromBranch), (10, SessionPullRequests.FromStack)],
+            cached.Select(p => (PullRequestStacks.Number(p.Url), p.Source)));
+    }
+
+    [Fact]
+    public async Task Poll_AStackMatch_IsNotCached_WhenTheListingDidNotSayWhichBranchIsTheDefault()
+    {
+        var gh = new StubGitHub { DefaultBranch = null };
+        gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main"), OpenHead(10, "fyrd/top", "fyrd/shared-memory")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal([9, 10], _state.Sessions.Single().PullRequests.Select(PullRequestStacks.Number));
+        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("session_s1"));
+    }
+
+    [Fact]
+    public async Task Poll_ADirectMatch_IsNotCached_WhenTheListingDidNotSayWhichBranchIsTheDefault()
+    {
+        var gh = new StubGitHub { DefaultBranch = null };
+        gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("session_s1"));
+    }
+
+    [Fact]
+    public async Task Poll_ViewUnion_ListsALivePrOnce_EvenWhenTheBlockSpelledItInAnotherCase()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/ACME/Widgets/pull/9", "https://github.com/acme/elsewhere/pull/4"));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal(["https://github.com/acme/widgets/pull/9", "https://github.com/acme/elsewhere/pull/4"], v.PullRequests);
+        Assert.Empty(v.StackedPullRequests);
+        // Statuses are published for what the listing knows; the details pane reads the rest live.
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], _state.PullRequests.Keys);
+    }
+
+    [Fact]
+    public async Task Poll_ABlockUrlAndABranchMatchInAnotherCase_AreOnePr_InLowerCase_WithItsStatus()
+    {
+        var gh = new StubGitHub();
+        const string Spelled = "https://github.com/Acme/widgets/pull/1"; // as GitHub names the repo
+        gh.ByRepo["acme/widgets"] = [new(Spelled, "fyrd/shared-memory")
+        {
+            Base = "main", State = "open", Status = new PullRequestStatus(Spelled, 1, "PR 1", "open", false, "passing"),
+        }];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/ACME/Widgets/pull/1"));
+
+        await Make(gh).PollOnceAsync(default);
+
+        const string Url = "https://github.com/acme/widgets/pull/1";
+        Assert.Equal([Url], _state.Sessions.Single().PullRequests);
+        Assert.Equal([Url], _state.PullRequests.Keys);
+        Assert.Equal(Url, _state.PullRequests[Url].Url);
+        Assert.Equal([Url], new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
+    public async Task Poll_ReapsTheCacheOfArchivedAndDeletedSessions_KeepsUnreadableOnes()
+    {
+        var store = new SessionPullRequests(_home.Paths, _time);
+        foreach (var id in new[] { "session_archived", "session_deleted", "session_unreadable", "session_s1" }) store.Add(id, ["https://github.com/acme/widgets/pull/1"], SessionPullRequests.FromBlock);
+        _cloud.SetSession(Hub("session_archived", "builder-old", "archived", role: "builder"));
+        // "session_unreadable" is listed but its history read fails this pass: alive as far as anyone knows.
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", role: "builder"), Hub("session_unreadable", "builder-3", role: "builder"));
+        _cloud.ThrowOnListEventsFor("session_unreadable", new HttpRequestException("reset"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal(["session_s1", "session_unreadable"], new SessionPullRequests(_home.Paths, _time).SessionIds());
+        Assert.Equal(["https://github.com/acme/widgets/pull/1"], _state.Sessions.Single(v => v.Id == "session_unreadable").PullRequests);
+    }
+
+    [Fact]
+    public async Task Poll_ATransientErrorWhileReaping_KeepsTheCache_AndIsReported()
+    {
+        new SessionPullRequests(_home.Paths, _time).Add("session_gone", ["https://github.com/acme/widgets/pull/1"], SessionPullRequests.FromBlock);
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", role: "builder"));
+        _cloud.ThrowOnGetFor("session_gone", new CloudSessionApiException(500, "oops"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal(["session_gone"], new SessionPullRequests(_home.Paths, _time).SessionIds());
+        Assert.False(_state.SignedOut);
+    }
 }
