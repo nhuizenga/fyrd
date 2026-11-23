@@ -10,6 +10,13 @@ public sealed record OwnedSet(IReadOnlyList<string> Urls, IReadOnlyList<string> 
 
     /// <summary>The repo's default branch as the listing gave it, or null when it did not say.</summary>
     public string? DefaultBranch { get; init; }
+
+    /// <summary>
+    /// The stacked PRs reachable from a direct match whose head is a branch of the session's own, not the default branch (a
+    /// session on <c>main</c> matches every PR from <c>main</c>); empty when the listing did not say which branch is the
+    /// default. A subset of <see cref="Stacked"/>, which still walks from every open direct match for the live view.
+    /// </summary>
+    public IReadOnlyList<string> OwnStacked { get; init; } = [];
 }
 
 /// <summary>
@@ -31,9 +38,27 @@ public static class PullRequestStacks
         var direct = listing.Prs.Where(p => wanted.Contains(p.Branch)).ToList();
         var directUrls = direct.Select(p => p.Url).ToHashSet(StringComparer.Ordinal);
 
+        var starts = direct.Where(p => p.State == "open" && !p.CrossRepository).ToList();
+        var def = listing.DefaultBranch;
+        var stacked = Walk(listing, starts).Where(u => !directUrls.Contains(u)).ToList();
+        var ownStacked = string.IsNullOrEmpty(def) ? []
+            : Walk(listing, starts.Where(p => p.Branch != def)).Where(u => !directUrls.Contains(u)).ToList();
+        return new OwnedSet(
+            directUrls.Concat(stacked).Distinct(StringComparer.Ordinal).OrderBy(Number).ToList(),
+            stacked.OrderBy(Number).ToList())
+        {
+            Direct = direct,
+            DefaultBranch = def,
+            OwnStacked = ownStacked.OrderBy(Number).ToList(),
+        };
+    }
+
+    /// <summary>Every open same-repo PR reachable along stack links from <paramref name="starts"/>, the starts included.</summary>
+    private static HashSet<string> Walk(PullRequestListing listing, IEnumerable<PullRequestHead> starts)
+    {
         var openPrs = listing.Prs.Where(p => p.State == "open" && !p.CrossRepository).ToList();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var queue = new Queue<PullRequestHead>(direct.Where(p => p.State == "open" && !p.CrossRepository));
+        var queue = new Queue<PullRequestHead>(starts);
         foreach (var p in queue) seen.Add(p.Url);
         while (queue.Count > 0)
         {
@@ -41,15 +66,7 @@ public static class PullRequestStacks
             foreach (var next in Neighbours(openPrs, current, listing.DefaultBranch))
                 if (seen.Add(next.Url)) queue.Enqueue(next);
         }
-
-        var stacked = seen.Where(u => !directUrls.Contains(u)).ToList();
-        return new OwnedSet(
-            directUrls.Concat(stacked).Distinct(StringComparer.Ordinal).OrderBy(Number).ToList(),
-            stacked.OrderBy(Number).ToList())
-        {
-            Direct = direct,
-            DefaultBranch = listing.DefaultBranch,
-        };
+        return seen;
     }
 
     /// <summary>The open PR below this one (its base is that PR's head) and every open PR above it, never through the default branch.</summary>

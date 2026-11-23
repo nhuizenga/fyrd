@@ -432,19 +432,23 @@ public sealed partial class HubRunner(
     /// <c>fyrd/&lt;title&gt;</c>), so any other direct match is cached only while it is open, or when it was opened at or
     /// after the session was created; a merged or closed PR from before the session, or one with no known creation time, is
     /// shown while the matching finds it but never cached. Stack matches are always open same-repo PRs (the walk ignores
-    /// merged, closed and fork PRs) and are cached.
+    /// merged, closed and fork PRs); one is cached only when it is reachable from a direct match on a branch that is not the
+    /// default (<see cref="OwnedSet.OwnStacked"/>), so a PR from <c>main</c> to <c>release</c> does not bring in its neighbours.
     /// </summary>
     private void RememberOwned(CloudSession s, OwnedSet owned)
     {
         if (owned.Urls.Count == 0) return;
         var stacked = owned.Stacked.ToHashSet(StringComparer.Ordinal);
+        var ownStacked = owned.OwnStacked.ToHashSet(StringComparer.Ordinal);
         var direct = owned.Direct.ToDictionary(p => p.Url, StringComparer.Ordinal);
         var sessionCreated = CreatedAt(s.Raw);
         // One at a time, in the listing's order, so the cache keeps that order; only a new PR writes the file.
         foreach (var url in owned.Urls)
         {
             if (stacked.Contains(url))
-                _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromStack);
+            {
+                if (ownStacked.Contains(url)) _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromStack);
+            }
             else if (direct.TryGetValue(url, out var pr) && OwnDirectMatch(pr, owned.DefaultBranch, sessionCreated))
                 _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromBranch);
         }

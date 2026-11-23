@@ -1100,6 +1100,42 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_PrsStackedOnlyWithADefaultBranchHead_AreShownButNotCached()
+    {
+        // main -> release (#8) walks up to the open PR whose head is release (#7). The session's own stack (#9 <- #10) is cached.
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [
+            OpenHead(7, "release", "prod"), OpenHead(8, "main", "release"),
+            OpenHead(9, "fyrd/shared-memory", "main"), OpenHead(10, "fyrd/top", "fyrd/shared-memory"),
+        ];
+        var raw = LiveBuilderRaw.Replace("{\"\":\"fyrd/shared-memory\"}", "{\"a\":\"fyrd/shared-memory\",\"b\":\"main\"}");
+        Assert.NotEqual(LiveBuilderRaw, raw);
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        var v = _state.Sessions.Single();
+        Assert.Equal([7, 8, 9, 10], v.PullRequests.Select(PullRequestStacks.Number));
+        Assert.Equal([7, 10], v.StackedPullRequests.Select(PullRequestStacks.Number));
+        var cached = new SessionPullRequests(_home.Paths, _time).For("session_s1");
+        Assert.Equal([(9, SessionPullRequests.FromBranch), (10, SessionPullRequests.FromStack)],
+            cached.Select(p => (PullRequestStacks.Number(p.Url), p.Source)));
+    }
+
+    [Fact]
+    public async Task Poll_AStackMatch_IsNotCached_WhenTheListingDidNotSayWhichBranchIsTheDefault()
+    {
+        var gh = new StubGitHub { DefaultBranch = null };
+        gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main"), OpenHead(10, "fyrd/top", "fyrd/shared-memory")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal([9, 10], _state.Sessions.Single().PullRequests.Select(PullRequestStacks.Number));
+        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("session_s1"));
+    }
+
+    [Fact]
     public async Task Poll_ADirectMatch_IsNotCached_WhenTheListingDidNotSayWhichBranchIsTheDefault()
     {
         var gh = new StubGitHub { DefaultBranch = null };
