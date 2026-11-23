@@ -83,7 +83,8 @@ public sealed partial class SessionPullRequests(FyrdPaths paths, TimeProvider ti
             var blockCount = list.Count(p => p.Source == FromBlock);
             foreach (var raw in urls)
             {
-                var url = raw is null ? null : PullRequestUrl.Canonical(raw);
+                if (raw is null) continue;
+                var url = PullRequestUrl.Canonical(raw);
                 if (!IsStorable(url) || list.Any(p => p.Url == url)) continue;
                 if (source == FromBlock && blockCount >= MaxBlockPerSession) break;
                 list.Add(new SessionPullRequest(url, when, source));
