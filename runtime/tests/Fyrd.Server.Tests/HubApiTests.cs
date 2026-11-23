@@ -150,24 +150,21 @@ public class HubApiTests
     {
         using var f = new FyrdFactory();
         var hold = new TaskCompletionSource();
-        f.Owner.OnCreate = _ => hold.Task;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cliCalls = 0;
+        f.Owner.OnCreate = _ => { Interlocked.Increment(ref cliCalls); entered.TrySetResult(); return hold.Task; };
         var c = f.CreateClient();
         var first = c.PostAsync("/api/hub/controller/create", null);
-        // Wait until the first create is inside the CLI call.
-        for (var i = 0; i < 200; i++)
-        {
-            var probe = await c.PostAsync("/api/hub/controller/create", null);
-            if (probe.StatusCode == HttpStatusCode.Conflict)
-            {
-                Assert.Equal("A Controller is already being created.", (await ReadJson(probe)).GetProperty("detail").GetString());
-                hold.SetResult();
-                Assert.Equal(HttpStatusCode.OK, (await first).StatusCode);
-                Assert.Single(f.Owner.Created);
-                return;
-            }
-            await Task.Delay(10);
-        }
-        Assert.Fail("The second create was not refused with 409.");
+        // Probe only once the first create is inside the CLI call: a probe sent earlier could reach the create gate first
+        // and then wait on the held CLI call itself, since the endpoint passes no cancellation token.
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var probe = await c.PostAsync("/api/hub/controller/create", null).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(HttpStatusCode.Conflict, probe.StatusCode);
+        Assert.Equal("A Controller is already being created.", (await ReadJson(probe)).GetProperty("detail").GetString());
+        hold.SetResult();
+        Assert.Equal(HttpStatusCode.OK, (await first.WaitAsync(TimeSpan.FromSeconds(10))).StatusCode);
+        Assert.Equal(1, cliCalls);
+        Assert.Single(f.Owner.Created);
     }
 
     [Fact]

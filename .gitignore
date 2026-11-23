@@ -5,6 +5,8 @@ node_modules/
 .superpowers/
 bin/
 obj/
+# dotnet test (--blame-hang-timeout writes hang dumps here)
+TestResults/
 runtime/src/Fyrd.Server/wwwroot/
 console/node_modules/
 spikes/cloud-sessions/out/
