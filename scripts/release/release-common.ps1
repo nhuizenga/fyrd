@@ -1,10 +1,18 @@
-# Functions the release scripts share; dot-source it. It has no parameters, so it sets nothing in the caller's scope.
+# Functions the release scripts share; dot-source it. It has no parameters, so it sets nothing in the caller's scope
+# beyond these functions and patterns.
+
+# MAJOR.MINOR.PATCH and its tag. [0-9], not \d (which also matches other scripts' digits), and \z, not $ (which also
+# matches before a final newline).
+$script:VersionPattern = '^[0-9]+\.[0-9]+\.[0-9]+\z'
+$script:TagPattern = '^v[0-9]+\.[0-9]+\.[0-9]+\z'
+$script:ShaPattern = '^[0-9a-f]{40}\z'
+$script:RepoPattern = '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z'
 
 function Get-PluginVersion {
     param([Parameter(Mandatory)][string]$Path)
     $json = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     $version = [string]$json.version
-    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    if ($version -notmatch $script:VersionPattern) {
         throw "The version in $Path must be MAJOR.MINOR.PATCH, not '$version'."
     }
     $version

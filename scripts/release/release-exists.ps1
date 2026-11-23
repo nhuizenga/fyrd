@@ -34,8 +34,8 @@ function Test-ReleaseExists {
         [Parameter(Mandatory)][string]$Tag,
         [scriptblock]$Invoke = { param($Path) Invoke-GhApi -Path $Path }
     )
-    if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Repo must be owner/name, not '$Repo'." }
-    if ($Tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Tag must be vMAJOR.MINOR.PATCH, not '$Tag'." }
+    if ($Repo -notmatch $script:RepoPattern) { throw "Repo must be owner/name, not '$Repo'." }
+    if ($Tag -cnotmatch $script:TagPattern) { throw "Tag must be vMAJOR.MINOR.PATCH, not '$Tag'." }
     $r = & $Invoke "repos/$Repo/releases/tags/$Tag"
     if ($r.ExitCode -eq 0) { return $true }
     if ($r.Output -match 'HTTP 404') { return $false }

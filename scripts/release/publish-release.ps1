@@ -19,6 +19,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'release-common.ps1')
 
 function Get-ReleaseArguments {
     param(
@@ -27,8 +28,8 @@ function Get-ReleaseArguments {
         [Parameter(Mandatory)][string]$Target,
         [Parameter(Mandatory)][string[]]$Assets
     )
-    if ($Tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Tag must be vMAJOR.MINOR.PATCH, not '$Tag'." }
-    if ($Target -notmatch '^[0-9a-f]{40}$') { throw "Target must be a full commit SHA, not '$Target'." }
+    if ($Tag -cnotmatch $script:TagPattern) { throw "Tag must be vMAJOR.MINOR.PATCH, not '$Tag'." }
+    if ($Target -cnotmatch $script:ShaPattern) { throw "Target must be a full commit SHA, not '$Target'." }
     foreach ($a in $Assets) { if (-not (Test-Path -LiteralPath $a -PathType Leaf)) { throw "Asset not found: $a" } }
     @('release', 'create', $Tag) + $Assets + @('--repo', $Repo, '--title', $Tag, '--target', $Target, '--generate-notes')
 }

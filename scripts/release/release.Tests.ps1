@@ -45,13 +45,21 @@ Describe 'Get-PluginVersion' {
         '{ "version": "0.2.57-beta; rm" }' | Set-Content $p
         { Get-PluginVersion -Path $p } | Should -Throw '*MAJOR.MINOR.PATCH*'
     }
+    It 'rejects a version with a trailing newline or non-ASCII digits' {
+        $p = Join-Path $TestDrive 'newline.json'
+        '{ "version": "0.2.57\n" }' | Set-Content $p
+        { Get-PluginVersion -Path $p } | Should -Throw '*MAJOR.MINOR.PATCH*'
+        $p = Join-Path $TestDrive 'arabic.json'
+        '{ "version": "0.2.\u0665" }' | Set-Content $p
+        { Get-PluginVersion -Path $p } | Should -Throw '*MAJOR.MINOR.PATCH*'
+    }
     It 'rejects a missing version' {
         $p = Join-Path $TestDrive 'none.json'
         '{ "name": "fyrd" }' | Set-Content $p
         { Get-PluginVersion -Path $p } | Should -Throw
     }
     It 'reads the repo''s own plugin.json' {
-        Get-PluginVersion -Path (Join-Path $PSScriptRoot '../../.claude-plugin/plugin.json') | Should -Match '^\d+\.\d+\.\d+$'
+        Get-PluginVersion -Path (Join-Path $PSScriptRoot '../../.claude-plugin/plugin.json') | Should -Match $script:VersionPattern
     }
 }
 
@@ -84,6 +92,8 @@ Describe 'Test-ReleaseExists' {
         $script:called = $false
         { Test-ReleaseExists -Repo 'o/r/../x' -Tag 'v1.0.0' -Invoke { $script:called = $true } } | Should -Throw
         { Test-ReleaseExists -Repo 'o/r' -Tag '1.0.0' -Invoke { $script:called = $true } } | Should -Throw
+        { Test-ReleaseExists -Repo 'o/r' -Tag "v1.0.0`n" -Invoke { $script:called = $true } } | Should -Throw
+        { Test-ReleaseExists -Repo "o/r`n" -Tag 'v1.0.0' -Invoke { $script:called = $true } } | Should -Throw
         $script:called | Should -BeFalse
     }
 }
@@ -203,5 +213,9 @@ Describe 'Get-ReleaseArguments' {
         { Get-ReleaseArguments -Repo 'o/r' -Tag 'v1.2.3' -Target $script:sha -Assets @('nope.zip') } | Should -Throw '*Asset not found*'
         { Get-ReleaseArguments -Repo 'o/r' -Tag 'latest' -Target $script:sha -Assets @($script:a1) } | Should -Throw
         { Get-ReleaseArguments -Repo 'o/r' -Tag 'v1.2.3' -Target 'main' -Assets @($script:a1) } | Should -Throw
+    }
+    It 'refuses a tag or target with a trailing newline' {
+        { Get-ReleaseArguments -Repo 'o/r' -Tag "v1.2.3`n" -Target $script:sha -Assets @($script:a1) } | Should -Throw '*vMAJOR*'
+        { Get-ReleaseArguments -Repo 'o/r' -Tag 'v1.2.3' -Target "$($script:sha)`n" -Assets @($script:a1) } | Should -Throw '*full commit SHA*'
     }
 }
