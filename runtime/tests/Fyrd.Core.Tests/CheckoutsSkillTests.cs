@@ -59,10 +59,13 @@ public sealed class CheckoutsSkillTests : IDisposable
         Assert.Contains($"at most {SessionPullRequests.MaxBlockPerSession} from blocks per session", body, StringComparison.Ordinal);
         Assert.Contains("If you found none, say so and write no block.", body, StringComparison.Ordinal);
         Assert.Contains("not a worker's or subagent's", body, StringComparison.Ordinal);
-        // Branch names are reused: a closed or merged PR counts only when its head is in the branch's history or it is new.
-        Assert.Contains("keep every open one, but keep a closed or merged one only when its head commit is in the local branch's history", body, StringComparison.Ordinal);
-        Assert.Contains("merge-base --is-ancestor <head sha> <branch>", body, StringComparison.Ordinal);
-        Assert.Contains("or it was created after this session started", body, StringComparison.Ordinal);
+        // Branch names are reused: fork PRs never count, and a closed or merged PR only when its head is in the branch's history.
+        Assert.Contains("drop every PR from a fork", body, StringComparison.Ordinal);
+        Assert.Contains("keep every other open one; keep a closed or merged one only when its head commit is in the local branch's history", body, StringComparison.Ordinal);
+        Assert.Contains("merge-base --is-ancestor <head sha> <branch>` exits 0.", body, StringComparison.Ordinal);
+        Assert.Contains("Drop it when that exits 1 (not in the history) or with any other code (128 means the commit isn't available locally).", body, StringComparison.Ordinal);
+        // The session rarely knows when it started, so creation time is no criterion.
+        Assert.DoesNotContain("session started", body, StringComparison.Ordinal);
         Assert.DoesNotContain("`gh ", body, StringComparison.Ordinal);
     }
 
