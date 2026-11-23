@@ -68,13 +68,17 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Run it for real.**",
             "never production",
             "a credential you merely found",
+            "counts only for the code and tool versions",
+            "**Run what only deploy runs.**",
+            "Within the limits of Run it for real",
+            "where only a build may write without the task's ask",
             "**PR body.**",
             "the rules applied, each guard changed and why",
             "each rule conflict the owner settled");
         Assert.True(d.IndexOf("# Build rules", StringComparison.Ordinal) < d.IndexOf("# Workers", StringComparison.Ordinal));
         // The worker rules sit in the section that is copied into briefs, before the coordinator-only hygiene.
         var hygiene = d.IndexOf("# Pull request hygiene", StringComparison.Ordinal);
-        foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**" })
+        foreach (var rule in new[] { "**Repo rules first.**", "**Guards are rules.**", "**True at the head.**", "**Trust boundaries.**", "**Run it for real.**", "**Run what only deploy runs.**" })
             Assert.InRange(d.IndexOf(rule, StringComparison.Ordinal), d.IndexOf("# Build rules", StringComparison.Ordinal), hygiene);
         // The lists survive fix rounds and a stack, and reach the report.
         ContainsAll(Whole("builder"),
@@ -172,6 +176,7 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "**Privileged identities.**",
             "**Egress and records.**",
             "**True at the head.**",
+            "**Deploy-only checks.**",
             "**Never run.**",
             "Never ask for a run against production",
             "the head commit reviewed",
@@ -204,7 +209,16 @@ public sealed class PersonaChangeRulesTests : IDisposable
             "a credential you merely found",
             "Return the head commit you checked",
             "could not run live",
-            "still the commit you checked");
+            "still the commit you checked",
+            "never by dispatching a workflow or posting a bot command",
+            "has not run, not passed",
+            "on the base branch's head",
+            "never report it as a pass or an expected failure",
+            "needing a re-run by whoever started it",
+            "needing a rebuild by whoever started it",
+            "where the limits in step 5 allow a target",
+            "a target and permission that the task gives",
+            "sandbox or preview target may write without the task's ask");
     }
 
     [Fact]

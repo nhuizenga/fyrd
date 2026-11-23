@@ -7,7 +7,19 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in session skill seeds (the plugin skills under <c>skills/</c> that name <c>roles</c>), and the Builder persona they were cut from.</summary>
 public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposable
 {
-    private static readonly string[] Names = ["stacked-pull-requests"];
+    private static readonly string[] Names = ["review-data-modeling", "stacked-pull-requests", "validate-dbt"];
+
+    /// <summary>
+    /// The roles each seed belongs to: the Builder's, whose prompt says when each applies. Roles only choose the prompts
+    /// that carry a skill's line or body; any session with the plugin can load any of them. A worker or a Validator or
+    /// Reviewer subagent loads Validate dbt or Review data modeling itself, as its brief says, so neither is the Validator's.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> RolesOf = new()
+    {
+        ["review-data-modeling"] = ["builder"],
+        ["stacked-pull-requests"] = ["builder"],
+        ["validate-dbt"] = ["builder"],
+    };
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -26,7 +38,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         Assert.Equal(Names, SeedDirs().Select(Path.GetFileName).Order(StringComparer.Ordinal));
         Assert.All(skills, s =>
         {
-            Assert.Equal(["builder"], s.Roles);
+            Assert.Equal(RolesOf[s.Name], s.Roles);
             Assert.StartsWith("# ", s.Body, StringComparison.Ordinal);
             Assert.False(s.UpdateAvailable);
         });
@@ -59,7 +71,9 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
 
     /// <summary>A description opens with the name of the section the skill holds (the persona refers to it by that name) and says when to load it.</summary>
     [Theory]
+    [InlineData("review-data-modeling", "Review data modeling", "Use when your brief asks for them, as a Builder's step 7 does for a diff that touches a dbt project")]
     [InlineData("stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
+    [InlineData("validate-dbt", "Validate dbt", "before you start or request a warehouse build")]
     public void EachDescription_NamesItsSection_AndSaysWhenToLoadIt(string name, string section, string when)
     {
         var skill = Skills().Single(s => s.Name == name);
@@ -72,11 +86,68 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     }
 
     /// <summary>
+    /// Validate dbt is loaded by each caller itself, from where it reads: a Validator subagent follows only the persona's
+    /// "The check", and a worker gets the Build rules bullets, so the lines that say to load it sit there, each with the
+    /// not-run fallback.
+    /// </summary>
+    [Fact]
+    public void ValidateDbt_IsInvokedWhereItsCallersSeeIt()
+    {
+        static string Section(string d, string heading)
+        {
+            var start = d.IndexOf(heading + "\n", StringComparison.Ordinal);
+            Assert.True(start >= 0, heading);
+            var end = d.IndexOf("\n# ", start + heading.Length, StringComparison.Ordinal);
+            return end < 0 ? d[start..] : d[start..end];
+        }
+        var validator = RepoSeeds.Personas(_home.Paths).Single(p => p.Id == "validator").Definition;
+        Assert.Contains("load the Validate dbt skill (`fyrd:validate-dbt`) with the Skill tool and run its checks here and in step 3; if you can't load it, report them as not run.", Section(validator, "# The check"), StringComparison.Ordinal);
+        var builder = Builder().Definition;
+        Assert.Contains("In a dbt project, also load the Validate dbt skill (`fyrd:validate-dbt`) and run its checks; if you can't load it, name them as not run.", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("how it was tested, any Validate dbt report,", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("load Validate dbt (`fyrd:validate-dbt`) and do its Builder part", Section(builder, "# Your job"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Review data modeling is run by a Reviewer subagent, which loads the skill itself: the Builder's step 7 briefs it to
+    /// (and the re-reviewer, on such a diff). A subagent that can't load the skill never reads a rule inside it, so the
+    /// Builder's step 7, not the skill, says what to report then.
+    /// </summary>
+    [Fact]
+    public void ReviewDataModeling_IsLoadedByTheReviewerSubagent_AsTheBuildersBriefSays()
+    {
+        var builder = Builder().Definition;
+        var job = builder[builder.IndexOf("# Your job\n", StringComparison.Ordinal)..builder.IndexOf("\n# Build rules\n", StringComparison.Ordinal)];
+        Assert.Contains("for a dbt or warehouse diff as the Review data modeling skill (`fyrd:review-data-modeling`) defines it, another briefed to load that skill and run its checks (if it can't load it, it reports those checks as not run)", job, StringComparison.Ordinal);
+        Assert.Contains("with the earlier findings to confirm fixed (it loads that skill too on such a diff)", job, StringComparison.Ordinal);
+        Assert.DoesNotContain("copy its text in", job, StringComparison.Ordinal);
+        var body = Skills().Single(s => s.Name == "review-data-modeling").Body;
+        Assert.DoesNotContain("checks as not run", body, StringComparison.Ordinal);
+        // Query results reach a public review: only aggregates leave the warehouse.
+        // Grouped key values (ids, emails) are row data too: only the grouped columns' names leave.
+        Assert.Contains("Report only aggregates from a query (counts, bytes, durations) and the names of grouped columns, never their values, row values or sample rows.", body, StringComparison.Ordinal);
+        // The skill's trigger is Validate dbt's paths, each one in both descriptions (they join the list differently).
+        string[] paths = ["models/", "macros/", "tests/", "seeds/", "snapshots/", "dbt_project.yml", "packages.yml", "selectors.yml"];
+        foreach (var name in new[] { "validate-dbt", "review-data-modeling" })
+        {
+            var description = Skills().Single(s => s.Name == name).Description;
+            foreach (var path in paths)
+                Assert.True(description.Contains(path, StringComparison.Ordinal), $"{name}'s description is missing {path}");
+        }
+        Assert.Contains("Never write", body, StringComparison.Ordinal);
+        // Deploy-only checks is the Reviewer persona's; the skill refers to it by that name.
+        Assert.Contains("Apply the Reviewer's Deploy-only checks", body, StringComparison.Ordinal);
+        Assert.Contains("- **Deploy-only checks.**", RepoSeeds.Personas(_home.Paths).Single(p => p.Id == "reviewer").Definition, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A word budget per skill, a little above its size, well under <see cref="SessionSkills.MaxWords"/>. A skill that
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
+    [InlineData("review-data-modeling", 810)]
     [InlineData("stacked-pull-requests", 540)]
+    [InlineData("validate-dbt", 1110)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -162,7 +233,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         foreach (var s in Skills())
         {
             Assert.Empty(RememberBlock.Parse(s.Body));
-            foreach (var tag in new[] { "</peasant-persona", "</subagent-persona", "</shared-memory", "</role-memory", "</hub-settings", "</controller-skill" })
+            foreach (var tag in new[] { "</peasant-persona", "</shared-memory", "</role-memory", "</hub-settings", "</controller-skill" })
                 Assert.DoesNotContain(tag, s.Body, StringComparison.OrdinalIgnoreCase);
         }
     }
@@ -171,7 +242,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4020;
+    private const int InstalledBudget = 4403;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()

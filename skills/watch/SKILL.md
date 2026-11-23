@@ -1,10 +1,12 @@
 ---
 name: watch
-description: "Fyrd Controller only: use when the Fyrd Controller is asked to watch a pull request and fix what comes up, or to start a watcher on a Slack channel. Never use this outside the Fyrd Controller session."
+description: "From the Fyrd Controller message's hub-settings, peasant-persona and shared-memory blocks, with the claude-code-remote session tools: start Fyrd Monitors when asked to watch a pull request and fix what comes up, or to start a watcher on a Slack channel, by starting a Monitor session."
 kind: controller-skill
 ---
 
 # watch
+
+**Needs:** the instructions Fyrd sends the Controller, with their `<hub-settings>`, `<peasant-persona>` and `<shared-memory>` blocks, and the `mcp__claude-code-remote__*` session tools. Without them, start and change nothing: say which is missing and carry on without this skill.
 
 Starts a Monitor (role `monitor`). The Monitor persona holds the watching behavior; you only start it and give it the task. The Slack Monitor only writes suggestions in its own session and never posts to Slack. Never ask it to.
 
@@ -14,7 +16,7 @@ Starts a Monitor (role `monitor`). The Monitor persona holds the watching behavi
 2. **Repo.** PR mode knows its repo from the PR. Slack mode asks as the Controller prompt's Repo rule says (likely repos plus `No repo`), before the session-cap check.
 3. **Session cap** as in `fyrd:peasant`, before deleting, archiving or creating anything (`AskUserQuestion`: `Start fewer now`, `Tear down idle sessions`, `Cancel`; `Tear down idle sessions` asks which with a `multiSelect` question; `Cancel` changes nothing).
 4. **Recycle.** Only if the Monitor is actually being started: tear down the session marked in step 1 (delete its trigger, then archive, as below).
-5. **Create.** Call `mcp__claude-code-remote__create_session` with `title`, `tags: ["fyrd-hub", "fyrd-role-monitor"]`, `environment_id` from `<hub-settings>` (omit when empty), `permission_mode: "auto"`, `model` from `<peasant-persona id="monitor" …>`, and `append_system_prompt` (monitor persona text, blank line, `<shared-memory>…</shared-memory>`, then role memory in `<role-memory role="monitor">…</role-memory>` if any, then a blank line and `<subagent-persona id="investigator">…</subagent-persona>` with the text inside `<subagent-persona-text id="investigator">`, not the whole investigator persona). The `prompt` depends on the mode:
+5. **Create.** Call `mcp__claude-code-remote__create_session` with `title`, `tags: ["fyrd-hub", "fyrd-role-monitor"]`, `environment_id` from `<hub-settings>` (omit when empty), `permission_mode: "auto"`, `model` from `<peasant-persona id="monitor" …>`, and `append_system_prompt` (monitor persona text, blank line, `<shared-memory>…</shared-memory>`, then role memory in `<role-memory role="monitor">…</role-memory>` if any). The `prompt` depends on the mode:
    - **PR mode** ("Watch #{pr} and fix anything that comes up"): `PR mode. Watch pull request <owner>/<repo>#<number> (<url>) and fix anything that comes up.` If the repo is not clear from the request, ask with `AskUserQuestion`.
    - **Slack mode** ("Start a new watcher on {slack channel}…"): `Slack mode. Watch #<channel> and suggest answers and fixes for new messages. Owner's instructions: <the owner's instructions>.` Never include any instruction to post, reply, react or edit in Slack.
    Set `source_url` from step 2 (omit only for `No repo`).

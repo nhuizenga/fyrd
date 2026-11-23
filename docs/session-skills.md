@@ -2,15 +2,21 @@
 
 A session skill is a part of a role's instructions that only some tasks need. The Builder's rules for stacked pull requests are one: most builds are a single pull request and never use them. Fyrd keeps such a part out of the role's persona and gives it to the session as a skill, which the session loads with the Skill tool when the situation comes up. Every session of that role then starts with shorter instructions.
 
-Fyrd ships one session skill, for the Builder:
+Fyrd ships three session skills:
 
-| Skill | Holds | A Builder loads it |
-| --- | --- | --- |
-| `stacked-pull-requests` (`fyrd:stacked-pull-requests` in a session) | How to build, open, fix, validate and move work in a native GitHub stack | when the work is, or may be, split into more than one pull request |
+| Skill | Roles | Holds | A session loads it |
+| --- | --- | --- | --- |
+| `review-data-modeling` (`fyrd:review-data-modeling` in a session) | Builder | The checks a second Reviewer runs on a dbt or warehouse diff beside the general review (grain and uniqueness, rules that drop rows, relationships liveness, cost and schedule, deploy-only checks, removed names), within read-only limits, and the questions only someone with warehouse access can settle | when its brief asks for it: in step 7, when a PR's diff touches a dbt project's `models/`, `macros/`, `tests/`, `seeds/`, `snapshots/`, `dbt_project.yml`, `packages.yml` or `selectors.yml`, wherever the project sits, or other warehouse SQL or schedules, the Builder briefs a second Reviewer subagent, and the re-reviewer, to load it |
+| `stacked-pull-requests` (`fyrd:stacked-pull-requests`) | Builder | How to build, open, fix, validate and move work in a native GitHub stack | when the work is, or may be, split into more than one pull request |
+| `validate-dbt` (`fyrd:validate-dbt`) | Builder | The checks a dbt change needs before merge that its PR checks may skip (compile and build downstream on real rows, selector hygiene, incremental boundaries, grain, cross-env columns, the repo's own checklists), within the limits on targets and live tables, and a report per test class | when a diff touches a dbt project's `models/`, `macros/`, `tests/`, `seeds/`, `snapshots/`, `dbt_project.yml`, `packages.yml` or `selectors.yml`, wherever the project sits, and before a warehouse build is started or requested |
+
+Workers and persona subagents get no session skills of their own, so whoever runs a skill's checks loads the skill itself, from the plugin, because its brief says to: the Build rules a Builder's worker is given tell it to load `fyrd:validate-dbt` in a dbt project; a Validator, as a Builder's subagent or as a Validator session's worker, follows the Validator persona's The check, which tells it to load `fyrd:validate-dbt`; and in step 7 the Builder briefs a second Reviewer subagent to load `fyrd:review-data-modeling`. Without the plugin (or with an edited copy that only the console holds) each reports those checks as not run. A Reviewer session of its own doesn't run the data modeling checks.
 
 Only rules that some tasks never need belong in a session skill. Rules every task reaches, such as the Builder's rules for pull request events, stay in the persona: a skill that is always loaded saves nothing.
 
 The defaults are skills of the fyrd Claude Code plugin: each is `skills/<name>/SKILL.md` in this repository, where Claude Code's plugin loader finds it, and a session that has the plugin lists it as `fyrd:<name>`. Their front matter also names `roles`, the personas whose sessions get the skill; a plugin skill without `roles` is no session skill.
+
+`roles` doesn't limit who can load a skill. The plugin is installed for the whole environment, so every session there, and every subagent it starts, lists every fyrd skill that a model may load and can load it with the Skill tool. `roles` chooses only which personas' instructions carry the skill: its line (installed) or its whole text (inline), and so which sessions are told when to load it. A role whose sessions never act on the skill themselves needs no entry: Validate dbt names only the Builder, which does its Builder part itself, and Review data modeling only the Builder, which decides when a Reviewer runs it.
 
 You edit them in the console under **Settings › Session skills**, next to the personas, and you can add your own. Fyrd copies each default into its own data once, keeps a skill you never edited in step with its default (and removes it when a later version of Fyrd no longer ships that default), and leaves a skill you edited alone (the list then shows "Update available", and "Reset to default" takes the default).
 
@@ -18,7 +24,7 @@ Deleting a skill takes its rules away from the roles it belongs to: nothing else
 
 ## Two ways a session gets a skill
 
-- **Inline.** The whole text of every skill is added to the persona text of its role. Nothing has to be set up, and nothing is saved either. This is how Fyrd starts.
+- **Inline.** The whole text of every skill is added to the persona text of its role. Nothing has to be set up, and nothing is saved either. This is how Fyrd starts. Persona subagents still need the plugin (see Limits).
 - **Installed.** The persona text holds one line per skill (the name the session loads it by, `fyrd:<name>`, and its description), and the session loads the text from the fyrd plugin. This is what makes the instructions shorter.
 
 Fyrd uses installed mode only when you have told it that the setup script below is in place. Even then, the plugin holds only the defaults as this repository ships them: a skill whose description or body you changed in the console, and a skill you added, is not in the plugin, so its whole text stays inline. A change of roles only is fine: the plugin doesn't hold the roles. **Reset to default** makes an edited skill the plugin's again. An edited default's inline section opens with a line saying it replaces the plugin skill of that name (`fyrd:<name>`) and that the session must not load that skill, since the plugin's unedited text is still in the session's skill list. Fyrd adds that line in inline mode too, where the plugin may be installed already.
@@ -88,4 +94,5 @@ In a session created after you saved the environment:
 - **Changes reach sessions through the Controller.** A change (an edit, a confirmation, turning it off) is in the instructions Fyrd sends the Controller the next time it is idle. A session the Controller creates before that gets the earlier text.
 - **New sessions only.** A setup script runs when a session's environment is built. A session that is already running keeps the plugin it started with, and the persona text it started with.
 - **Size.** A skill body holds at most 1,500 words. After a session's context is compacted it keeps only the first 5,000 tokens of each loaded skill, so put the rules that matter most first.
-- **Subagent texts.** The cut of a persona that another session runs as a subagent (`<subagent-persona>`) carries no session skills.
+- **Persona subagents need the plugin.** A Validator, Reviewer or Investigator subagent loads its persona skill (`fyrd:validator`, `fyrd:reviewer`, `fyrd:investigator`) from the fyrd plugin, so it works only where the environment has the plugin at 0.2.54 or later (owner's decision); inline mode no longer serves it. A Builder, Researcher, Validator or Monitor checks once, at task start, that the persona skills it briefs are in its skill list and tells you once if one is missing; after that, a subagent that returns `blocked` because its skill won't load goes into its report, not a question each round, and any other `blocked` still comes to you. A Researcher missing `fyrd:reviewer` asks you then, once, whether to publish the plan unreviewed (marked `Review: not run` at its top) or stop. A Monitor checks once per session.
+- **Workers and subagents load from the plugin.** A worker or persona subagent sees neither its coordinator's instructions nor their session skills: it loads a skill from the plugin when its brief tells it to. An edit you make in the console reaches only the sessions whose instructions carry the skill inline, never a worker or subagent, which loads the plugin's text.
