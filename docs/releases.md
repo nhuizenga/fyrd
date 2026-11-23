@@ -1,7 +1,7 @@
 # Releases
 
 Each plugin version is published as a GitHub Release, tagged and titled `v<version>` after the `version` in
-`.claude-plugin/plugin.json` (version 0.2.57 is release `v0.2.57`). A release has two assets:
+`.claude-plugin/plugin.json` (version 0.2.58 is release `v0.2.58`). The first release is `v0.2.58`. A release has two assets:
 
 | Asset | What it is |
 | --- | --- |
@@ -17,7 +17,9 @@ tests, and the Pester tests), builds both assets and creates the release on the 
 generates from the merged pull requests. A failing test stops the run before anything is built or published. So a release is made when a pull request
 that bumps the version merges (the version is bumped once per pull request into `main`, see `CLAUDE.md`), and a push
 that does not bump it releases nothing. If the check cannot tell (any answer but found or 404), the run fails instead
-of guessing.
+of guessing. The scripts reset the exit code an expected `gh` failure (such as that 404) leaves behind and end with
+`exit 0`, because the wrapper Actions puts around a `shell: pwsh` step exits with the last native command's exit code;
+the Pester tests run the `check` and `publish` steps' `run` lines inside a copy of that wrapper, with a stub `gh`.
 
 Runs share one `release` concurrency group and wait rather than cancel, but GitHub keeps only the newest waiting run:
 if two version bumps land on `main` while a release is running, the first bump's run is dropped and that version gets

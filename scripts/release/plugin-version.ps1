@@ -4,7 +4,7 @@ Reads the plugin version from .claude-plugin/plugin.json and the release tag nam
 
 .DESCRIPTION
 The release workflow (.github/workflows/release.yml) names each GitHub Release, and its tag, after the plugin version:
-version 0.2.57 is released as tag and title v0.2.57. Writes `version=` and `tag=` to the file in -OutputFile (the
+version 0.2.58 is released as tag and title v0.2.58. Writes `version=` and `tag=` to the file in -OutputFile (the
 workflow passes $env:GITHUB_OUTPUT) and prints them.
 
 .EXAMPLE

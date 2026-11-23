@@ -9,7 +9,7 @@ leads to a release being created twice or skipped silently. Writes `exists=true|
 A tag without a release counts as no release: the release is then created on that tag.
 
 .EXAMPLE
-pwsh ./scripts/release/release-exists.ps1 -Repo nhuizenga/fyrd -Tag v0.2.57
+pwsh ./scripts/release/release-exists.ps1 -Repo nhuizenga/fyrd -Tag v0.2.58
 #>
 [CmdletBinding()]
 param(
