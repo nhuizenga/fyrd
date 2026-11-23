@@ -59,9 +59,11 @@ public sealed class CheckoutsSkillTests : IDisposable
         Assert.Contains($"at most {SessionPullRequests.MaxBlockPerSession} from blocks per session", body, StringComparison.Ordinal);
         Assert.Contains("If you found none, say so and write no block.", body, StringComparison.Ordinal);
         Assert.Contains("not a worker's or subagent's", body, StringComparison.Ordinal);
-        // Branch names are reused: fork PRs never count, and a closed or merged PR only when its head is in the branch's history.
-        Assert.Contains("drop every PR from a fork", body, StringComparison.Ordinal);
-        Assert.Contains("keep every other open one; keep a closed or merged one only when its head commit is in the local branch's history", body, StringComparison.Ordinal);
+        // Branch names are reused: an open same-repo PR counts; a closed or merged one, or any from a fork (the session's own
+        // fork PR among them), only when its head is in the branch's history.
+        Assert.DoesNotContain("drop every PR from a fork", body, StringComparison.Ordinal);
+        Assert.Contains("with the fork's owner in `head`", body, StringComparison.Ordinal);
+        Assert.Contains("keep an open PR whose head is in the repository it targets; keep any other PR (closed or merged, or from a fork in any state) only when its head commit is in the local branch's history", body, StringComparison.Ordinal);
         Assert.Contains("merge-base --is-ancestor <head sha> <branch>` exits 0.", body, StringComparison.Ordinal);
         Assert.Contains("Drop it when that exits 1 (not in the history) or with any other code (128 means the commit isn't available locally).", body, StringComparison.Ordinal);
         // The session rarely knows when it started, so creation time is no criterion.
