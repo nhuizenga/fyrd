@@ -18,7 +18,7 @@ It runs only gh and these scripts: no npm, dotnet or PSGallery code, so the work
 write to the repo.
 
 .EXAMPLE
-pwsh ./scripts/release/publish-release.ps1 -Repo nhuizenga/fyrd -Tag v0.2.57 -Target <sha> -AssetDir out
+pwsh ./scripts/release/publish-release.ps1 -Repo nhuizenga/fyrd -Tag v0.2.58 -Target <sha> -AssetDir out
 #>
 [CmdletBinding()]
 param(
@@ -119,4 +119,10 @@ function Invoke-Main {
     if ($LASTEXITCODE -ne 0) { throw "gh release create failed with exit code $LASTEXITCODE" }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Main }
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-Main
+    # Exit 0 explicitly, so no native command's exit code left in $LASTEXITCODE becomes the step's (see Invoke-GhApi in
+    # release-common.ps1). An error still throws ($ErrorActionPreference = 'Stop') and fails the step. Dot-sourcing for
+    # the tests skips this block, so it never exits the test run.
+    exit 0
+}

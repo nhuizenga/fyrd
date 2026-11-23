@@ -82,4 +82,10 @@ function Invoke-Main {
     Write-StepOutput -Path $OutputFile -Values @{ path = $package }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Main }
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-Main
+    # Exit 0 explicitly, so no native command's exit code left in $LASTEXITCODE becomes the step's (see Invoke-GhApi in
+    # release-common.ps1). An error still throws ($ErrorActionPreference = 'Stop') and fails the step. Dot-sourcing for
+    # the tests skips this block, so it never exits the test run.
+    exit 0
+}

@@ -4,7 +4,7 @@ Reads the plugin version from .claude-plugin/plugin.json and the release tag nam
 
 .DESCRIPTION
 The release workflow (.github/workflows/release.yml) names each GitHub Release, and its tag, after the plugin version:
-version 0.2.57 is released as tag and title v0.2.57. Writes `version=` and `tag=` to the file in -OutputFile (the
+version 0.2.58 is released as tag and title v0.2.58. Writes `version=` and `tag=` to the file in -OutputFile (the
 workflow passes $env:GITHUB_OUTPUT) and prints them.
 
 .EXAMPLE
@@ -25,4 +25,10 @@ function Invoke-Main {
     Write-StepOutput -Path $OutputFile -Values @{ version = $version; tag = (Get-ReleaseTag -Version $version) }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Main }
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-Main
+    # Exit 0 explicitly, so no native command's exit code left in $LASTEXITCODE becomes the step's (see Invoke-GhApi in
+    # release-common.ps1). An error still throws ($ErrorActionPreference = 'Stop') and fails the step. Dot-sourcing for
+    # the tests skips this block, so it never exits the test run.
+    exit 0
+}

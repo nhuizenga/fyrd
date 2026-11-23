@@ -44,10 +44,16 @@ function Write-StepOutput {
 }
 
 # Runs `gh api <path>` (a GET) and returns its exit code and combined output; tests pass their own instead.
+# Callers handle a non-zero exit themselves (a 404 is an expected answer), so this resets $LASTEXITCODE to 0: gh's
+# exit code would otherwise outlive the call, and the wrapper GitHub Actions puts around a `shell: pwsh` step ends with
+# `if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }`, which failed the step on a 404 after
+# the script had already written its answer.
 function Invoke-GhApi {
     param([Parameter(Mandatory)][string]$Path)
     $output = & gh api $Path 2>&1 | Out-String
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+    $code = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    [pscustomobject]@{ ExitCode = $code; Output = $output }
 }
 
 # Runs a command in a folder and throws when it exits non-zero.
