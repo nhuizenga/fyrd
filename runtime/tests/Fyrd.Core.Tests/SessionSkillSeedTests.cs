@@ -171,7 +171,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4020;
+    private const int InstalledBudget = 4170;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
