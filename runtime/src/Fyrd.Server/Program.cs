@@ -68,6 +68,7 @@ builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();
 builder.Services.AddSingleton<HubState>();
 builder.Services.AddSingleton<NotificationDismissals>();
+builder.Services.AddSingleton<SessionPullRequests>();
 builder.Services.AddSingleton<CostLedger>();
 builder.Services.AddSingleton<CostGuard>();
 builder.Services.AddSingleton<HubRunner>();
