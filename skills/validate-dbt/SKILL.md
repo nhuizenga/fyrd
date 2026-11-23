@@ -1,7 +1,7 @@
 ---
 name: validate-dbt
 description: "Validate dbt: the checks a dbt change needs before merge that its PR checks may skip, and a report per test class. Use when a diff touches a dbt project's models/, macros/, tests/, seeds/, snapshots/, dbt_project.yml, packages.yml or selectors.yml, wherever the project sits, and before you start or request a warehouse build."
-roles: builder, validator
+roles: builder
 ---
 # Validate dbt
 

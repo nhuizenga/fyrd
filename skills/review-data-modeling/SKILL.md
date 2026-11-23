@@ -1,6 +1,6 @@
 ---
 name: review-data-modeling
-description: "Review data modeling: the checks a second Reviewer runs on a dbt or warehouse diff, and the questions only someone with warehouse access can settle. Use when you start the step 7 review of a PR whose diff touches a dbt project (models/, macros/, tests/, seeds/, snapshots/, dbt_project.yml, packages.yml, selectors.yml, wherever it sits) or other warehouse SQL or schedules."
+description: "Review data modeling: the checks a second Reviewer runs on a dbt or warehouse diff, and the questions only someone with warehouse access can settle. Use when your brief asks for them, as a Builder's step 7 does for a diff that touches a dbt project (models/, macros/, tests/, seeds/, snapshots/, dbt_project.yml, packages.yml, selectors.yml, wherever it sits) or other warehouse SQL or schedules."
 roles: builder
 ---
 # Review data modeling
