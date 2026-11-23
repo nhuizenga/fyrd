@@ -1,7 +1,7 @@
 # Releases
 
 Each plugin version is published as a GitHub Release, tagged and titled `v<version>` after the `version` in
-`.claude-plugin/plugin.json` (version 0.2.58 is release `v0.2.58`). The first release is `v0.2.58`. A release has two assets:
+`.claude-plugin/plugin.json` (version 0.2.58 is release `v0.2.58`). Versions before 0.2.58 have no release. A release has two assets:
 
 | Asset | What it is |
 | --- | --- |
