@@ -59,6 +59,10 @@ public sealed class CheckoutsSkillTests : IDisposable
         Assert.Contains($"at most {SessionPullRequests.MaxBlockPerSession} from blocks per session", body, StringComparison.Ordinal);
         Assert.Contains("If you found none, say so and write no block.", body, StringComparison.Ordinal);
         Assert.Contains("not a worker's or subagent's", body, StringComparison.Ordinal);
+        // Branch names are reused: a closed or merged PR counts only when its head is in the branch's history or it is new.
+        Assert.Contains("keep every open one, but keep a closed or merged one only when its head commit is in the local branch's history", body, StringComparison.Ordinal);
+        Assert.Contains("merge-base --is-ancestor <head sha> <branch>", body, StringComparison.Ordinal);
+        Assert.Contains("or it was created after this session started", body, StringComparison.Ordinal);
         Assert.DoesNotContain("`gh ", body, StringComparison.Ordinal);
     }
 
