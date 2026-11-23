@@ -19,6 +19,10 @@ that bumps the version merges (the version is bumped once per pull request into 
 that does not bump it releases nothing. If the check cannot tell (any answer but found or 404), the run fails instead
 of guessing.
 
+Runs share one `release` concurrency group and wait rather than cancel, but GitHub keeps only the newest waiting run:
+if two version bumps land on `main` while a release is running, the first bump's run is dropped and that version gets
+no release (the next one does).
+
 To re-run a release whose run failed, start the workflow by hand on `main` (Actions › Release › Run workflow). It does
 nothing when the release exists. If a failed run left a draft release behind, delete the draft first.
 
@@ -123,6 +127,9 @@ To build both assets locally into `out/` (ignored by git) without publishing any
 pwsh ./scripts/release/build-tool-package.ps1 -OutDir out
 pwsh ./scripts/release/build-plugin-zip.ps1 -OutDir out
 ```
+
+Both read your working tree: the tool package packs it as it is, and the zip takes the files git tracks with their
+current contents, uncommitted edits included. Build from a clean checkout for assets that match a commit.
 
 The Pester tests are `pwsh ./scripts/release/invoke-tests.ps1` (it installs Pester 6.2.0 for the current user if that
 version is missing). `pwsh ./scripts/release/invoke-all-tests.ps1` runs every suite, as the workflow does before it

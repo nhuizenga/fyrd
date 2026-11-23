@@ -204,7 +204,7 @@ export function checkTool(cmd, expected, run = spawnSync) {
     return {
       ok: false,
       message: `Refusing to start ${cmd}: it is not the Fyrd console tool (\`${path.basename(cmd)} --version\` ${answer}, `
-        + `not "fyrd ${expected}"). Remove it from PATH or rename it, then install the tool: ${downloadStep(expected)}, then run:\n  `
+        + `not "fyrd ${expected}"). Remove it from PATH or rename it, and install the tool from the same release. ${downloadStep(expected)}, then run:\n  `
         + `${toolInstallCommands(expected).install}\nSee docs/releases.md.`,
     };
   }
