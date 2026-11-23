@@ -1,0 +1,108 @@
+# Publishes a GitHub Release for each new plugin version: on a push to main whose .claude-plugin/plugin.json version
+# has no release yet, runs every test suite, builds the fyrd dotnet tool (the console) and the plugin zip in a read-only
+# job, then attaches both to a release tagged and titled v<version> in a separate job that holds contents: write.
+# A push whose version is already released does nothing. See docs/releases.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check for a new version
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      exists: ${{ steps.exists.outputs.exists }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: version
+        run: ./scripts/release/plugin-version.ps1
+      - id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: ./scripts/release/release-exists.ps1 -Tag $env:TAG
+
+  # Runs every test suite and builds both assets with a read-only token. npm, NuGet and PSGallery code (npm ci,
+  # dotnet restore and pack, Install-Module Pester) runs only here, never in the job that can write to the repo.
+  build:
+    name: Test and build ${{ needs.check.outputs.tag }}
+    needs: check
+    if: needs.check.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Run all the tests
+        run: ./scripts/release/invoke-all-tests.ps1
+      - id: tool
+        name: Build the fyrd tool package
+        run: ./scripts/release/build-tool-package.ps1 -OutDir out
+      - id: zip
+        name: Build the plugin zip
+        run: ./scripts/release/build-plugin-zip.ps1 -OutDir out
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-assets
+          path: |
+            ${{ steps.tool.outputs.path }}
+            ${{ steps.zip.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job with contents: write. It runs gh and the release scripts and nothing from npm, NuGet or PSGallery.
+  publish:
+    name: Publish ${{ needs.check.outputs.tag }}
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-assets
+          path: assets
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: ./scripts/release/publish-release.ps1 -Tag $env:TAG -AssetDir assets

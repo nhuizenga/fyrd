@@ -12,7 +12,7 @@ internal static class SessionSkillEndpoints
     private const string GuideFile = "session-skills.md";
 
     private static string DocsDir(IConfiguration configuration, IWebHostEnvironment environment) =>
-        Path.GetFullPath(configuration["Fyrd:DocsDir"] ?? Path.Combine(environment.ContentRootPath, "..", "..", "..", "docs"));
+        Path.GetFullPath(configuration["Fyrd:DocsDir"] ?? ServerLayout.DefaultDir(environment.ContentRootPath, AppContext.BaseDirectory, "docs"));
 
     public static IEndpointRouteBuilder MapSessionSkills(this IEndpointRouteBuilder app)
     {

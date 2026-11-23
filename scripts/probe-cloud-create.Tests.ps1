@@ -1,4 +1,4 @@
-# Pester 5 tests for the non-interactive parts of probe-cloud-create.ps1.
+# Pester 6 tests (scripts/release/invoke-tests.ps1 pins Pester 6.2.0) for the non-interactive parts of probe-cloud-create.ps1.
 # Run: pwsh -c "Invoke-Pester ./scripts/probe-cloud-create.Tests.ps1"
 
 BeforeAll {

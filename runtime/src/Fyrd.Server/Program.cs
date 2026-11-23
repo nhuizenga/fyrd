@@ -6,7 +6,20 @@ using Fyrd.Core.Hub;
 using Fyrd.Server;
 using Fyrd.Server.Endpoints;
 
-var builder = WebApplication.CreateBuilder(args);
+// `fyrd --version` identifies the tool for /fyrd:up before it starts it (see ServerVersion).
+if (ServerVersion.IsVersionRequest(args))
+{
+    Console.WriteLine(ServerVersion.Line);
+    return;
+}
+
+// From the dotnet tool package the console, skills and docs sit beside the assembly (see ServerLayout).
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = ServerLayout.ContentRoot(AppContext.BaseDirectory),
+});
+string DefaultDir(string name) => ServerLayout.DefaultDir(builder.Environment.ContentRootPath, AppContext.BaseDirectory, name);
 
 builder.Services.ConfigureHttpJsonOptions(o =>
 {
@@ -57,12 +70,12 @@ builder.Services.AddSingleton(sp => new StackMergeJobs(sp.GetRequiredService<IGi
     sp.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping));
 builder.Services.AddSingleton(sp => new HubPersonas(sp.GetRequiredService<FyrdPaths>(),
     Path.GetFullPath(builder.Configuration["Fyrd:HubPersonasSeedDir"]
-        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));
+        ?? DefaultDir("skills"))));
 builder.Services.AddSingleton(_ => new HubSkills(Path.GetFullPath(builder.Configuration["Fyrd:HubSkillsDir"]
-    ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));
+    ?? DefaultDir("skills"))));
 builder.Services.AddSingleton(sp => new SessionSkills(sp.GetRequiredService<FyrdPaths>(),
     Path.GetFullPath(builder.Configuration["Fyrd:SessionSkillsSeedDir"]
-        ?? Path.Combine(builder.Environment.ContentRootPath, "..", "..", "..", "skills"))));
+        ?? DefaultDir("skills"))));
 builder.Services.AddSingleton<HubMemory>();
 builder.Services.AddSingleton<PendingMemory>();
 builder.Services.AddSingleton<ControllerManager>();

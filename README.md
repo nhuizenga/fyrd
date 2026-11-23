@@ -33,7 +33,7 @@ Fyrd reads the login only from `~/.claude/.credentials.json`, with no other fall
 /plugin install fyrd@fyrd
 ```
 
-To work from a local clone instead, add the clone's folder as the marketplace (`/plugin marketplace add /path/to/fyrd`), and run `/reload-plugins` after edits.
+To install from a GitHub Release instead (the console as a dotnet tool, and a zip of the plugin's files), see [docs/releases.md](docs/releases.md). To work from a local clone instead, add the clone's folder as the marketplace (`/plugin marketplace add /path/to/fyrd`), and run `/reload-plugins` after edits.
 
 To update, run `/plugin marketplace update fyrd`, then `claude plugin update fyrd@fyrd` in a terminal (the marketplace update alone leaves the installed plugin at its old version), then `/reload-plugins` (or restart Claude Code), `/fyrd:down` and `/fyrd:up`. Then refresh the environment snapshot after merging: cloud sessions and their persona subagents use the fyrd plugin as the environment's setup script installed it when its snapshot was built, so have the environment build a new snapshot (it does when you change its setup script; see `docs/session-skills.md`, Limits). Persona subagents need the plugin at 0.2.54 or later there.
 
@@ -85,7 +85,12 @@ Environment variables:
 dotnet test runtime/Fyrd.sln
 cd console && npm test
 node --test "scripts/*.test.mjs"
+pwsh ./scripts/release/invoke-tests.ps1
 ```
+
+`pwsh ./scripts/release/invoke-all-tests.ps1` runs all of these and the console's `tsc -b`, as the release workflow does.
+
+[docs/releases.md](docs/releases.md) covers how releases are made.
 
 ## License
 

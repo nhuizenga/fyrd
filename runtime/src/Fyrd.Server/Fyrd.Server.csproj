@@ -10,4 +10,40 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!--
+    The Fyrd console as a dotnet tool (`dotnet pack`, see docs/releases.md). The package version is the plugin's
+    version, read from .claude-plugin/plugin.json so a release's tool and plugin zip always match. Publish (which pack
+    runs) carries wwwroot, the console that `npm run build` in console/ writes there, so build the console first;
+    scripts/release/build-tool-package.ps1 does both and checks the package. The plugin's skills and the session-skills guide ship beside
+    the assembly, where ServerLayout finds them when the server runs from the package.
+  -->
+  <PropertyGroup>
+    <FyrdRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../..'))</FyrdRoot>
+    <FyrdPluginVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(FyrdRoot)/.claude-plugin/plugin.json')), '&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</FyrdPluginVersion>
+    <Version>$(FyrdPluginVersion)</Version>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <!-- The tool runs from its publish output (tools/); content and static web assets packed for library consumers would only be dead weight. -->
+    <IncludeContentInPack>false</IncludeContentInPack>
+    <DisableStaticWebAssetsBuildPropsFileGeneration>true</DisableStaticWebAssetsBuildPropsFileGeneration>
+    <DisableStaticWebAssetEndpointsBuildPropsFileGeneration>true</DisableStaticWebAssetEndpointsBuildPropsFileGeneration>
+    <StaticWebAssetsDisableProjectBuildPropsFileGeneration>true</StaticWebAssetsDisableProjectBuildPropsFileGeneration>
+    <ToolCommandName>fyrd</ToolCommandName>
+    <PackageId>fyrd</PackageId>
+    <Authors>nhuizenga</Authors>
+    <Description>The Fyrd console: the local service and web UI the fyrd Claude Code plugin starts with /fyrd:up.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/nhuizenga/fyrd</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/nhuizenga/fyrd</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(FyrdRoot)/skills/**" LinkBase="skills" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <Content Include="$(FyrdRoot)/docs/session-skills.md" LinkBase="docs" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="FyrdCheckVersion" BeforeTargets="Build">
+    <Error Condition="'$(FyrdPluginVersion)' == ''" Text="Could not read &quot;version&quot; from $(FyrdRoot)/.claude-plugin/plugin.json." />
+  </Target>
+
 </Project>
