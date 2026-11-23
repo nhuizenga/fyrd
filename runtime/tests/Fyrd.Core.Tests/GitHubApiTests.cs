@@ -284,6 +284,7 @@ public class GitHubApiTests
         graph.Then("""{"data":{"repository":null},"errors":[{"type":"NOT_FOUND","path":["repository"],"message":"Could not resolve to a Repository"}]}""");
         var e = await Assert.ThrowsAsync<GitHubException>(() => api.GetAsync(Url));
         Assert.Equal("GitHub token lacks access to acme/widgets.", e.Message);
+        Assert.IsNotType<GitHubPullRequestNotFoundException>(e); // a hidden repo is not proof the PR does not exist
     }
 
     [Fact]
@@ -291,7 +292,7 @@ public class GitHubApiTests
     {
         var (api, graph, _) = Make();
         graph.Then("""{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND","path":["repository","pullRequest"],"message":"Could not resolve to a PullRequest with the number of 12."}]}""");
-        var e = await Assert.ThrowsAsync<GitHubException>(() => api.GetAsync(Url));
+        var e = await Assert.ThrowsAsync<GitHubPullRequestNotFoundException>(() => api.GetAsync(Url));
         Assert.Equal($"GitHub has no pull request at {Url}.", e.Message);
     }
 

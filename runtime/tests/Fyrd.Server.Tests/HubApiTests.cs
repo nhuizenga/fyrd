@@ -766,6 +766,95 @@ public class HubApiTests
         Assert.Equal(StackMergeStatus.Cancelled, jobs.Snapshot().Single().Status);
     }
 
+    private const string ForeignPr = "https://github.com/other/private/pull/5";
+    private const string MissingPr = "https://github.com/acme/widgets/pull/404";
+
+    /// <summary>The session's PRs: the given stack plus extra URLs (cached ones, say) that GitHub fails to read.</summary>
+    private static void SeedChainWithUnreadable(FyrdFactory f, Dictionary<string, GitHubException> unreadable, params PullRequestStatus[] prs)
+    {
+        f.Services.GetRequiredService<HubState>().Publish(
+            [View() with { PullRequests = [.. prs.Select(p => p.Url), .. unreadable.Keys] }], []);
+        foreach (var p in prs) f.GitHub.Statuses[p.Url] = p;
+        f.GitHub.OnGet = u => { if (unreadable.TryGetValue(u, out var e)) throw e; };
+    }
+
+    [Fact]
+    public async Task MergeStack_AnUnreadablePrInAnotherRepo_OrOneThatDoesNotExist_DoesNotBlockTheStack()
+    {
+        using var f = new FyrdFactory();
+        SeedChainWithUnreadable(f, new()
+            {
+                [ForeignPr] = new GitHubException("GitHub token lacks access to other/private."),
+                [MissingPr] = new GitHubPullRequestNotFoundException(MissingPr),
+            },
+            Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+
+        var r = await MergeStack(f, Pr);
+
+        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);
+        var jobId = (await ReadJson(r)).GetProperty("jobId").GetString()!;
+        await f.Services.GetRequiredService<StackMergeJobs>().Completion(jobId)!.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal([Pr, Pr11], f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task MergeStack_APrInTheSameRepoThatFailsToRead_502_NothingMerged()
+    {
+        // It may be part of the stack (here it is the top), so merging the rest could split it.
+        using var f = new FyrdFactory();
+        SeedChainWithUnreadable(f, new() { [Pr13] = new GitHubException("GitHub answered 502 for acme/widgets.") },
+            Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+
+        var r = await MergeStack(f, Pr11);
+
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Empty(f.Services.GetRequiredService<StackMergeJobs>().Snapshot());
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task MergeStack_TheRequestedPrDoesNotExist_502()
+    {
+        using var f = new FyrdFactory();
+        SeedChainWithUnreadable(f, new() { [MissingPr] = new GitHubPullRequestNotFoundException(MissingPr) },
+            Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+
+        var r = await MergeStack(f, MissingPr);
+
+        Assert.Equal(HttpStatusCode.BadGateway, r.StatusCode);
+        Assert.Empty(f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task PullRequests_AnUnreadableCachedPr_IsListedWithItsError_TheOthersStillRead()
+    {
+        using var f = new FyrdFactory();
+        SeedChainWithUnreadable(f, new() { [ForeignPr] = new GitHubException("GitHub token lacks access to other/private.") },
+            Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+
+        var r = await f.CreateClient().GetAsync($"/api/hub/sessions/{SessionId}/pull-requests");
+
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var list = (await ReadJson(r)).EnumerateArray().ToList();
+        Assert.Equal(3, list.Count);
+        var foreign = list.Single(p => p.GetProperty("url").GetString() == ForeignPr);
+        Assert.Equal("GitHub token lacks access to other/private.", foreign.GetProperty("error").GetString());
+        Assert.Equal("open", list.Single(p => p.GetProperty("url").GetString() == Pr).GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task Ready_OnAReadablePr_IsNotBlockedByAnUnreadableCachedOne()
+    {
+        using var f = new FyrdFactory();
+        var draft = Open(Pr, 12, "b", "main") with { Draft = true };
+        SeedChainWithUnreadable(f, new() { [ForeignPr] = new GitHubException("GitHub token lacks access to other/private.") }, draft);
+
+        var r = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/ready", new { url = Pr });
+
+        Assert.Equal(HttpStatusCode.NoContent, r.StatusCode);
+        Assert.Equal([Pr], f.GitHub.Readied);
+    }
+
     [Fact]
     public async Task MergeStack_CancelOfAnUnknownJob_404()
     {

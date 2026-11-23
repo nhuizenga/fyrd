@@ -129,7 +129,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
 
     private static JsonElement NodeOf(JsonElement data, string url) =>
         Path(data, "repository", "pullRequest", out var pr) && pr.ValueKind == JsonValueKind.Object
-            ? pr : throw new GitHubException($"GitHub has no pull request at {url}.");
+            ? pr : throw new GitHubPullRequestNotFoundException(url);
 
     /// <summary>Maps one GraphQL pull request node. Check rules: any running check means pending, any failed one failing.</summary>
     public static PullRequestStatus ParseStatus(string url, JsonElement r)
@@ -225,7 +225,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
                 doc.Dispose();
                 if (type == "RATE_LIMITED") throw new GitHubRateLimitException(_time.GetUtcNow().AddMinutes(1));
                 if (type == "NOT_FOUND" && prUrl is not null && missingPr)
-                    throw new GitHubException($"GitHub has no pull request at {prUrl}.");
+                    throw new GitHubPullRequestNotFoundException(prUrl);
                 if (type == "NOT_FOUND" || type == "FORBIDDEN") throw new GitHubException($"GitHub token lacks access to {subject}.");
                 throw new GitHubException($"GitHub refused the request: {message}");
             }

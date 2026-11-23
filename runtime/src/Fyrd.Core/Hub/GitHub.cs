@@ -53,6 +53,9 @@ public sealed record FailingCheck(string Name, string? Url);
 
 public class GitHubException(string message) : Exception(message);
 
+/// <summary>GitHub can read the repo but has no pull request with that number.</summary>
+public sealed class GitHubPullRequestNotFoundException(string url) : GitHubException($"GitHub has no pull request at {url}.");
+
 /// <summary>No GitHub token is set, so nothing was sent to GitHub.</summary>
 public sealed class GitHubNotConfiguredException() : GitHubException("GitHub is not configured. Set GH_TOKEN before /fyrd:up.");
 

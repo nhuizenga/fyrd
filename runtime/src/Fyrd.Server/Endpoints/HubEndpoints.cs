@@ -266,15 +266,23 @@ internal static partial class HubEndpoints
                 var own = state.Sessions.First(s => s.Id == id).PullRequests;
                 if (!PullRequestUrl.IsValid(url) || !own.Contains(url!))
                     return Bad("That is not one of this session's pull requests.");
+                var (owner, repo, _) = PullRequestUrl.Parse(url!);
                 try
                 {
-                    // Live status for every PR of the session, so a stale console view cannot start a bad merge.
-                    var live = await Task.WhenAll(own.Select(u => github.GetAsync(u, ct)));
+                    // Live status for every PR of the session that could be in the chain, so a stale console view cannot start
+                    // a bad merge. A stack never leaves its repo, so PRs in other repos (a fyrd-prs block may name any) are not
+                    // read. In this repo, a PR GitHub says does not exist is skipped; any other failed read fails the request,
+                    // because an unread PR may be part of the stack and merging the rest would split it.
+                    var reads = await Task.WhenAll(own.Where(u => InRepo(u, owner, repo)).Select(async u =>
+                    {
+                        try { return await github.GetAsync(u, ct); }
+                        catch (GitHubPullRequestNotFoundException) when (u != url) { return null; }
+                    }));
+                    var live = reads.OfType<PullRequestStatus>().ToList();
                     if (PullRequestStacks.Chain(live, url!) is not { } chain)
                         return Results.Problem("That pull request is not stacked with another one.", statusCode: StatusCodes.Status409Conflict);
                     if (StackMergeJobs.Preconditions(chain.RootToTop, chain.Fork, own) is { } why)
                         return Results.Problem(why, statusCode: StatusCodes.Status409Conflict);
-                    var (owner, repo, _) = PullRequestUrl.Parse(url!);
                     return jobs.Start($"{owner}/{repo}", chain.RootToTop, out var conflict) is { } job
                         ? Results.Accepted(value: new { jobId = job.Id })
                         : Results.Problem(conflict, statusCode: StatusCodes.Status409Conflict);
@@ -699,6 +707,11 @@ internal static partial class HubEndpoints
         });
 
     /// <summary>The session's PRs as the last poll listed them, with the freshly read one in place of its listed copy.</summary>
+    /// <summary>The PR URL is in <paramref name="owner"/>/<paramref name="repo"/> (GitHub names are case-insensitive).</summary>
+    private static bool InRepo(string url, string owner, string repo) =>
+        PullRequestUrl.IsValid(url) && PullRequestUrl.Parse(url) is var (o, r, _)
+        && string.Equals(o, owner, StringComparison.OrdinalIgnoreCase) && string.Equals(r, repo, StringComparison.OrdinalIgnoreCase);
+
     private static IEnumerable<PullRequestStatus> StackedStatuses(HubState state, string id, PullRequestStatus current) =>
         state.Sessions.First(s => s.Id == id).PullRequests
             .Select(u => u == current.Url ? current : state.PullRequests.GetValueOrDefault(u))
