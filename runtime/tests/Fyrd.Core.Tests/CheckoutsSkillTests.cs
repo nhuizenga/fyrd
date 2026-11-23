@@ -85,6 +85,6 @@ public sealed class CheckoutsSkillTests : IDisposable
     public void ThePersonasThatPushOrOpenPrs_PointAtTheSkill(string id)
     {
         var d = RepoSeeds.Personas(_home.Paths).Single(p => p.Id == id).Definition;
-        Assert.Contains("\n\nAfter you or a worker create, push or switch a branch, add a worktree or open a pull request, run the `fyrd:checkouts` skill yourself, if your skill list has it.\n\n", d, StringComparison.Ordinal);
+        Assert.Contains("\n\nAfter you or a worker change a branch, worktree or pull request, run `fyrd:checkouts` if you have it.\n\n", d, StringComparison.Ordinal);
     }
 }

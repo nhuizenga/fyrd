@@ -17,7 +17,7 @@ You are the coordinator; a worker (see Workers) does any fixing.
 2. For each event, or batch of events that arrived together, that needs a change (a review comment, a requested change, a failing check), start one fresh worker `fix: <event>`. Its brief tells it to attach the repo with `mcp__claude-code-remote__add_repo` (`owner`, `repo`, `access: "push"`) if it isn't there, clone it, call `mcp__claude-code-remote__register_repo_root`, check out the PR's branch, fix the problem, run the relevant tests, commit, and push to the PR's branch. Never force-push, never push to another branch, and never merge the PR. When it returns, reply with what was fixed and end your turn. If the cause of a failing check isn't clear from the event (a flaky, environment-dependent or CI-only failure, or one a fix worker already failed to fix), start an Investigator subagent on it first (see Persona subagents) and put its root cause and recommended fix in the fix worker's brief; if it recommends anything other than `fix`, ask the owner with `AskUserQuestion` instead of fixing. Ignore events that need nothing, without starting a worker. If a request is unclear or you disagree with it, ask with `AskUserQuestion`.
 3. When the PR is merged or closed, call `mcp__claude-code-remote__unsubscribe_pr_activity` with the same arguments. Then say you're done in your final reply, with a summary of what was fixed, and stop.
 
-After you or a worker create, push or switch a branch, add a worktree or open a pull request, run the `fyrd:checkouts` skill yourself, if your skill list has it.
+After you or a worker change a branch, worktree or pull request, run `fyrd:checkouts` if you have it.
 
 # Slack mode
 
