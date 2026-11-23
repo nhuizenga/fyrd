@@ -332,3 +332,174 @@ Describe 'Invoke-TestSteps' {
         $ran | Should -Be @('a', 'b')
     }
 }
+
+# A fake `gh` for tests that run the real scripts: a native command (a separate process, as gh is) placed first on
+# PATH. Each rule answers the calls whose arguments, joined by spaces, start with its Args: it writes Stdout and Stderr
+# and exits with Exit. A call no rule matches fails with exit 99. Every call's arguments are logged to calls.log.
+BeforeAll {
+    function New-StubGh {
+        param([Parameter(Mandatory)][object[]]$Rules)
+        $dir = Join-Path $TestDrive "gh-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory $dir | Out-Null
+        ConvertTo-Json -InputObject @($Rules) -Depth 5 | Set-Content (Join-Path $dir 'rules.json')
+        @'
+$dir = $PSScriptRoot
+Add-Content -LiteralPath (Join-Path $dir 'calls.log') -Value ($args -join ' ')
+$call = $args -join ' '
+foreach ($rule in (Get-Content -Raw (Join-Path $dir 'rules.json') | ConvertFrom-Json)) {
+    if ($call -eq $rule.Args -or $call.StartsWith("$($rule.Args) ")) {
+        if ($rule.Stdout) { [Console]::Out.WriteLine($rule.Stdout) }
+        if ($rule.Stderr) { [Console]::Error.WriteLine($rule.Stderr) }
+        exit $rule.Exit
+    }
+}
+[Console]::Error.WriteLine("stub gh: no rule for: $call")
+exit 99
+'@ | Set-Content (Join-Path $dir 'gh-stub.ps1')
+        $pwsh = $script:Pwsh
+        if ($IsWindows) {
+            "@`"$pwsh`" -NoProfile -NonInteractive -File `"%~dp0gh-stub.ps1`" %*`r`nexit /b %ERRORLEVEL%" |
+                Set-Content (Join-Path $dir 'gh.cmd')
+        }
+        else {
+            $sh = "#!/bin/sh`nexec '$pwsh' -NoProfile -NonInteractive -File `"`$(dirname `"`$0`")/gh-stub.ps1`" `"`$@`"`n"
+            [IO.File]::WriteAllText((Join-Path $dir 'gh'), $sh)
+            & chmod +x (Join-Path $dir 'gh')
+        }
+        $dir
+    }
+
+    # Runs a workflow step's `run:` text the way the GitHub Actions runner runs a `shell: pwsh` step: the runner's
+    # ScriptHandlerHelpers writes it to a .ps1 file between `$ErrorActionPreference = 'stop'` and
+    # `if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }`, and starts
+    # `pwsh -command ". '<file>'"` in the checkout. -Path goes first on PATH (the stub gh), and the step's output file
+    # is a fresh GITHUB_OUTPUT. Returns the exit code, the step's outputs and everything it printed.
+    function Invoke-RunnerStep {
+        param(
+            [Parameter(Mandatory)][string]$Run,
+            [hashtable]$Environment = @{},
+            [string]$Path
+        )
+        $dir = Join-Path $TestDrive "step-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory $dir | Out-Null
+        $script = Join-Path $dir "$([guid]::NewGuid()).ps1"
+        $nl = [Environment]::NewLine
+        [IO.File]::WriteAllText($script, "`$ErrorActionPreference = 'stop'$nl$Run$nl" +
+            'if ((Test-Path -LiteralPath variable:\LASTEXITCODE)) { exit $LASTEXITCODE }')
+        $outputFile = Join-Path $dir 'github_output'
+        New-Item -ItemType File $outputFile | Out-Null
+
+        $psi = [System.Diagnostics.ProcessStartInfo]::new($script:Pwsh)
+        $psi.ArgumentList.Add('-command')
+        $psi.ArgumentList.Add(". '$script'")
+        $psi.WorkingDirectory = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.Environment['GITHUB_OUTPUT'] = $outputFile
+        $psi.Environment['GITHUB_REPOSITORY'] = 'o/r'
+        if ($Path) { $psi.Environment['PATH'] = $Path + [IO.Path]::PathSeparator + $psi.Environment['PATH'] }
+        foreach ($k in $Environment.Keys) { $psi.Environment[$k] = $Environment[$k] }
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $stdout = $p.StandardOutput.ReadToEndAsync()
+        $stderr = $p.StandardError.ReadToEndAsync()
+        $p.WaitForExit()
+        $outputs = @{}
+        foreach ($line in Get-Content -LiteralPath $outputFile) {
+            $k, $v = $line -split '=', 2
+            $outputs[$k] = $v
+        }
+        [pscustomobject]@{ ExitCode = $p.ExitCode; Outputs = $outputs; Output = $stdout.Result + $stderr.Result }
+    }
+
+    # pwsh as the runner finds it, on PATH (not this process's path, which is dotnet when pwsh is a dotnet tool).
+    $script:Pwsh = (Get-Command pwsh -CommandType Application | Select-Object -First 1).Source
+
+    # The run: lines of .github/workflows/release.yml, so the step tests run what the workflow runs.
+    $script:WorkflowRuns = @(Get-Content (Join-Path $PSScriptRoot '../../.github/workflows/release.yml') |
+            Where-Object { $_ -match '^\s+run: (.+)$' } | ForEach-Object { $Matches[1].Trim() })
+    $script:NotFound = 'gh: Not Found (HTTP 404)'
+}
+
+Describe 'Invoke-GhApi' {
+    It 'returns gh''s exit code and output, and leaves $LASTEXITCODE at 0' {
+        $stub = New-StubGh @(@{ Args = 'api repos/o/r/releases/tags/v1.2.3'; Stderr = $script:NotFound; Exit = 1 })
+        $old = $env:PATH
+        try {
+            $env:PATH = $stub + [IO.Path]::PathSeparator + $env:PATH
+            $r = Invoke-GhApi -Path 'repos/o/r/releases/tags/v1.2.3'
+            $last = $LASTEXITCODE
+        }
+        finally { $env:PATH = $old }
+        $r.ExitCode | Should -Be 1
+        $r.Output | Should -Match 'HTTP 404'
+        $last | Should -Be 0
+    }
+}
+
+Describe 'The workflow steps, run as the Actions runner runs them' {
+    BeforeAll {
+        $script:existsRun = './scripts/release/release-exists.ps1 -Tag $env:TAG'
+        $script:publishRun = './scripts/release/publish-release.ps1 -Tag $env:TAG -AssetDir assets'
+    }
+    It 'tests the workflow''s own run lines' {
+        $script:WorkflowRuns | Should -Contain './scripts/release/plugin-version.ps1'
+        $script:WorkflowRuns | Should -Contain $script:existsRun
+        $script:WorkflowRuns | Should -Contain $script:publishRun
+    }
+    It 'plugin-version exits 0 with the repo''s version and tag' {
+        $r = Invoke-RunnerStep -Run './scripts/release/plugin-version.ps1'
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $r.Outputs.version | Should -Be (Get-PluginVersion -Path (Join-Path $PSScriptRoot '../../.claude-plugin/plugin.json'))
+        $r.Outputs.tag | Should -Be "v$($r.Outputs.version)"
+    }
+    It 'release-exists exits 0 with exists=false on a 404' {
+        $stub = New-StubGh @(@{ Args = 'api repos/o/r/releases/tags/v1.2.3'; Stdout = '{"message":"Not Found","status":"404"}'; Stderr = $script:NotFound; Exit = 1 })
+        $r = Invoke-RunnerStep -Run $script:existsRun -Environment @{ TAG = 'v1.2.3' } -Path $stub
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $r.Outputs.exists | Should -Be 'false'
+    }
+    It 'release-exists exits 0 with exists=true when the release is found' {
+        $stub = New-StubGh @(@{ Args = 'api repos/o/r/releases/tags/v1.2.3'; Stdout = '{"tag_name":"v1.2.3"}'; Exit = 0 })
+        $r = Invoke-RunnerStep -Run $script:existsRun -Environment @{ TAG = 'v1.2.3' } -Path $stub
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $r.Outputs.exists | Should -Be 'true'
+    }
+    It 'release-exists fails the step on any other answer, such as a 401' {
+        $stub = New-StubGh @(@{ Args = 'api repos/o/r/releases/tags/v1.2.3'; Stderr = 'gh: Bad credentials (HTTP 401)'; Exit = 1 })
+        $r = Invoke-RunnerStep -Run $script:existsRun -Environment @{ TAG = 'v1.2.3' } -Path $stub
+        $r.ExitCode | Should -Not -Be 0
+        $r.Output | Should -Match 'Could not tell'
+        $r.Outputs.ContainsKey('exists') | Should -BeFalse
+    }
+    It 'publish-release exits 0 when the tag is missing and the release is created' {
+        $stub = New-StubGh @(
+            @{ Args = 'api repos/o/r/git/ref/tags/v1.2.3'; Stderr = $script:NotFound; Exit = 1 }
+            @{ Args = 'release create v1.2.3'; Stdout = 'https://github.com/o/r/releases/tag/v1.2.3'; Exit = 0 }
+        )
+        $assets = Join-Path $TestDrive "assets-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory $assets | Out-Null
+        'x' | Set-Content (Join-Path $assets 'fyrd.1.2.3.nupkg'); 'x' | Set-Content (Join-Path $assets 'fyrd-plugin-1.2.3.zip')
+        # The workflow passes a relative -AssetDir; the test passes its own folder with the same run line.
+        $run = $script:publishRun -replace '-AssetDir assets$', "-AssetDir '$assets'"
+        $r = Invoke-RunnerStep -Run $run -Environment @{ TAG = 'v1.2.3'; GITHUB_SHA = 'a' * 40 } -Path $stub
+        $r.ExitCode | Should -Be 0 -Because $r.Output
+        $calls = @(Get-Content (Join-Path $stub 'calls.log'))
+        $calls[0] | Should -Be 'api repos/o/r/git/ref/tags/v1.2.3'
+        $calls[1] | Should -BeLike "release create v1.2.3 * --repo o/r --title v1.2.3 --target $('a' * 40) --generate-notes"
+        $calls.Count | Should -Be 2
+    }
+    It 'publish-release fails the step when gh release create fails' {
+        $stub = New-StubGh @(
+            @{ Args = 'api repos/o/r/git/ref/tags/v1.2.3'; Stderr = $script:NotFound; Exit = 1 }
+            @{ Args = 'release create v1.2.3'; Stderr = 'a release with the same tag name already exists'; Exit = 1 }
+        )
+        $assets = Join-Path $TestDrive "assets-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory $assets | Out-Null
+        'x' | Set-Content (Join-Path $assets 'fyrd.1.2.3.nupkg'); 'x' | Set-Content (Join-Path $assets 'fyrd-plugin-1.2.3.zip')
+        $run = $script:publishRun -replace '-AssetDir assets$', "-AssetDir '$assets'"
+        $r = Invoke-RunnerStep -Run $run -Environment @{ TAG = 'v1.2.3'; GITHUB_SHA = 'a' * 40 } -Path $stub
+        $r.ExitCode | Should -Not -Be 0
+        $r.Output | Should -Match 'gh release create failed'
+    }
+}
