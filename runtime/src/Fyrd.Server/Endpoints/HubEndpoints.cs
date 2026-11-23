@@ -262,7 +262,7 @@ internal static partial class HubEndpoints
             InHub(id, state, async () =>
             {
                 if (!github.Configured) return NotConfigured();
-                var url = body?.Url;
+                var url = RequestedUrl(body);
                 var own = state.Sessions.First(s => s.Id == id).PullRequests;
                 if (!PullRequestUrl.IsValid(url) || !own.Contains(url!))
                     return Bad("That is not one of this session's pull requests.");
@@ -685,7 +685,7 @@ internal static partial class HubEndpoints
         InHub(id, state, async () =>
         {
             if (!github.Configured) return NotConfigured();
-            var url = body?.Url;
+            var url = RequestedUrl(body);
             if (!PullRequestUrl.IsValid(url) || !state.Sessions.First(s => s.Id == id).PullRequests.Contains(url!))
                 return Bad("That is not one of this session's pull requests.");
             try
@@ -705,6 +705,12 @@ internal static partial class HubEndpoints
                 return Results.Problem(e.Message, statusCode: StatusCodes.Status502BadGateway);
             }
         });
+
+    /// <summary>
+    /// The PR URL a console request names, lower-cased like every URL the hub keeps (<see cref="PullRequestUrl.Canonical"/>), so
+    /// it compares exactly with the session's PRs whatever case the caller used. Checked with <see cref="PullRequestUrl.IsValid"/> after.
+    /// </summary>
+    private static string? RequestedUrl(PrBody? body) => body?.Url is { } u ? PullRequestUrl.Canonical(u) : null;
 
     /// <summary>The PR URL is in <paramref name="owner"/>/<paramref name="repo"/> (GitHub names are case-insensitive).</summary>
     private static bool InRepo(string url, string owner, string repo) =>

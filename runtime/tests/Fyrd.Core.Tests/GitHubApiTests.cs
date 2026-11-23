@@ -190,6 +190,27 @@ public class GitHubApiTests
     }
 
     [Fact]
+    public async Task List_AndGet_LowerCaseTheUrlsGitHubSpellsInMixedCase()
+    {
+        var (api, graph, _) = Make();
+        graph.Then("""
+            {"data":{"repository":{"defaultBranchRef":{"name":"main"},
+              "all":{"nodes":[{"url":"https://github.com/Acme/Widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":false,"headRefName":"fyrd/b","baseRefName":"main","isCrossRepository":false}]},
+              "open":{"nodes":[{"url":"https://github.com/Acme/Widgets/pull/14","number":14,"title":"new","state":"OPEN","isDraft":false,"headRefName":"fyrd/b","baseRefName":"main",
+                 "mergeable":"CONFLICTING","commits":{"nodes":[]}}]}}}}
+            """);
+        graph.Then(Get(Pr()));
+
+        var pr = Assert.Single((await api.ListAsync("Acme/Widgets")).Prs);
+        var read = await api.GetAsync("https://github.com/ACME/widgets/pull/12");
+
+        Assert.Equal("https://github.com/acme/widgets/pull/14", pr.Url);
+        Assert.Equal("https://github.com/acme/widgets/pull/14", pr.Status!.Url);
+        Assert.Equal("conflicting", pr.Status.Mergeable); // still joined with the heavy alias
+        Assert.Equal("https://github.com/acme/widgets/pull/12", read.Url);
+    }
+
+    [Fact]
     public async Task List_RejectsAnInvalidRepo_WithoutARequest()
     {
         var (api, graph, _) = Make();

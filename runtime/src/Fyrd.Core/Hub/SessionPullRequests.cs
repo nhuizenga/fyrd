@@ -34,8 +34,8 @@ public sealed partial class SessionPullRequests(FyrdPaths paths, TimeProvider ti
     private static partial Regex SessionIdPattern();
 
     /// <summary>
-    /// A URL the store keeps: exactly what <see cref="PullRequestBlock.Normalize"/> builds (strict owner, repo and number,
-    /// no <c>..</c>, no leading zeros, a number that fits an <see cref="int"/>), so <see cref="PullRequestUrl.Parse"/>
+    /// A URL the store keeps: exactly what <see cref="PullRequestBlock.Normalize"/> builds (lower case, strict owner, repo
+    /// and number, no <c>..</c>, no leading zeros, a number that fits an <see cref="int"/>), so <see cref="PullRequestUrl.Parse"/>
     /// never throws on a cached URL.
     /// </summary>
     public static bool IsStorable(string? url) => url is not null && PullRequestBlock.Normalize(url) == url;
@@ -63,7 +63,8 @@ public sealed partial class SessionPullRequests(FyrdPaths paths, TimeProvider ti
     }
 
     /// <summary>
-    /// Adds each valid URL (<see cref="IsStorable"/>) the session does not have yet (compared case-insensitively) with
+    /// Adds each URL, lower-cased (<see cref="PullRequestUrl.Canonical"/>), that is valid (<see cref="IsStorable"/>) and that
+    /// the session does not have yet, with
     /// this source, and persists once. An invalid URL is skipped, and nothing is added for an id that is not
     /// <see cref="IsSessionId"/>; past <see cref="MaxBlockPerSession"/> block URLs more are skipped. A URL already
     /// cached keeps its first-seen time and source. Returns the URLs added.
@@ -80,9 +81,10 @@ public sealed partial class SessionPullRequests(FyrdPaths paths, TimeProvider ti
             list ??= [];
             var added = new List<string>();
             var blockCount = list.Count(p => p.Source == FromBlock);
-            foreach (var url in urls)
+            foreach (var raw in urls)
             {
-                if (!IsStorable(url) || list.Any(p => string.Equals(p.Url, url, StringComparison.OrdinalIgnoreCase))) continue;
+                var url = raw is null ? null : PullRequestUrl.Canonical(raw);
+                if (!IsStorable(url) || list.Any(p => p.Url == url)) continue;
                 if (source == FromBlock && blockCount >= MaxBlockPerSession) break;
                 list.Add(new SessionPullRequest(url, when, source));
                 added.Add(url);
@@ -160,9 +162,13 @@ public sealed partial class SessionPullRequests(FyrdPaths paths, TimeProvider ti
         foreach (var (id, list) in read?.Sessions ?? [])
         {
             // A hand-edited entry that the store would refuse is not a relationship: the same checks as Add, cap included.
+            // A file written before URLs were kept in lower case may hold mixed-case ones: those are lower-cased (and
+            // deduped, the first kept), not dropped.
             if (!IsSessionId(id)) continue;
-            var valid = (list ?? []).Where(p => p is not null && IsStorable(p.Url) && p.Source is FromBlock or FromBranch or FromStack)
-                .DistinctBy(p => p.Url, StringComparer.OrdinalIgnoreCase).ToList();
+            var valid = (list ?? []).Where(p => p?.Url is not null && p.Source is FromBlock or FromBranch or FromStack)
+                .Select(p => p with { Url = PullRequestUrl.Canonical(p.Url) })
+                .Where(p => IsStorable(p.Url))
+                .DistinctBy(p => p.Url, StringComparer.Ordinal).ToList();
             var blocks = valid.Where(p => p.Source == FromBlock).Skip(MaxBlockPerSession).ToHashSet();
             valid = valid.Where(p => !blocks.Contains(p)).ToList();
             if (valid.Count > 0) sessions[id] = valid;

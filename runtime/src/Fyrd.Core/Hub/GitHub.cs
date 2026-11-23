@@ -148,6 +148,13 @@ public static partial class PullRequestUrl
     /// <summary>Plain <c>https://github.com/{owner}/{repo}/pull/{n}</c> only, so nothing else ever reaches a query.</summary>
     public static bool IsValid(string? url) => url is not null && Pattern().IsMatch(url);
 
+    /// <summary>
+    /// The one spelling Fyrd keeps for a PR URL: all lower case. GitHub owner and repo names are case-insensitive (links and
+    /// API calls work in any case), so every URL entering the hub (a <c>fyrd-prs</c> block, a GitHub listing or read, the
+    /// cache file, a console request) is lower-cased, and URLs then compare exactly everywhere.
+    /// </summary>
+    public static string Canonical(string url) => url.ToLowerInvariant();
+
     /// <summary>Owner, repo and number of a valid URL; throws <see cref="GitHubException"/> for anything else.</summary>
     public static (string Owner, string Repo, int Number) Parse(string url)
     {

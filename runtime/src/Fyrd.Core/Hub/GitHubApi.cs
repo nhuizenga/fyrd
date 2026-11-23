@@ -74,12 +74,13 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
         var open = new Dictionary<string, PullRequestStatus>(StringComparer.Ordinal);
         if (Path(data, "repository", "open", "nodes", out var openNodes) && openNodes.ValueKind == JsonValueKind.Array)
             foreach (var e in openNodes.EnumerateArray())
-                if (Str(e, "url") is { } u && PullRequestUrl.IsValid(u)) open[u] = ParseStatus(u, e);
+                if (Str(e, "url") is { } u && PullRequestUrl.IsValid(u)) open[PullRequestUrl.Canonical(u)] = ParseStatus(PullRequestUrl.Canonical(u), e);
         var heads = new List<PullRequestHead>();
         if (Path(data, "repository", "all", "nodes", out var nodes) && nodes.ValueKind == JsonValueKind.Array)
             foreach (var e in nodes.EnumerateArray())
             {
-                var url = Str(e, "url");
+                // GitHub spells owner and repo as they are named (mixed case); Fyrd keeps PR URLs in lower case.
+                var url = Str(e, "url") is { } raw ? PullRequestUrl.Canonical(raw) : null;
                 var branch = Str(e, "headRefName");
                 if (!PullRequestUrl.IsValid(url) || string.IsNullOrEmpty(branch)) continue;
                 var light = ParseStatus(url!, e);
@@ -102,7 +103,7 @@ public sealed class GitHubApi(GitHubToken token, HttpClient http, IGitHubClient 
     {
         var (owner, repo, number) = PullRequestUrl.Parse(url);
         using var data = await QueryAsync(GetQuery, new { owner, name = repo, number }, $"{owner}/{repo}", ct, url);
-        return ParseStatus(url, NodeOf(Data(data), url));
+        return ParseStatus(PullRequestUrl.Canonical(url), NodeOf(Data(data), url));
     }
 
     public async Task MarkReadyAsync(string url, CancellationToken ct = default)

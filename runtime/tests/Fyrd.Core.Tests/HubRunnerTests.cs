@@ -1130,6 +1130,27 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_ABlockUrlAndABranchMatchInAnotherCase_AreOnePr_InLowerCase_WithItsStatus()
+    {
+        var gh = new StubGitHub();
+        const string Spelled = "https://github.com/Acme/widgets/pull/1"; // as GitHub names the repo
+        gh.ByRepo["acme/widgets"] = [new(Spelled, "fyrd/shared-memory")
+        {
+            Base = "main", State = "open", Status = new PullRequestStatus(Spelled, 1, "PR 1", "open", false, "passing"),
+        }];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/ACME/Widgets/pull/1"));
+
+        await Make(gh).PollOnceAsync(default);
+
+        const string Url = "https://github.com/acme/widgets/pull/1";
+        Assert.Equal([Url], _state.Sessions.Single().PullRequests);
+        Assert.Equal([Url], _state.PullRequests.Keys);
+        Assert.Equal(Url, _state.PullRequests[Url].Url);
+        Assert.Equal([Url], new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
     public async Task Poll_ReapsTheCacheOfArchivedAndDeletedSessions_KeepsUnreadableOnes()
     {
         var store = new SessionPullRequests(_home.Paths, _time);

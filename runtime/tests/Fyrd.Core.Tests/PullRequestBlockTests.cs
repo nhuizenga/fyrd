@@ -21,6 +21,13 @@ public sealed class PullRequestBlockTests
     }
 
     [Fact]
+    public void Parse_LowerCasesOwnerAndRepo()
+    {
+        var r = PullRequestBlock.Parse(Block("https://github.com/ACME/Widgets/pull/1", "https://github.com/Octo-Org/My.Repo_X/pull/2"));
+        Assert.Equal(["https://github.com/acme/widgets/pull/1", "https://github.com/octo-org/my.repo_x/pull/2"], r);
+    }
+
+    [Fact]
     public void Parse_DedupesCaseInsensitively_AcrossLinesAndBlocks()
     {
         var r = PullRequestBlock.Parse(Block("https://github.com/acme/widgets/pull/1", "https://github.com/ACME/Widgets/pull/1")

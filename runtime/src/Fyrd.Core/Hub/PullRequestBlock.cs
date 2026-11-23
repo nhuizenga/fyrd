@@ -7,8 +7,8 @@ namespace Fyrd.Core.Hub;
 /// Parses fenced <c>fyrd-prs</c> blocks: one pull request URL per line, which a session emits (the <c>fyrd:checkouts</c>
 /// skill) to say which pull requests it works on. The text is model output, so it is untrusted: a line counts only when
 /// it is exactly <c>https://github.com/&lt;owner&gt;/&lt;repo&gt;/pull/&lt;number&gt;</c> (surrounding spaces and an
-/// upper-case scheme or host aside); any other line is ignored. URLs come back normalised (lower-case scheme and host,
-/// no leading zeros), each one once, at most <see cref="MaxPerBlock"/> per block, and every one passes
+/// upper-case scheme or host aside); any other line is ignored. URLs come back normalised (all lower case, see
+/// <see cref="PullRequestUrl.Canonical"/>, and no leading zeros), each one once, at most <see cref="MaxPerBlock"/> per block, and every one passes
 /// <see cref="PullRequestUrl.IsValid"/>.
 /// </summary>
 public static partial class PullRequestBlock
@@ -40,10 +40,10 @@ public static partial class PullRequestBlock
             foreach (var raw in m.Groups["body"].Value.Split('\n'))
             {
                 if (block.Count == MaxPerBlock) break;
-                if (Normalize(raw) is { } url && !block.Contains(url, StringComparer.OrdinalIgnoreCase)) block.Add(url);
+                if (Normalize(raw) is { } url && !block.Contains(url)) block.Add(url);
             }
             foreach (var url in block)
-                if (!all.Contains(url, StringComparer.OrdinalIgnoreCase)) all.Add(url);
+                if (!all.Contains(url)) all.Add(url);
         }
         return all;
     }
@@ -59,7 +59,8 @@ public static partial class PullRequestBlock
         if (repo is "." or "..") return null;
         if (!long.TryParse(m.Groups["number"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var number)
             || number is < 1 or > int.MaxValue) return null;
-        var url = $"https://github.com/{m.Groups["owner"].Value}/{repo}/pull/{number.ToString(CultureInfo.InvariantCulture)}";
+        var url = PullRequestUrl.Canonical(
+            $"https://github.com/{m.Groups["owner"].Value}/{repo}/pull/{number.ToString(CultureInfo.InvariantCulture)}");
         // The value that is stored and later queried is checked again, as built.
         return PullRequestUrl.IsValid(url) ? url : null;
     }

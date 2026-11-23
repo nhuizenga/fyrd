@@ -40,7 +40,7 @@ public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
         {
             try
             {
-                listing = new Listing(now, await github.ListAsync(repo!, ct));
+                listing = new Listing(now, Canonical(await github.ListAsync(repo!, ct)));
             }
             catch (GitHubRateLimitException e)
             {
@@ -59,6 +59,16 @@ public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
         return set;
     }
 
+    /// <summary>The listing with every PR URL lower-cased (<see cref="PullRequestUrl.Canonical"/>), whatever the client returned.</summary>
+    private static PullRequestListing Canonical(PullRequestListing l) => l with
+    {
+        Prs = l.Prs.Select(p => p with
+        {
+            Url = PullRequestUrl.Canonical(p.Url),
+            Status = p.Status is { } st ? st with { Url = PullRequestUrl.Canonical(st.Url) } : null,
+        }).ToList(),
+    };
+
     /// <summary>
     /// Reads each owned PR the listing left partial on its own and stores the full status in the listing, so each is read at
     /// most once per listing (a failed read keeps the partial status until then). A rate limit stops the reads and the listing.
@@ -75,7 +85,7 @@ public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
         foreach (var url in partial)
         {
             PullRequestStatus? status;
-            try { status = await github.GetAsync(url, ct); }
+            try { status = await github.GetAsync(url, ct) is { } read ? read with { Url = PullRequestUrl.Canonical(read.Url) } : null; }
             catch (GitHubRateLimitException e) { lock (_gate) _notBefore[repo] = e.ResetAt; return; }
             // A failed read keeps the partial status until the next listing, so a broken PR is not re-read every poll.
             catch (GitHubException) { status = null; }
@@ -92,7 +102,10 @@ public sealed class OwnedPullRequests(IGitHub github, TimeProvider time)
     public PullRequestStatus? Status(string url)
     {
         lock (_gate)
-            return _byRepo.Values.SelectMany(l => l.Value.Prs).FirstOrDefault(p => p.Url == url)?.Status;
+        {
+            var key = PullRequestUrl.Canonical(url);
+            return _byRepo.Values.SelectMany(l => l.Value.Prs).FirstOrDefault(p => p.Url == key)?.Status;
+        }
     }
 
     /// <summary>Makes the repo's next poll list again (after a console action). The old listing stays as the fallback if that fails.</summary>

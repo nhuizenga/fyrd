@@ -766,6 +766,38 @@ public class HubApiTests
         Assert.Equal(StackMergeStatus.Cancelled, jobs.Snapshot().Single().Status);
     }
 
+    [Fact]
+    public async Task PrActions_AcceptAMixedCaseUrl_ForTheSessionsLowerCasePr()
+    {
+        // The hub keeps PR URLs in lower case; a request may spell owner and repo as GitHub names them.
+        const string Spelled = "https://github.com/ACME/Widgets/pull/12";
+        using var f = new FyrdFactory();
+        SeedWithPr(f, draft: true);
+
+        var ready = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/ready", new { url = Spelled });
+        Assert.Equal(HttpStatusCode.NoContent, ready.StatusCode);
+        Assert.Equal([Pr], f.GitHub.Readied);
+
+        f.GitHub.Statuses[Pr] = f.GitHub.Statuses[Pr] with { Draft = false };
+        var merge = await f.CreateClient().PostAsJsonAsync($"/api/hub/sessions/{SessionId}/pull-requests/merge", new { url = Spelled });
+        Assert.Equal(HttpStatusCode.NoContent, merge.StatusCode);
+        Assert.Equal([Pr], f.GitHub.Merged);
+    }
+
+    [Fact]
+    public async Task MergeStack_AcceptsAMixedCaseUrl_ForTheSessionsLowerCasePr()
+    {
+        using var f = new FyrdFactory();
+        SeedChain(f, Open(Pr11, 11, "a", "main"), Open(Pr, 12, "b", "a"));
+
+        var r = await MergeStack(f, "https://github.com/Acme/WIDGETS/pull/12");
+
+        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);
+        var jobId = (await ReadJson(r)).GetProperty("jobId").GetString()!;
+        await f.Services.GetRequiredService<StackMergeJobs>().Completion(jobId)!.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal([Pr, Pr11], f.GitHub.Merged);
+    }
+
     private const string ForeignPr = "https://github.com/other/private/pull/5";
     private const string MissingPr = "https://github.com/acme/widgets/pull/404";
 

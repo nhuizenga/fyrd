@@ -104,6 +104,26 @@ public sealed class SessionPullRequestsTests : IDisposable
     }
 
     [Fact]
+    public void Load_LowerCasesMixedCaseEntries_FromAnOlderFile_AndDedupesThem()
+    {
+        Directory.CreateDirectory(_home.Paths.HubDir);
+        File.WriteAllText(File_, """
+            {"sessions":{"session_s1":[{"url":"https://github.com/ACME/Widgets/pull/1","firstSeen":"2026-11-01T00:00:00Z","source":"branch"},
+                               {"url":"https://github.com/acme/widgets/pull/1","firstSeen":"2026-11-02T00:00:00Z","source":"block"},
+                               {"url":"https://github.com/Acme/widgets/pull/2","firstSeen":"2026-11-03T00:00:00Z","source":"stack"}]}}
+            """);
+        var store = Make();
+
+        var list = store.For("session_s1");
+        Assert.Equal([Pr1, Pr2], list.Select(p => p.Url));
+        Assert.Equal((SessionPullRequests.FromBranch, DateTimeOffset.Parse("2026-11-01T00:00:00Z")), (list[0].Source, list[0].FirstSeen));
+        Assert.Equal(SessionPullRequests.FromStack, list[1].Source);
+        // A mixed-case spelling of a cached PR is the same PR, and is stored lower-cased.
+        Assert.Empty(store.Add("session_s1", ["https://github.com/acme/WIDGETS/pull/2"], SessionPullRequests.FromBlock));
+        Assert.Equal(["https://github.com/acme/widgets/pull/3"], store.Add("session_s1", ["https://github.com/ACME/widgets/pull/3"], SessionPullRequests.FromBlock));
+    }
+
+    [Fact]
     public void Add_RefusesTheUrlsLoadWouldRefuse()
     {
         var store = Make();
