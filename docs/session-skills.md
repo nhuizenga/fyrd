@@ -2,11 +2,14 @@
 
 A session skill is a part of a role's instructions that only some tasks need. The Builder's rules for stacked pull requests are one: most builds are a single pull request and never use them. Fyrd keeps such a part out of the role's persona and gives it to the session as a skill, which the session loads with the Skill tool when the situation comes up. Every session of that role then starts with shorter instructions.
 
-Fyrd ships one session skill, for the Builder:
+Fyrd ships two session skills:
 
-| Skill | Holds | A Builder loads it |
-| --- | --- | --- |
-| `stacked-pull-requests` (`fyrd:stacked-pull-requests` in a session) | How to build, open, fix, validate and move work in a native GitHub stack | when the work is, or may be, split into more than one pull request |
+| Skill | Roles | Holds | A session loads it |
+| --- | --- | --- | --- |
+| `stacked-pull-requests` (`fyrd:stacked-pull-requests` in a session) | Builder | How to build, open, fix, validate and move work in a native GitHub stack | when the work is, or may be, split into more than one pull request |
+| `validate-dbt` (`fyrd:validate-dbt`) | Builder, Validator | The checks a dbt change needs before merge that its PR checks may skip (compile and build downstream on real rows, selector hygiene, incremental boundaries, grain, cross-env columns, the repo's own checklists), within the limits on targets and live tables, and a report per test class | when a diff touches a dbt project's `models/`, `macros/`, `tests/`, `seeds/`, `snapshots/`, `dbt_project.yml`, `packages.yml` or `selectors.yml`, wherever the project sits, and before a warehouse build is started or requested |
+
+A Builder's worker gets no session skills of its own: the Build rules it is given tell it to load `fyrd:validate-dbt` in a dbt project, which it can only from the plugin, so without the plugin it reports those checks as not run. The same holds for a Validator run as a Builder's subagent (see Limits).
 
 Only rules that some tasks never need belong in a session skill. Rules every task reaches, such as the Builder's rules for pull request events, stay in the persona: a skill that is always loaded saves nothing.
 
@@ -89,3 +92,4 @@ In a session created after you saved the environment:
 - **New sessions only.** A setup script runs when a session's environment is built. A session that is already running keeps the plugin it started with, and the persona text it started with.
 - **Size.** A skill body holds at most 1,500 words. After a session's context is compacted it keeps only the first 5,000 tokens of each loaded skill, so put the rules that matter most first.
 - **Subagent texts.** The cut of a persona that another session runs as a subagent (`<subagent-persona>`) carries no session skills.
+- **Inline mode reaches only the Builder.** In inline mode the Validate dbt text is in the Builder's own instructions only: a Builder's workers and its Validator subagents never get it, and without the plugin in their skill list they report its checks as not run.

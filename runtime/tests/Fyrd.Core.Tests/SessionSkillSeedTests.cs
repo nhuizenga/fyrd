@@ -7,7 +7,14 @@ namespace Fyrd.Core.Tests;
 /// <summary>Checks the checked-in session skill seeds (the plugin skills under <c>skills/</c> that name <c>roles</c>), and the Builder persona they were cut from.</summary>
 public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposable
 {
-    private static readonly string[] Names = ["stacked-pull-requests"];
+    private static readonly string[] Names = ["stacked-pull-requests", "validate-dbt"];
+
+    /// <summary>The roles each seed belongs to: every one is the Builder's; Validate dbt is the Validator's too.</summary>
+    private static readonly Dictionary<string, string[]> RolesOf = new()
+    {
+        ["stacked-pull-requests"] = ["builder"],
+        ["validate-dbt"] = ["builder", "validator"],
+    };
     private readonly TempHome _home = new();
 
     public void Dispose() => _home.Dispose();
@@ -26,7 +33,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
         Assert.Equal(Names, SeedDirs().Select(Path.GetFileName).Order(StringComparer.Ordinal));
         Assert.All(skills, s =>
         {
-            Assert.Equal(["builder"], s.Roles);
+            Assert.Equal(RolesOf[s.Name], s.Roles);
             Assert.StartsWith("# ", s.Body, StringComparison.Ordinal);
             Assert.False(s.UpdateAvailable);
         });
@@ -60,6 +67,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// <summary>A description opens with the name of the section the skill holds (the persona refers to it by that name) and says when to load it.</summary>
     [Theory]
     [InlineData("stacked-pull-requests", "Stacked pull requests", "more than one pull request")]
+    [InlineData("validate-dbt", "Validate dbt", "before you start or request a warehouse build")]
     public void EachDescription_NamesItsSection_AndSaysWhenToLoadIt(string name, string section, string when)
     {
         var skill = Skills().Single(s => s.Name == name);
@@ -72,11 +80,34 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     }
 
     /// <summary>
+    /// Validate dbt is invoked where each caller sees it: a Validator subagent gets only the persona's intro, "The check"
+    /// and the Inputs bullet, and a worker gets the Build rules bullets, so the lines that load it sit there.
+    /// </summary>
+    [Fact]
+    public void ValidateDbt_IsInvokedWhereItsCallersSeeIt()
+    {
+        static string Section(string d, string heading)
+        {
+            var start = d.IndexOf(heading + "\n", StringComparison.Ordinal);
+            Assert.True(start >= 0, heading);
+            var end = d.IndexOf("\n# ", start + heading.Length, StringComparison.Ordinal);
+            return end < 0 ? d[start..] : d[start..end];
+        }
+        var validator = RepoSeeds.Personas(_home.Paths).Single(p => p.Id == "validator").Definition;
+        Assert.Contains("run the Validate dbt skill's checks (`fyrd:validate-dbt`) here and in step 3", Section(validator, "# The check"), StringComparison.Ordinal);
+        var builder = Builder().Definition;
+        Assert.Contains("In a dbt project, also run the checks of the Validate dbt skill (`fyrd:validate-dbt`)", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("how it was tested, any Validate dbt report,", Section(builder, "# Build rules"), StringComparison.Ordinal);
+        Assert.Contains("load Validate dbt (`fyrd:validate-dbt`) and do its Builder part", Section(builder, "# Your job"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A word budget per skill, a little above its size, well under <see cref="SessionSkills.MaxWords"/>. A skill that
     /// outgrows it is tightened, or the budget is raised on purpose.
     /// </summary>
     [Theory]
     [InlineData("stacked-pull-requests", 540)]
+    [InlineData("validate-dbt", 1110)]
     public void EverySeed_StaysUnderItsWordBudget(string name, int budget)
     {
         var words = Words(Skills().Single(s => s.Name == name).Body);
@@ -171,7 +202,7 @@ public sealed class SessionSkillSeedTests(ITestOutputHelper output) : IDisposabl
     /// What a Builder session is given, in words: without the confirmed plugin setup script every rule is inline; with
     /// it, the skills are a line each. The installed prompt has a budget so the saving is kept.
     /// </summary>
-    private const int InstalledBudget = 4170;
+    private const int InstalledBudget = 4290;
 
     [Fact]
     public void TheBuildersPrompt_IsSmallerOnceTheSkillsAreInstalled()
