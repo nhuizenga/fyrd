@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
-import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine } from "./lib.mjs";
+import { readServerFile, writeServerFile, isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState, readSessionSkills, sessionSkillsLine, serverLaunch, toolMissing, findOnPath } from "./lib.mjs";
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "fyrd-test-"));
 const ok = async () => ({ ok: true, json: async () => ({ status: "ok" }) });
@@ -148,3 +148,39 @@ test("readSessionSkills reads the setup-script state, and gives null when it can
   assert.equal(await readSessionSkills("http://x", async () => ({ ok: true, json: async () => { throw new SyntaxError("not json"); } })), null);
 });
 
+
+test("serverLaunch runs the build output from the project folder in a clone", () => {
+  const root = path.join("r");
+  const l = serverLaunch(root, 4871, (p) => p === path.join(root, "runtime/src/Fyrd.Server/Fyrd.Server.csproj"));
+  assert.equal(l.source, true);
+  assert.equal(l.cmd, "dotnet");
+  assert.deepEqual(l.args, [path.join(root, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll"), "--urls", "http://127.0.0.1:4871"]);
+  assert.equal(l.cwd, path.join(root, "runtime/src/Fyrd.Server"));
+});
+
+test("serverLaunch runs the fyrd tool with the plugin's skills and docs when there is no runtime source", () => {
+  const root = path.join("plugin");
+  const l = serverLaunch(root, 4870, () => false);
+  const skills = path.join(root, "skills");
+  assert.equal(l.source, false);
+  assert.equal(l.cmd, "fyrd");
+  assert.deepEqual(l.args, ["--urls", "http://127.0.0.1:4870", `--Fyrd:HubPersonasSeedDir=${skills}`,
+    `--Fyrd:HubSkillsDir=${skills}`, `--Fyrd:SessionSkillsSeedDir=${skills}`, `--Fyrd:DocsDir=${path.join(root, "docs")}`]);
+  assert.equal(l.cwd, root);
+});
+
+test("toolMissing says how to install the tool from a release", () => {
+  assert.match(toolMissing, /dotnet tool install --global fyrd --add-source/);
+});
+
+test("findOnPath finds a command on POSIX PATH and returns null when absent", () => {
+  const env = { PATH: "/a:/b" };
+  assert.equal(findOnPath("fyrd", env, "linux", (p) => p === "/b/fyrd"), "/b/fyrd");
+  assert.equal(findOnPath("fyrd", env, "linux", () => false), null);
+  assert.equal(findOnPath("fyrd", {}, "linux", () => true), null);
+});
+
+test("findOnPath tries PATHEXT on Windows", () => {
+  const env = { Path: "C:\\t;C:\\u", PATHEXT: ".COM;.EXE" };
+  assert.equal(findOnPath("fyrd", env, "win32", (p) => p === "C:\\u\\fyrd.EXE"), "C:\\u\\fyrd.EXE");
+});

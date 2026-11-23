@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   runDir, readServerFile, writeServerFile, removeServerFile,
   isServerAlive, findFreePort, needsConsoleBuild, tokenWarning, gitHubLine, statusLine, readHubState,
-  readSessionSkills, sessionSkillsLine,
+  readSessionSkills, sessionSkillsLine, serverLaunch, toolMissing, findOnPath,
 } from "./lib.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -56,20 +56,29 @@ async function up() {
   }
   removeServerFile(dir);
 
-  if (needsConsoleBuild(repoRoot)) {
-    run("npm", ["ci"], path.join(repoRoot, "console"));
-    run("npm", ["run", "build"], path.join(repoRoot, "console"));
-  }
-  run("dotnet", ["build", "runtime/src/Fyrd.Server", "-c", "Release"], repoRoot);
-
   const port = await findFreePort();
+  const launch = serverLaunch(repoRoot, port);
+  if (launch.source) {
+    if (needsConsoleBuild(repoRoot)) {
+      run("npm", ["ci"], path.join(repoRoot, "console"));
+      run("npm", ["run", "build"], path.join(repoRoot, "console"));
+    }
+    run("dotnet", ["build", "runtime/src/Fyrd.Server", "-c", "Release"], repoRoot);
+  } else {
+    launch.cmd = findOnPath(launch.cmd);
+    if (!launch.cmd) {
+      console.error(toolMissing);
+      process.exit(1);
+    }
+  }
+
   fs.mkdirSync(dir, { recursive: true });
   const logPath = path.join(dir, "server.log");
   const log = fs.openSync(logPath, "w");
-  const dll = path.join(repoRoot, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll");
-  // The content root must be the project dir so wwwroot (the built console) is found regardless of caller cwd.
-  const child = spawn("dotnet", [dll, "--urls", `http://127.0.0.1:${port}`], {
-    cwd: path.join(repoRoot, "runtime/src/Fyrd.Server"),
+  // From a clone the content root must be the project dir so wwwroot (the built console) is found regardless of caller
+  // cwd; the dotnet tool finds its console beside its own assembly.
+  const child = spawn(launch.cmd, launch.args, {
+    cwd: launch.cwd,
     detached: true, stdio: ["ignore", log, log], windowsHide: true,
   });
   child.unref();

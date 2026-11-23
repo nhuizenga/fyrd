@@ -128,3 +128,47 @@ export function sessionSkillsLine(setup) {
   }
   return "Session skills: inline (the plugin setup script is not confirmed)";
 }
+
+/**
+ * How `up` starts the server. In a clone (runtime/src/Fyrd.Server is there) it builds the console when needed, builds the
+ * server and runs the build output from the project folder, so wwwroot is found. In the release's plugin zip, which has
+ * no runtime source, it runs the `fyrd` dotnet tool from the same release (see docs/releases.md) and points it at the
+ * plugin's own skills and docs, so the skills the console serves are the ones Claude Code loads.
+ */
+export function serverLaunch(repoRoot, port, exists = fs.existsSync) {
+  const urls = ["--urls", `http://127.0.0.1:${port}`];
+  if (exists(path.join(repoRoot, "runtime/src/Fyrd.Server/Fyrd.Server.csproj"))) {
+    return {
+      source: true,
+      cmd: "dotnet",
+      args: [path.join(repoRoot, "runtime/src/Fyrd.Server/bin/Release/net10.0/Fyrd.Server.dll"), ...urls],
+      cwd: path.join(repoRoot, "runtime/src/Fyrd.Server"),
+    };
+  }
+  const skills = path.join(repoRoot, "skills");
+  return {
+    source: false,
+    cmd: "fyrd",
+    args: [...urls, `--Fyrd:HubPersonasSeedDir=${skills}`, `--Fyrd:HubSkillsDir=${skills}`,
+      `--Fyrd:SessionSkillsSeedDir=${skills}`, `--Fyrd:DocsDir=${path.join(repoRoot, "docs")}`],
+    cwd: repoRoot,
+  };
+}
+
+/** What `up` prints when the plugin has no runtime source and the `fyrd` tool is not on PATH. */
+export const toolMissing =
+  "The fyrd console tool is not installed. Install it from the release this plugin came from: "
+  + "dotnet tool install --global fyrd --add-source <folder with fyrd.<version>.nupkg> --version <version> (see docs/releases.md).";
+
+/** The full path of `cmd` on PATH (with PATHEXT on Windows), else null. */
+export function findOnPath(cmd, env = process.env, platform = process.platform, exists = fs.existsSync) {
+  const win = platform === "win32";
+  const exts = win ? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
+  for (const d of (env.PATH || env.Path || "").split(win ? ";" : ":").filter(Boolean)) {
+    for (const ext of exts) {
+      const p = (win ? path.win32 : path.posix).join(d, cmd + ext);
+      if (exists(p)) return p;
+    }
+  }
+  return null;
+}
