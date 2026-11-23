@@ -32,11 +32,6 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 
-function Get-PluginZipName {
-    param([Parameter(Mandatory)][string]$Version)
-    "fyrd-plugin-$Version.zip"
-}
-
 # True when the repo-relative path (forward slashes) belongs in the plugin zip.
 function Test-PluginFile {
     param([Parameter(Mandatory)][string]$Path)

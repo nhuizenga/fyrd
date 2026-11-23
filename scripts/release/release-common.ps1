@@ -23,6 +23,17 @@ function Get-ReleaseTag {
     "v$Version"
 }
 
+# The release's two asset file names for a version.
+function Get-ToolPackageName {
+    param([Parameter(Mandatory)][string]$Version)
+    "fyrd.$Version.nupkg"
+}
+
+function Get-PluginZipName {
+    param([Parameter(Mandatory)][string]$Version)
+    "fyrd-plugin-$Version.zip"
+}
+
 function Write-StepOutput {
     param([string]$Path, [Parameter(Mandatory)][hashtable]$Values)
     foreach ($key in $Values.Keys | Sort-Object) {
@@ -37,4 +48,15 @@ function Invoke-GhApi {
     param([Parameter(Mandatory)][string]$Path)
     $output = & gh api $Path 2>&1 | Out-String
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+}
+
+# Runs a command in a folder and throws when it exits non-zero.
+function Invoke-Checked {
+    param([string]$Dir, [string]$Command, [string[]]$Arguments)
+    Push-Location $Dir
+    try {
+        & $Command @Arguments
+        if ($LASTEXITCODE -ne 0) { throw "$Command $($Arguments -join ' ') failed with exit code $LASTEXITCODE" }
+    }
+    finally { Pop-Location }
 }

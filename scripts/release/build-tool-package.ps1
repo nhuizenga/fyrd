@@ -32,11 +32,6 @@ $script:RequiredToolFiles = @(
     'docs/session-skills.md'
 )
 
-function Get-ToolPackageName {
-    param([Parameter(Mandatory)][string]$Version)
-    "fyrd.$Version.nupkg"
-}
-
 # The problems with the package at -Path, one string each; none means it is good.
 function Test-ToolPackage {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Version)
@@ -70,16 +65,6 @@ function Read-ZipText {
     param($Zip, [string]$Name)
     $reader = [System.IO.StreamReader]::new($Zip.GetEntry($Name).Open())
     try { $reader.ReadToEnd() } finally { $reader.Dispose() }
-}
-
-function Invoke-Checked {
-    param([string]$Dir, [string]$Command, [string[]]$Arguments)
-    Push-Location $Dir
-    try {
-        & $Command @Arguments
-        if ($LASTEXITCODE -ne 0) { throw "$Command $($Arguments -join ' ') failed with exit code $LASTEXITCODE" }
-    }
-    finally { Pop-Location }
 }
 
 function Invoke-Main {

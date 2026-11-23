@@ -1,4 +1,4 @@
-# Pester 5 tests for the release scripts the release workflow (.github/workflows/release.yml) runs.
+# Pester 6 tests (invoke-tests.ps1 pins Pester 6.2.0) for the release scripts the release workflow (.github/workflows/release.yml) runs.
 # Run: pwsh ./scripts/release/invoke-tests.ps1   (or: pwsh -c "Invoke-Pester ./scripts/release")
 
 BeforeAll {
@@ -7,6 +7,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'build-tool-package.ps1')
     . (Join-Path $PSScriptRoot 'build-plugin-zip.ps1')
     . (Join-Path $PSScriptRoot 'publish-release.ps1')
+    . (Join-Path $PSScriptRoot 'invoke-all-tests.ps1')
     Add-Type -AssemblyName System.IO.Compression.FileSystem
 
     function New-TestZip {
@@ -277,5 +278,57 @@ Describe 'Assert-TagOnTarget' {
     It 'throws when an annotated tag object cannot be read' {
         $api = New-FakeApi @{ 'repos/o/r/git/ref/tags/v1.2.3' = @{ object = @{ type = 'tag'; sha = $script:tagObject } } }
         { Assert-TagOnTarget -Repo 'o/r' -Tag 'v1.2.3' -Target $script:target -Invoke $api } | Should -Throw '*Could not read tag object*'
+    }
+}
+
+Describe 'Get-ReleaseAssets' {
+    It 'returns the tool package and plugin zip named after the tag''s version' {
+        $d = Join-Path $TestDrive 'good'; New-Item -ItemType Directory $d | Out-Null
+        'x' | Set-Content (Join-Path $d 'fyrd.1.2.3.nupkg'); 'x' | Set-Content (Join-Path $d 'fyrd-plugin-1.2.3.zip')
+        Get-ReleaseAssets -Dir $d -Tag 'v1.2.3' | Should -Be @((Join-Path $d 'fyrd.1.2.3.nupkg'), (Join-Path $d 'fyrd-plugin-1.2.3.zip'))
+    }
+    It 'refuses a missing asset or one for another version' {
+        $d = Join-Path $TestDrive 'old'; New-Item -ItemType Directory $d | Out-Null
+        'x' | Set-Content (Join-Path $d 'fyrd.1.2.2.nupkg'); 'x' | Set-Content (Join-Path $d 'fyrd-plugin-1.2.3.zip')
+        { Get-ReleaseAssets -Dir $d -Tag 'v1.2.3' } | Should -Throw '*missing: fyrd.1.2.3.nupkg extra: fyrd.1.2.2.nupkg*'
+    }
+    It 'refuses any extra file, even in a subfolder' {
+        $d = Join-Path $TestDrive 'extra'; New-Item -ItemType Directory (Join-Path $d 'sub') | Out-Null
+        'x' | Set-Content (Join-Path $d 'fyrd.1.2.3.nupkg'); 'x' | Set-Content (Join-Path $d 'fyrd-plugin-1.2.3.zip')
+        'x' | Set-Content (Join-Path $d 'sub/evil.sh')
+        { Get-ReleaseAssets -Dir $d -Tag 'v1.2.3' } | Should -Throw '*extra: sub, sub/evil.sh*'
+    }
+    It 'refuses a missing folder or a bad tag' {
+        { Get-ReleaseAssets -Dir (Join-Path $TestDrive 'nope') -Tag 'v1.2.3' } | Should -Throw '*not found*'
+        { Get-ReleaseAssets -Dir $TestDrive -Tag 'v1.2' } | Should -Throw '*vMAJOR*'
+    }
+}
+
+Describe 'Get-TestSteps' {
+    BeforeAll { $script:steps = @(Get-TestSteps -Root '/r') }
+    It 'runs <_> before the release is built' -ForEach @(
+        'dotnet test runtime/Fyrd.sln', 'node --test scripts/*.test.mjs', 'npm ci', 'npx tsc -b', 'npm test'
+    ) {
+        @($script:steps | ForEach-Object { "$($_.Command) $($_.Arguments -join ' ')" }) | Should -Contain $_
+    }
+    It 'runs the Pester tests through invoke-tests.ps1' {
+        $pester = $script:steps | Where-Object Command -EQ 'pwsh'
+        $pester.Arguments[-1] | Should -Be (Join-Path $PSScriptRoot 'invoke-tests.ps1')
+    }
+    It 'installs the console''s dependencies before its type check and tests, in console/' {
+        $names = @($script:steps | ForEach-Object Name)
+        $names.IndexOf('console dependencies') | Should -BeLessThan $names.IndexOf('console type check')
+        $names.IndexOf('console dependencies') | Should -BeLessThan $names.IndexOf('console tests')
+        ($script:steps | Where-Object Command -In 'npm', 'npx').Dir | Sort-Object -Unique | Should -Be (Join-Path '/r' 'console')
+    }
+}
+
+Describe 'Invoke-TestSteps' {
+    It 'stops at the first failing step' {
+        $ran = [System.Collections.Generic.List[string]]::new()
+        $steps = @('a', 'b', 'c') | ForEach-Object { [pscustomobject]@{ Name = $_; Command = $_; Arguments = @() } }
+        { Invoke-TestSteps -Steps $steps -Run { param($s) $ran.Add($s.Name); if ($s.Name -eq 'b') { throw 'b failed' } } 6> $null } |
+            Should -Throw 'b failed'
+        $ran | Should -Be @('a', 'b')
     }
 }

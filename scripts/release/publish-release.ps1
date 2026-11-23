@@ -10,19 +10,43 @@ publish that other commit under this version. If the tag is missing, or already 
 -Target. gh refuses when a release with that tag already exists, so a second run for the same version fails rather
 than replacing anything. Needs a GH_TOKEN with contents: write.
 
+The assets are the two files in -AssetDir named after the tag's version (fyrd.<version>.nupkg and
+fyrd-plugin-<version>.zip); the workflow downloads them there from the build job. Any other file in -AssetDir, or a
+missing one, stops it before it calls GitHub.
+
+It runs only gh and these scripts: no npm, dotnet or PSGallery code, so the workflow can run it in the one job that may
+write to the repo.
+
 .EXAMPLE
-pwsh ./scripts/release/publish-release.ps1 -Repo nhuizenga/fyrd -Tag v0.2.57 -Target <sha> -Assets out/fyrd.0.2.57.nupkg, out/fyrd-plugin-0.2.57.zip
+pwsh ./scripts/release/publish-release.ps1 -Repo nhuizenga/fyrd -Tag v0.2.57 -Target <sha> -AssetDir out
 #>
 [CmdletBinding()]
 param(
     [string]$Repo = $env:GITHUB_REPOSITORY,
     [string]$Tag,
     [string]$Target = $env:GITHUB_SHA,
-    [string[]]$Assets = @()
+    [string]$AssetDir
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'release-common.ps1')
+
+# The two asset paths in $Dir for the tag's version. Throws if either is missing or the folder holds anything else.
+function Get-ReleaseAssets {
+    param([Parameter(Mandatory)][string]$Dir, [Parameter(Mandatory)][string]$Tag)
+    if ($Tag -cnotmatch $script:TagPattern) { throw "Tag must be vMAJOR.MINOR.PATCH, not '$Tag'." }
+    if (-not (Test-Path -LiteralPath $Dir -PathType Container)) { throw "Asset folder not found: $Dir" }
+    $version = $Tag.Substring(1)
+    $expected = @((Get-ToolPackageName -Version $version), (Get-PluginZipName -Version $version))
+    $found = @(Get-ChildItem -LiteralPath $Dir -Force -Recurse | ForEach-Object {
+            [IO.Path]::GetRelativePath($Dir, $_.FullName) -replace '\\', '/' })
+    $extra = @($found | Where-Object { $_ -notin $expected })
+    $missing = @($expected | Where-Object { $_ -notin $found })
+    if ($extra.Count -or $missing.Count) {
+        throw "$Dir must hold exactly $($expected -join ' and ') for ${Tag}; missing: $($missing -join ', ' ) extra: $($extra -join ', ')"
+    }
+    $expected | ForEach-Object { Join-Path $Dir $_ }
+}
 
 function Get-ReleaseArguments {
     param(
@@ -87,7 +111,8 @@ function Assert-TagOnTarget {
 }
 
 function Invoke-Main {
-    $arguments = Get-ReleaseArguments -Repo $Repo -Tag $Tag -Target $Target -Assets $Assets
+    $assets = @(Get-ReleaseAssets -Dir $AssetDir -Tag $Tag)
+    $arguments = Get-ReleaseArguments -Repo $Repo -Tag $Tag -Target $Target -Assets $assets
     $state = Assert-TagOnTarget -Repo $Repo -Tag $Tag -Target $Target
     Write-Host "Tag ${Tag}: $state"
     & gh @arguments

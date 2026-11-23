@@ -11,8 +11,10 @@ Each plugin version is published as a GitHub Release, tagged and titled `v<versi
 ## When a release is made
 
 `.github/workflows/release.yml` runs on every push to `main`. It reads the plugin version and asks GitHub whether a
-release with that tag exists. If one does, it stops there. If not, it builds both assets and creates the release on
-the pushed commit, with notes GitHub generates from the merged pull requests. So a release is made when a pull request
+release with that tag exists. If one does, it stops there. If not, it runs every test suite
+(`scripts/release/invoke-all-tests.ps1`: the .NET tests, the node script tests, the console's `tsc -b` and vitest
+tests, and the Pester tests), builds both assets and creates the release on the pushed commit, with notes GitHub
+generates from the merged pull requests. A failing test stops the run before anything is built or published. So a release is made when a pull request
 that bumps the version merges (the version is bumped once per pull request into `main`, see `CLAUDE.md`), and a push
 that does not bump it releases nothing. If the check cannot tell (any answer but found or 404), the run fails instead
 of guessing.
@@ -20,8 +22,23 @@ of guessing.
 To re-run a release whose run failed, start the workflow by hand on `main` (Actions › Release › Run workflow). It does
 nothing when the release exists. If a failed run left a draft release behind, delete the draft first.
 
-The workflow has no secrets: it uses the run's own `GITHUB_TOKEN`, read-only for the check and with `contents: write`
-only in the job that publishes.
+The workflow has no secrets: it uses the run's own `GITHUB_TOKEN`. It has three jobs:
+
+| Job | Token | Runs |
+| --- | --- | --- |
+| `check` | `contents: read` | `plugin-version.ps1` and `release-exists.ps1` |
+| `build` | `contents: read` | the tests, `build-tool-package.ps1` and `build-plugin-zip.ps1`, then uploads both assets as the `release-assets` artifact |
+| `publish` | `contents: write` | downloads `release-assets` and runs `publish-release.ps1` |
+
+Everything that runs code from npm, NuGet or PSGallery (`npm ci`, the restore in `dotnet pack` and `dotnet test`,
+installing Pester) is in `build`, which cannot write to the repository. `publish` runs only `gh` and the release
+scripts, and refuses an artifact that holds anything but the two assets named after the version. Actions are pinned by
+commit SHA, and the tests pin Pester 6.2.0.
+
+`publish-release.ps1` reads the tag before it creates the release. If `v<version>` already exists on another commit
+(an annotated tag is followed to its commit), it stops without publishing, because `gh release create` would otherwise
+attach the release to that commit and ignore the pushed one. Move or delete the tag, or bump the version, and re-run.
+A tag already on the pushed commit is used as it is.
 
 ## Install the console tool from a release
 
@@ -82,7 +99,9 @@ The workflow runs PowerShell scripts in `scripts/release/`, so each step can be 
 | `release-exists.ps1` | Asks GitHub (read-only) whether the tag's release exists; writes `exists` |
 | `build-tool-package.ps1` | Builds the console, packs `runtime/src/Fyrd.Server` and checks the package holds the `fyrd` command at the plugin version with the console, skills and guide; writes `path` |
 | `build-plugin-zip.ps1` | Zips the plugin files; writes `path` |
-| `publish-release.ps1` | Runs `gh release create` with both assets |
+| `invoke-all-tests.ps1` | Runs every test suite, stopping at the first failure |
+| `invoke-tests.ps1` | Runs the Pester tests under `scripts/` with Pester 6.2.0 |
+| `publish-release.ps1` | Checks the tag is missing or on the pushed commit, then runs `gh release create` with both assets |
 
 To build both assets locally into `out/` (ignored by git) without publishing anything:
 
@@ -91,8 +110,10 @@ pwsh ./scripts/release/build-tool-package.ps1 -OutDir out
 pwsh ./scripts/release/build-plugin-zip.ps1 -OutDir out
 ```
 
-The tests are `pwsh ./scripts/release/invoke-tests.ps1` (it installs Pester 5 for the current user if needed); the
-workflow runs them before it builds.
+The Pester tests are `pwsh ./scripts/release/invoke-tests.ps1` (it installs Pester 6.2.0 for the current user if that
+version is missing). `pwsh ./scripts/release/invoke-all-tests.ps1` runs every suite, as the workflow does before it
+builds. The ConPTY runner tests in `Fyrd.Core.Tests` return at once off Windows, so on the Linux runner they pass
+without exercising the pseudo console; run them on Windows with `scripts/test-conpty.ps1`.
 
 `runtime/src/Fyrd.Server/Fyrd.Server.csproj` reads the package version from `plugin.json`, so `dotnet pack` there always
 packs the plugin version. The package carries `wwwroot` only once the console is built (`npm run build` in `console/`),

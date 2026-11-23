@@ -88,6 +88,8 @@ node --test "scripts/*.test.mjs"
 pwsh ./scripts/release/invoke-tests.ps1
 ```
 
+`pwsh ./scripts/release/invoke-all-tests.ps1` runs all of these and the console's `tsc -b`, as the release workflow does.
+
 [docs/releases.md](docs/releases.md) covers how releases are made.
 
 ## License
