@@ -10,7 +10,7 @@ public sealed class StubGitHub : IGitHub
     public bool Configured { get; set; } = true;
     public Task<string?> LoginAsync(CancellationToken ct = default) => Task.FromResult<string?>(Configured ? "me" : null);
 
-    public string DefaultBranch { get; set; } = "main";
+    public string? DefaultBranch { get; set; } = "main";
 
     public Task<PullRequestListing> ListAsync(string repo, CancellationToken ct = default)
     {

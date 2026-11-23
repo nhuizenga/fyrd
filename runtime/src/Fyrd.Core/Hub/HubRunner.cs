@@ -425,11 +425,14 @@ public sealed partial class HubRunner(
     }
 
     /// <summary>
-    /// Caches the PRs the branch matching found that are this session's own: a relationship stays once it exists. Branch
-    /// names are reused (a recycled peasant keeps <c>fyrd/&lt;title&gt;</c>; sessions share a fork's <c>main</c>), so a
-    /// direct match is cached only while it is open, or when it was opened at or after the session was created; a merged
-    /// or closed PR from before the session, or one with no known creation time, is shown while the matching finds it but
-    /// never cached. Stack matches are always open PRs (the walk ignores merged and closed ones) and are cached.
+    /// Caches the PRs the branch matching found that are this session's own: a relationship stays once it exists. A direct
+    /// match is by branch name only, so it is never cached when its head is in a fork (a fork's branch merely shares the
+    /// name) or is the repo's default branch (a session on <c>main</c> matches every PR from <c>main</c>), or when the
+    /// listing did not say which branch is the default. Branch names are also reused (a recycled peasant keeps
+    /// <c>fyrd/&lt;title&gt;</c>), so any other direct match is cached only while it is open, or when it was opened at or
+    /// after the session was created; a merged or closed PR from before the session, or one with no known creation time, is
+    /// shown while the matching finds it but never cached. Stack matches are always open same-repo PRs (the walk ignores
+    /// merged, closed and fork PRs) and are cached.
     /// </summary>
     private void RememberOwned(CloudSession s, OwnedSet owned)
     {
@@ -442,13 +445,14 @@ public sealed partial class HubRunner(
         {
             if (stacked.Contains(url))
                 _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromStack);
-            else if (direct.TryGetValue(url, out var pr) && OwnDirectMatch(pr, sessionCreated))
+            else if (direct.TryGetValue(url, out var pr) && OwnDirectMatch(pr, owned.DefaultBranch, sessionCreated))
                 _sessionPrs.Add(s.Id, [url], SessionPullRequests.FromBranch);
         }
     }
 
-    private static bool OwnDirectMatch(PullRequestHead pr, DateTimeOffset? sessionCreated) =>
-        pr.State == "open" || (pr.CreatedAt is { } opened && sessionCreated is { } created && opened >= created);
+    private static bool OwnDirectMatch(PullRequestHead pr, string? defaultBranch, DateTimeOffset? sessionCreated) =>
+        !pr.CrossRepository && !string.IsNullOrEmpty(defaultBranch) && pr.Branch != defaultBranch
+        && (pr.State == "open" || (pr.CreatedAt is { } opened && sessionCreated is { } created && opened >= created));
 
     /// <summary>
     /// A session's pull requests: the ones found now on its repo and branches (the cloud API reports none itself), then

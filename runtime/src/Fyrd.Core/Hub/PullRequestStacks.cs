@@ -7,6 +7,9 @@ public sealed record OwnedSet(IReadOnlyList<string> Urls, IReadOnlyList<string> 
 
     /// <summary>The listing's entries for the direct matches (head is one of the session's branches), with state and creation time.</summary>
     public IReadOnlyList<PullRequestHead> Direct { get; init; } = [];
+
+    /// <summary>The repo's default branch as the listing gave it, or null when it did not say.</summary>
+    public string? DefaultBranch { get; init; }
 }
 
 /// <summary>
@@ -45,6 +48,7 @@ public static class PullRequestStacks
             stacked.OrderBy(Number).ToList())
         {
             Direct = direct,
+            DefaultBranch = listing.DefaultBranch,
         };
     }
 

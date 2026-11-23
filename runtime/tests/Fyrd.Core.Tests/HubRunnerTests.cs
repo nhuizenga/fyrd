@@ -1067,6 +1067,52 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_AnOpenForkPrOnAMatchingBranchName_IsShownButNotCached()
+    {
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] =
+        [
+            OpenHead(8, "fyrd/shared-memory", "main") with { CrossRepository = true },
+            OpenHead(9, "fyrd/shared-memory", "main"),
+        ];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
+    public async Task Poll_AnOpenPrWhoseHeadIsTheDefaultBranch_IsShownButNotCached()
+    {
+        // The session is on main as well as its own branch: every open PR from main matches by name.
+        var gh = new StubGitHub();
+        gh.ByRepo["acme/widgets"] = [OpenHead(8, "main", "release"), OpenHead(9, "fyrd/shared-memory", "main")];
+        var raw = LiveBuilderRaw.Replace("{\"\":\"fyrd/shared-memory\"}", "{\"a\":\"fyrd/shared-memory\",\"b\":\"main\"}");
+        Assert.NotEqual(LiveBuilderRaw, raw);
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: raw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], new SessionPullRequests(_home.Paths, _time).For("session_s1").Select(p => p.Url));
+    }
+
+    [Fact]
+    public async Task Poll_ADirectMatch_IsNotCached_WhenTheListingDidNotSayWhichBranchIsTheDefault()
+    {
+        var gh = new StubGitHub { DefaultBranch = null };
+        gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main")];
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+
+        await Make(gh).PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
+        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("session_s1"));
+    }
+
+    [Fact]
     public async Task Poll_ViewUnion_ListsALivePrOnce_EvenWhenTheBlockSpelledItInAnotherCase()
     {
         var gh = new StubGitHub();
