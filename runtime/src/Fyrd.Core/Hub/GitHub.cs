@@ -150,7 +150,10 @@ public static partial class PullRequestUrl
     {
         if (!IsValid(url)) throw new GitHubException("Not a GitHub pull request URL.");
         var parts = url["https://github.com/".Length..].Split('/');
-        return (parts[0], parts[1], int.Parse(parts[3]));
+        // The pattern allows any digits: a number past int.MaxValue is no PR, and must not escape as an OverflowException.
+        if (!int.TryParse(parts[3], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number))
+            throw new GitHubException("Not a GitHub pull request URL.");
+        return (parts[0], parts[1], number);
     }
 }
 

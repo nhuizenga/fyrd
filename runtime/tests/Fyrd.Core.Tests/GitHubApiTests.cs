@@ -73,6 +73,10 @@ public class GitHubApiTests
         Assert.Equal(("acme", "widgets", 12), PullRequestUrl.Parse(Url));
 
     [Fact]
+    public void Url_Parse_ANumberPastIntMax_IsAGitHubException_NotAnOverflow() =>
+        Assert.Throws<GitHubException>(() => PullRequestUrl.Parse("https://github.com/acme/widgets/pull/99999999999"));
+
+    [Fact]
     public async Task Get_DraftOpenWithPassingChecks()
     {
         var (api, graph, _) = Make();

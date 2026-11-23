@@ -945,31 +945,31 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_PrBlock_InAnAssistantEvent_BecomesTheSessionsPr_AndIsCached()
     {
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "researcher-1", role: "researcher"), Hub("s2", "builder-2", role: "builder"));
-        _cloud.AddAssistantEvent("s1", "e1", PrBlock("https://github.com/acme/widgets/pull/12", "not a url", "https://github.com/acme/other/pull/3"));
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "researcher-1", role: "researcher"), Hub("session_s2", "builder-2", role: "builder"));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/acme/widgets/pull/12", "not a url", "https://github.com/acme/other/pull/3"));
         // A user turn is not the session's own claim.
-        _cloud.AddEvent("s2", new SessionEvent("u1", "user", DateTimeOffset.UnixEpoch, PrBlock("https://github.com/acme/widgets/pull/99"), FakeCloudSessions.Empty));
+        _cloud.AddEvent("session_s2", new SessionEvent("u1", "user", DateTimeOffset.UnixEpoch, PrBlock("https://github.com/acme/widgets/pull/99"), FakeCloudSessions.Empty));
 
         await Make().PollOnceAsync(default);
 
-        Assert.Equal(["https://github.com/acme/widgets/pull/12", "https://github.com/acme/other/pull/3"], _state.Sessions.Single(v => v.Id == "s1").PullRequests);
-        Assert.Empty(_state.Sessions.Single(v => v.Id == "s2").PullRequests);
-        var cached = new SessionPullRequests(_home.Paths, _time).For("s1");
+        Assert.Equal(["https://github.com/acme/widgets/pull/12", "https://github.com/acme/other/pull/3"], _state.Sessions.Single(v => v.Id == "session_s1").PullRequests);
+        Assert.Empty(_state.Sessions.Single(v => v.Id == "session_s2").PullRequests);
+        var cached = new SessionPullRequests(_home.Paths, _time).For("session_s1");
         Assert.All(cached, p => Assert.Equal(SessionPullRequests.FromBlock, p.Source));
-        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("s2"));
+        Assert.Empty(new SessionPullRequests(_home.Paths, _time).For("session_s2"));
     }
 
     [Fact]
     public async Task Poll_PrBlock_IsCapturedOnce_TheCursorSkipsItAfterARestart()
     {
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "researcher-1", role: "researcher"));
-        _cloud.AddAssistantEvent("s1", "e1", PrBlock("https://github.com/acme/widgets/pull/12"));
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "researcher-1", role: "researcher"));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/acme/widgets/pull/12"));
         await Make().PollOnceAsync(default);
         Assert.Contains("\"e1\"", File.ReadAllText(Path.Combine(_home.Paths.HubDir, "cursors.json")), StringComparison.Ordinal);
 
         // Lose the cache: a restarted service must not capture the old event again, only new ones.
         File.Delete(SessionPrsFile);
-        _cloud.AddAssistantEvent("s1", "e2", PrBlock("https://github.com/acme/widgets/pull/13"));
+        _cloud.AddAssistantEvent("session_s1", "e2", PrBlock("https://github.com/acme/widgets/pull/13"));
         var restarted = new HubState();
         await new HubRunner(_cloud, _memory, _personas, _controller, restarted, _home.Paths, _time, _ledger, _guard, _pending, _owner)
             .PollOnceAsync(default);
@@ -980,8 +980,8 @@ public sealed class HubRunnerTests : IDisposable
     [Fact]
     public async Task Poll_PrBlock_AndARememberBlock_InOneEvent_BothCount()
     {
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-ab12", role: "builder"));
-        _cloud.AddAssistantEvent("s1", "e1", Remember("role", "Use pnpm.") + PrBlock("https://github.com/acme/widgets/pull/12"));
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-ab12", role: "builder"));
+        _cloud.AddAssistantEvent("session_s1", "e1", Remember("role", "Use pnpm.") + PrBlock("https://github.com/acme/widgets/pull/12"));
 
         await Make().PollOnceAsync(default);
 
@@ -994,21 +994,21 @@ public sealed class HubRunnerTests : IDisposable
     {
         var gh = new StubGitHub();
         gh.ByRepo["acme/widgets"] = [OpenHead(8, "fyrd/base", "main"), OpenHead(9, "fyrd/shared-memory", "fyrd/base")];
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
         var runner = Make(gh);
         await runner.PollOnceAsync(default);
         Assert.Equal(["https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], _state.Sessions.Single().PullRequests);
 
         // The branch's PR merged and dropped out of the listing, and the session switched branch.
         gh.ByRepo["acme/widgets"] = [OpenHead(10, "fyrd/next", "main")];
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw.Replace("fyrd/shared-memory", "fyrd/next")));
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw.Replace("fyrd/shared-memory", "fyrd/next")));
         _time.Advance(OwnedPullRequests.Ttl + TimeSpan.FromSeconds(1));
         await runner.PollOnceAsync(default);
 
         var v = _state.Sessions.Single();
         Assert.Equal(["https://github.com/acme/widgets/pull/10", "https://github.com/acme/widgets/pull/8", "https://github.com/acme/widgets/pull/9"], v.PullRequests);
         Assert.Equal(["https://github.com/acme/widgets/pull/8"], v.StackedPullRequests);
-        var cached = new SessionPullRequests(_home.Paths, _time).For("s1").ToDictionary(p => p.Url, p => p.Source);
+        var cached = new SessionPullRequests(_home.Paths, _time).For("session_s1").ToDictionary(p => p.Url, p => p.Source);
         Assert.Equal(SessionPullRequests.FromStack, cached["https://github.com/acme/widgets/pull/8"]);
         Assert.Equal(SessionPullRequests.FromBranch, cached["https://github.com/acme/widgets/pull/9"]);
         Assert.Equal(SessionPullRequests.FromBranch, cached["https://github.com/acme/widgets/pull/10"]);
@@ -1023,8 +1023,8 @@ public sealed class HubRunnerTests : IDisposable
     {
         var gh = new StubGitHub();
         gh.ByRepo["acme/widgets"] = [OpenHead(9, "fyrd/shared-memory", "main")];
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
-        _cloud.AddAssistantEvent("s1", "e1", PrBlock("https://github.com/ACME/Widgets/pull/9", "https://github.com/acme/elsewhere/pull/4"));
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", "idle", role: "builder", raw: LiveBuilderRaw));
+        _cloud.AddAssistantEvent("session_s1", "e1", PrBlock("https://github.com/ACME/Widgets/pull/9", "https://github.com/acme/elsewhere/pull/4"));
 
         await Make(gh).PollOnceAsync(default);
 
@@ -1039,28 +1039,28 @@ public sealed class HubRunnerTests : IDisposable
     public async Task Poll_ReapsTheCacheOfArchivedAndDeletedSessions_KeepsUnreadableOnes()
     {
         var store = new SessionPullRequests(_home.Paths, _time);
-        foreach (var id in new[] { "archived", "deleted", "unreadable", "s1" }) store.Add(id, ["https://github.com/acme/widgets/pull/1"], SessionPullRequests.FromBlock);
-        _cloud.SetSession(Hub("archived", "builder-old", "archived", role: "builder"));
-        // "unreadable" is listed but its history read fails this pass: alive as far as anyone knows.
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", role: "builder"), Hub("unreadable", "builder-3", role: "builder"));
-        _cloud.ThrowOnListEventsFor("unreadable", new HttpRequestException("reset"));
+        foreach (var id in new[] { "session_archived", "session_deleted", "session_unreadable", "session_s1" }) store.Add(id, ["https://github.com/acme/widgets/pull/1"], SessionPullRequests.FromBlock);
+        _cloud.SetSession(Hub("session_archived", "builder-old", "archived", role: "builder"));
+        // "session_unreadable" is listed but its history read fails this pass: alive as far as anyone knows.
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", role: "builder"), Hub("session_unreadable", "builder-3", role: "builder"));
+        _cloud.ThrowOnListEventsFor("session_unreadable", new HttpRequestException("reset"));
 
         await Make().PollOnceAsync(default);
 
-        Assert.Equal(["s1", "unreadable"], new SessionPullRequests(_home.Paths, _time).SessionIds());
-        Assert.Equal(["https://github.com/acme/widgets/pull/1"], _state.Sessions.Single(v => v.Id == "unreadable").PullRequests);
+        Assert.Equal(["session_s1", "session_unreadable"], new SessionPullRequests(_home.Paths, _time).SessionIds());
+        Assert.Equal(["https://github.com/acme/widgets/pull/1"], _state.Sessions.Single(v => v.Id == "session_unreadable").PullRequests);
     }
 
     [Fact]
     public async Task Poll_ATransientErrorWhileReaping_KeepsTheCache_AndIsReported()
     {
-        new SessionPullRequests(_home.Paths, _time).Add("gone", ["https://github.com/acme/widgets/pull/1"], SessionPullRequests.FromBlock);
-        _cloud.SetByTag("fyrd-hub", Hub("s1", "builder-1", role: "builder"));
-        _cloud.ThrowOnGetFor("gone", new CloudSessionApiException(500, "oops"));
+        new SessionPullRequests(_home.Paths, _time).Add("session_gone", ["https://github.com/acme/widgets/pull/1"], SessionPullRequests.FromBlock);
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-1", role: "builder"));
+        _cloud.ThrowOnGetFor("session_gone", new CloudSessionApiException(500, "oops"));
 
         await Make().PollOnceAsync(default);
 
-        Assert.Equal(["gone"], new SessionPullRequests(_home.Paths, _time).SessionIds());
+        Assert.Equal(["session_gone"], new SessionPullRequests(_home.Paths, _time).SessionIds());
         Assert.False(_state.SignedOut);
     }
 }

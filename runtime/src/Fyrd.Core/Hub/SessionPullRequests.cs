@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Fyrd.Core.CloudSessions;
 
 namespace Fyrd.Core.Hub;
@@ -16,7 +17,7 @@ public sealed record SessionPullRequest(string Url, DateTimeOffset FirstSeen, st
 /// session's entries go only when <see cref="ReapAsync"/> finds the session archived or deleted (404), checked by id at
 /// most once per <see cref="ReapInterval"/>; any other error keeps them. Thread safe.
 /// </summary>
-public sealed class SessionPullRequests(FyrdPaths paths, TimeProvider time)
+public sealed partial class SessionPullRequests(FyrdPaths paths, TimeProvider time)
 {
     public const string FromBlock = "block", FromBranch = "branch", FromStack = "stack";
 
@@ -27,6 +28,20 @@ public sealed class SessionPullRequests(FyrdPaths paths, TimeProvider time)
     public const int MaxBlockPerSession = 50;
 
     public static readonly TimeSpan ReapInterval = TimeSpan.FromHours(1);
+
+    // The cloud client's own rule: an id it would refuse could never be asked about, so it would never be reaped.
+    [GeneratedRegex("^session_[A-Za-z0-9]+$")]
+    private static partial Regex SessionIdPattern();
+
+    /// <summary>
+    /// A URL the store keeps: exactly what <see cref="PullRequestBlock.Normalize"/> builds (strict owner, repo and number,
+    /// no <c>..</c>, no leading zeros, a number that fits an <see cref="int"/>), so <see cref="PullRequestUrl.Parse"/>
+    /// never throws on a cached URL.
+    /// </summary>
+    public static bool IsStorable(string? url) => url is not null && PullRequestBlock.Normalize(url) == url;
+
+    /// <summary>A session id the store keeps: one the cloud API accepts.</summary>
+    public static bool IsSessionId(string? id) => id is not null && SessionIdPattern().IsMatch(id);
 
     private sealed record Store(DateTimeOffset? ReapedAt, Dictionary<string, List<SessionPullRequest>> Sessions);
 
@@ -48,13 +63,14 @@ public sealed class SessionPullRequests(FyrdPaths paths, TimeProvider time)
     }
 
     /// <summary>
-    /// Adds each valid URL the session does not have yet (compared case-insensitively) with this source, and persists
-    /// once. An invalid URL is skipped; past <see cref="MaxBlockPerSession"/> block URLs more are skipped. A URL already
+    /// Adds each valid URL (<see cref="IsStorable"/>) the session does not have yet (compared case-insensitively) with
+    /// this source, and persists once. An invalid URL is skipped, and nothing is added for an id that is not
+    /// <see cref="IsSessionId"/>; past <see cref="MaxBlockPerSession"/> block URLs more are skipped. A URL already
     /// cached keeps its first-seen time and source. Returns the URLs added.
     /// </summary>
     public IReadOnlyList<string> Add(string sessionId, IEnumerable<string> urls, string source, DateTimeOffset? at = null)
     {
-        if (string.IsNullOrEmpty(sessionId)) return [];
+        if (!IsSessionId(sessionId)) return [];
         if (source is not (FromBlock or FromBranch or FromStack)) throw new ArgumentException($"Unknown source '{source}'.", nameof(source));
         var when = at ?? time.GetUtcNow();
         lock (_gate)
@@ -66,7 +82,7 @@ public sealed class SessionPullRequests(FyrdPaths paths, TimeProvider time)
             var blockCount = list.Count(p => p.Source == FromBlock);
             foreach (var url in urls)
             {
-                if (!PullRequestUrl.IsValid(url) || list.Any(p => string.Equals(p.Url, url, StringComparison.OrdinalIgnoreCase))) continue;
+                if (!IsStorable(url) || list.Any(p => string.Equals(p.Url, url, StringComparison.OrdinalIgnoreCase))) continue;
                 if (source == FromBlock && blockCount >= MaxBlockPerSession) break;
                 list.Add(new SessionPullRequest(url, when, source));
                 added.Add(url);
@@ -143,10 +159,13 @@ public sealed class SessionPullRequests(FyrdPaths paths, TimeProvider time)
         var sessions = new Dictionary<string, List<SessionPullRequest>>(StringComparer.Ordinal);
         foreach (var (id, list) in read?.Sessions ?? [])
         {
-            // A hand-edited entry that the store would refuse is not a relationship.
-            var valid = (list ?? []).Where(p => p is not null && PullRequestUrl.IsValid(p.Url) && p.Source is FromBlock or FromBranch or FromStack)
+            // A hand-edited entry that the store would refuse is not a relationship: the same checks as Add, cap included.
+            if (!IsSessionId(id)) continue;
+            var valid = (list ?? []).Where(p => p is not null && IsStorable(p.Url) && p.Source is FromBlock or FromBranch or FromStack)
                 .DistinctBy(p => p.Url, StringComparer.OrdinalIgnoreCase).ToList();
-            if (!string.IsNullOrEmpty(id) && valid.Count > 0) sessions[id] = valid;
+            var blocks = valid.Where(p => p.Source == FromBlock).Skip(MaxBlockPerSession).ToHashSet();
+            valid = valid.Where(p => !blocks.Contains(p)).ToList();
+            if (valid.Count > 0) sessions[id] = valid;
         }
         return _store = new Store(read?.ReapedAt, sessions);
     }
