@@ -960,6 +960,22 @@ public sealed class HubRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_PrBlock_InASubagentsMessage_IsIgnored_ButItsRememberBlockStillCounts()
+    {
+        _cloud.SetByTag("fyrd-hub", Hub("session_s1", "builder-ab12", role: "builder"));
+        // A worker's message inside the session carries the tool call it answers: it is not the session's own reply.
+        var raw = JsonDocument.Parse("""{"parent_tool_use_id":"toolu_1"}""").RootElement.Clone();
+        _cloud.AddEvent("session_s1", new SessionEvent("w1", "assistant", DateTimeOffset.UnixEpoch,
+            Remember("role", "Use pnpm.") + PrBlock("https://github.com/acme/widgets/pull/77"), raw));
+        _cloud.AddAssistantEvent("session_s1", "e2", PrBlock("https://github.com/acme/widgets/pull/12"));
+
+        await Make().PollOnceAsync(default);
+
+        Assert.Equal(["https://github.com/acme/widgets/pull/12"], _state.Sessions.Single().PullRequests);
+        Assert.Single(_memory.List("builder"));
+    }
+
+    [Fact]
     public async Task Poll_PrBlock_IsCapturedOnce_TheCursorSkipsItAfterARestart()
     {
         _cloud.SetByTag("fyrd-hub", Hub("session_s1", "researcher-1", role: "researcher"));

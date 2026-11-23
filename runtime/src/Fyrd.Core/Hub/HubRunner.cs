@@ -372,7 +372,8 @@ public sealed partial class HubRunner(
                 memory.Add(scope, d.Text, source, at);
                 consumed = true;
             }
-            var prs = PullRequestBlock.Parse(e.Text);
+            // Only the session's own reply names its PRs: a subagent's or worker's message (it may be about any branch) does not.
+            var prs = HubNotifications.IsSubagent(e) ? [] : PullRequestBlock.Parse(e.Text);
             if (prs.Count > 0 && _sessionPrs.Add(s.Id, prs, SessionPullRequests.FromBlock, e.CreatedAt == default ? null : e.CreatedAt).Count > 0)
                 consumed = true;
             if (consumed && e.Uuid.Length > 0)

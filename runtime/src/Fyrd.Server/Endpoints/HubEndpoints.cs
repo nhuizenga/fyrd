@@ -706,12 +706,12 @@ internal static partial class HubEndpoints
             }
         });
 
-    /// <summary>The session's PRs as the last poll listed them, with the freshly read one in place of its listed copy.</summary>
     /// <summary>The PR URL is in <paramref name="owner"/>/<paramref name="repo"/> (GitHub names are case-insensitive).</summary>
     private static bool InRepo(string url, string owner, string repo) =>
         PullRequestUrl.IsValid(url) && PullRequestUrl.Parse(url) is var (o, r, _)
         && string.Equals(o, owner, StringComparison.OrdinalIgnoreCase) && string.Equals(r, repo, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>The session's PRs as the last poll listed them, with the freshly read one in place of its listed copy.</summary>
     private static IEnumerable<PullRequestStatus> StackedStatuses(HubState state, string id, PullRequestStatus current) =>
         state.Sessions.First(s => s.Id == id).PullRequests
             .Select(u => u == current.Url ? current : state.PullRequests.GetValueOrDefault(u))
