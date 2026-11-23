@@ -6,6 +6,13 @@ using Fyrd.Core.Hub;
 using Fyrd.Server;
 using Fyrd.Server.Endpoints;
 
+// `fyrd --version` identifies the tool for /fyrd:up before it starts it (see ServerVersion).
+if (ServerVersion.IsVersionRequest(args))
+{
+    Console.WriteLine(ServerVersion.Line);
+    return;
+}
+
 // From the dotnet tool package the console, skills and docs sit beside the assembly (see ServerLayout).
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
