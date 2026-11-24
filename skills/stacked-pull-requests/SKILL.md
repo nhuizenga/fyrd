@@ -5,7 +5,7 @@ roles: builder
 ---
 # Stacked pull requests
 
-Several PRs that build on each other are one native GitHub stack, not just branches based on each other. Make and keep it with GitHub's REST APIs only: the GitHub tools you have, or the endpoints below with the `X-GitHub-Api-Version: 2026-03-10` header (`gh api` is fine for these).
+Several PRs that build on each other are one native GitHub stack, not just branches based on each other. Make and keep it with GitHub's REST APIs only: the GitHub tools you have, or the endpoints below with the `X-GitHub-Api-Version: 2026-03-10` header (`gh api` is fine for these, not other `gh` commands).
 
 - **Branches.** Each branch starts from the one below it; the bottom one starts from your base branch. Workers push them with plain `git push`. For a stack, start one worker per branch, bottom first, each after the one below it returns.
 - **Briefs.** For a worker building an upper branch of a stack, add the body the worker below returned, as a start for finding the rules; its own body lists only the rules and guards its own diff touches.
